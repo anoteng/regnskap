@@ -1,0 +1,31 @@
+[Unit]
+Description=Regnskap FastAPI Application
+After=network.target mysql.service
+Requires=mysql.service
+
+[Service]
+Type=simple
+User=andreas
+Group=andreas
+WorkingDirectory=/home/andreas/regnskap
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+EnvironmentFile=/home/andreas/regnskap/.env
+
+# Start the FastAPI app with uvicorn
+ExecStart=/usr/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8000
+
+# Restart on failure
+Restart=on-failure
+RestartSec=5s
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=regnskap
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

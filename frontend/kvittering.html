@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#2563eb">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Kvitteringer">
+    <title>Last opp kvittering</title>
+    <link rel="manifest" href="/manifest.json">
+    <link rel="stylesheet" href="/static/css/mobile.css">
+    <link rel="icon" type="image/png" href="/static/icons/icon-192.png">
+    <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+</head>
+<body>
+    <div class="mobile-container">
+        <header class="mobile-header">
+            <h1>📎 Kvittering</h1>
+            <button id="logout-btn" class="btn-icon">🚪</button>
+        </header>
+
+        <main class="mobile-main">
+            <div id="login-view" style="display: none;">
+                <div class="card">
+                    <h2>Logg inn</h2>
+
+                    <div id="passkey-debug" style="padding: 0.5rem; background: #f0f0f0; border-radius: 4px; margin-bottom: 1rem; font-size: 0.875rem; display: none;">
+                        <strong>Debug:</strong> <span id="passkey-debug-text">Laster...</span>
+                    </div>
+
+                    <button id="mobile-passkey-login-btn" class="btn btn-primary btn-large" style="display: none; margin-bottom: 1rem;">
+                        🔐 Logg inn med passkey
+                    </button>
+                    <div id="passkey-or-divider" style="display: none; text-align: center; margin-bottom: 1rem; color: #666;">eller</div>
+
+                    <form id="mobile-login-form">
+                        <div class="form-group">
+                            <label>E-post</label>
+                            <input type="email" id="login-email" required autocomplete="email">
+                        </div>
+                        <div class="form-group">
+                            <label>Passord</label>
+                            <input type="password" id="login-password" required autocomplete="current-password">
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-large">Logg inn med passord</button>
+                    </form>
+                </div>
+            </div>
+
+            <div id="upload-view" style="display: none;">
+                <!-- Camera capture -->
+                <div id="camera-section">
+                    <div id="camera-preview-container" style="display: none;">
+                        <video id="camera-preview" autoplay playsinline></video>
+
+                        <!-- Camera controls -->
+                        <div class="camera-controls">
+                            <button id="flash-btn" class="camera-control-btn" title="Flash">
+                                💡
+                            </button>
+                            <button id="switch-camera-btn" class="camera-control-btn" title="Bytt kamera">
+                                🔄
+                            </button>
+                        </div>
+
+                        <!-- Zoom control -->
+                        <div class="zoom-control" id="zoom-control" style="display: none;">
+                            <input type="range" id="zoom-slider" class="zoom-slider" min="1" max="3" step="0.1" value="1">
+                            <span class="zoom-label" id="zoom-label">Zoom: 1.0x</span>
+                        </div>
+                    </div>
+
+                    <canvas id="camera-canvas" style="display: none;"></canvas>
+
+                    <!-- Image editor (after capture) -->
+                    <div id="image-preview-container" style="display: none;">
+                        <div class="image-editor">
+                            <div class="image-editor-canvas-container" id="editor-container">
+                                <canvas id="image-editor-canvas"></canvas>
+                                <div class="crop-overlay" id="crop-overlay">
+                                    <div class="crop-area" id="crop-area">
+                                        <div class="crop-handle nw"></div>
+                                        <div class="crop-handle ne"></div>
+                                        <div class="crop-handle sw"></div>
+                                        <div class="crop-handle se"></div>
+                                        <div class="crop-handle n"></div>
+                                        <div class="crop-handle s"></div>
+                                        <div class="crop-handle w"></div>
+                                        <div class="crop-handle e"></div>
+                                        <div class="crop-info" id="crop-info">Dra for å beskjære</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="editor-controls">
+                                <button class="btn btn-secondary" onclick="mobileApp.rotateImage(-90)">
+                                    ↶ Roter
+                                </button>
+                                <button class="btn btn-secondary" onclick="mobileApp.rotateImage(90)">
+                                    Roter ↷
+                                </button>
+                                <button class="btn btn-secondary" onclick="mobileApp.toggleCrop()">
+                                    ✂️ Beskjær
+                                </button>
+                                <button class="btn btn-secondary" onclick="mobileApp.enhanceImage()">
+                                    ✨ Forbedre
+                                </button>
+                                <button class="btn btn-danger" onclick="mobileApp.retakePhoto()">
+                                    📷 Ta nytt
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button id="take-photo-btn" class="btn btn-primary btn-large btn-camera" style="display: none;">
+                        📷 Ta bilde
+                    </button>
+
+                    <button id="start-camera-btn" class="btn btn-primary btn-large btn-camera">
+                        📷 Åpne kamera
+                    </button>
+
+                    <div style="text-align: center; margin: 1rem 0;">
+                        <strong>eller</strong>
+                    </div>
+
+                    <label for="file-input" class="btn btn-secondary btn-large" style="display: block; text-align: center; cursor: pointer;">
+                        📁 Velg fra galleriet
+                    </label>
+                    <input type="file" id="file-input" accept="image/*" style="display: none;">
+                </div>
+
+                <!-- Upload form -->
+                <div id="upload-form-section" style="display: none;">
+                    <div class="card">
+                        <form id="upload-form">
+                            <div class="form-group">
+                                <label>Dato (valgfri)</label>
+                                <input type="date" id="receipt-date">
+                            </div>
+                            <div class="form-group">
+                                <label>Beløp (valgfri)</label>
+                                <input type="number" step="0.01" id="receipt-amount" placeholder="0.00">
+                            </div>
+                            <div class="form-group">
+                                <label>Notat (valgfri)</label>
+                                <textarea id="receipt-description" rows="3" placeholder="Notater..."></textarea>
+                            </div>
+
+                            <button type="submit" class="btn btn-primary btn-large" id="upload-btn">
+                                ⬆️ Last opp
+                            </button>
+                            <button type="button" class="btn btn-secondary btn-large" onclick="mobileApp.cancelUpload()">
+                                Avbryt
+                            </button>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Success message -->
+                <div id="success-message" style="display: none;">
+                    <div class="card success-card">
+                        <div style="text-align: center; font-size: 4rem; margin-bottom: 1rem;">
+                            ✅
+                        </div>
+                        <h2 style="text-align: center; color: var(--success-color);">Lastet opp!</h2>
+                        <p style="text-align: center;">Kvitteringen er mottatt og venter i køen.</p>
+                        <button class="btn btn-primary btn-large" onclick="mobileApp.reset()">
+                            Last opp ny kvittering
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Loading overlay -->
+            <div id="loading-overlay" style="display: none;">
+                <div class="loading-spinner"></div>
+                <p>Laster opp...</p>
+            </div>
+        </main>
+
+        <!-- Toast container -->
+        <div id="toast-container"></div>
+    </div>
+
+    <script src="/static/js/passkey.js?v=8"></script>
+    <script type="module" src="/static/js/mobile-upload.js?v=8"></script>
+</body>
+</html>

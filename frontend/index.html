@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#2563eb">
+    <title>Regnskap - Personlig Bokføring</title>
+    <link rel="manifest" href="/manifest.json">
+    <link rel="stylesheet" href="/static/css/styles.css?v=2">
+</head>
+<body>
+    <div id="app">
+        <div id="auth-view" class="view">
+            <div class="auth-container">
+                <h1>Regnskap</h1>
+                <p class="subtitle">Personlig regnskap med dobbelt bokføring</p>
+
+                <div id="login-form" class="auth-form">
+                    <h2>Logg inn</h2>
+
+                    <div id="passkey-login-section" style="display: none;">
+                        <button type="button" id="passkey-login-btn" class="btn btn-primary" style="width: 100%; margin-bottom: 1rem;">
+                            🔐 Logg inn med passkey
+                        </button>
+                        <div style="text-align: center; margin-bottom: 1rem; color: #666;">eller</div>
+                    </div>
+
+                    <form id="loginForm">
+                        <div class="form-group">
+                            <label for="login-email">E-post</label>
+                            <input type="email" id="login-email" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="login-password">Passord</label>
+                            <input type="password" id="login-password" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Logg inn med passord</button>
+                        <p class="auth-switch">
+                            <a href="#" id="forgot-password">Glemt passord?</a>
+                        </p>
+                        <p class="auth-switch">Har du ikke konto? <a href="#" id="show-register">Registrer deg</a></p>
+                    </form>
+                </div>
+
+                <div id="reset-password-form" class="auth-form" style="display: none;">
+                    <h2>Tilbakestill passord</h2>
+                    <p id="reset-instructions">Oppgi e-postadressen din, så sender vi deg en lenke for å tilbakestille passordet.</p>
+                    <form id="resetPasswordForm">
+                        <div class="form-group">
+                            <label for="reset-email">E-post</label>
+                            <input type="email" id="reset-email" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Send tilbakestillingslenke</button>
+                        <p class="auth-switch"><a href="#" id="back-to-login">Tilbake til innlogging</a></p>
+                    </form>
+                </div>
+
+                <div id="register-form" class="auth-form" style="display: none;">
+                    <h2>Registrer deg</h2>
+                    <form id="registerForm">
+                        <div class="form-group">
+                            <label for="register-name">Fullt navn</label>
+                            <input type="text" id="register-name" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="register-email">E-post</label>
+                            <input type="email" id="register-email" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="register-password">Passord</label>
+                            <input type="password" id="register-password" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Registrer</button>
+                        <p class="auth-switch">Har du allerede konto? <a href="#" id="show-login">Logg inn</a></p>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div id="main-view" class="view" style="display: none;">
+            <nav class="navbar">
+                <button class="mobile-menu-toggle" id="mobile-menu-toggle" aria-label="Meny">
+                    ☰
+                </button>
+                <div class="navbar-brand">Regnskap</div>
+                <ul class="navbar-menu" id="navbar-menu">
+                    <li><a href="#" data-view="dashboard">Dashboard</a></li>
+                    <li><a href="#" data-view="bank-accounts">Bankkontoer</a></li>
+                    <li><a href="#" data-view="transactions">Transaksjoner</a></li>
+                    <li><a href="#" data-view="posting-queue">📋 Posteringskø</a></li>
+                    <li><a href="#" data-view="receipts">📎 Vedlegg</a></li>
+                    <li><a href="#" data-view="accounts">Kontoer</a></li>
+                    <li><a href="#" data-view="budgets">Budsjett</a></li>
+                    <li><a href="#" data-view="reports">Rapporter</a></li>
+                    <li><a href="#" data-view="ledger-settings">⚙️ Innstillinger</a></li>
+                    <li id="admin-menu-item" style="display: none;"><a href="#" data-view="admin">🔐 Admin</a></li>
+                </ul>
+                <div class="navbar-user">
+                    <select id="ledger-selector" class="ledger-dropdown"></select>
+                    <button id="new-ledger-btn" class="btn btn-sm btn-secondary" onclick="ledgerManager.showCreateLedgerModal()" title="Opprett nytt regnskap">+ Nytt</button>
+                    <span id="user-name"></span>
+                    <button id="logout-btn" class="btn btn-secondary">Logg ut</button>
+                </div>
+            </nav>
+
+            <main class="container">
+                <div id="dashboard-view" class="content-view">
+                    <h1>Dashboard</h1>
+                    <div class="dashboard-grid">
+                        <div class="card">
+                            <h3>Totale eiendeler</h3>
+                            <p class="amount" id="total-assets">0 kr</p>
+                        </div>
+                        <div class="card">
+                            <h3>Total gjeld</h3>
+                            <p class="amount" id="total-liabilities">0 kr</p>
+                        </div>
+                        <div class="card">
+                            <h3>Netto formue</h3>
+                            <p class="amount" id="net-worth">0 kr</p>
+                        </div>
+                        <div class="card">
+                            <h3>Månedens inntekt</h3>
+                            <p class="amount" id="month-income">0 kr</p>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h2>Siste transaksjoner</h2>
+                        <div id="recent-transactions"></div>
+                    </div>
+                </div>
+
+                <div id="transactions-view" class="content-view" style="display: none;">
+                    <div class="view-header">
+                        <h1>Transaksjoner</h1>
+                        <button id="new-transaction-btn" class="btn btn-primary">Ny transaksjon</button>
+                    </div>
+
+                    <div class="filters">
+                        <input type="date" id="filter-start-date">
+                        <input type="date" id="filter-end-date">
+                        <button id="filter-btn" class="btn btn-secondary">Filtrer</button>
+                        <button id="import-csv-btn" class="btn btn-secondary">Importer CSV</button>
+                    </div>
+
+                    <div id="transactions-list"></div>
+                </div>
+
+                <div id="posting-queue-view" class="content-view" style="display: none;">
+                    <div class="view-header">
+                        <h1>Posteringskø</h1>
+                        <button id="post-all-btn" class="btn btn-primary">Poster alle balanserte</button>
+                    </div>
+
+                    <p class="subtitle">Gjennomgå og poster importerte transaksjoner</p>
+
+                    <div id="posting-queue-list"></div>
+                </div>
+
+                <div id="receipts-view" class="content-view" style="display: none;">
+                    <div class="view-header">
+                        <h1>Vedleggskø</h1>
+                        <div>
+                            <label style="margin-right: 1rem;">
+                                <input type="radio" name="receipt-filter" value="PENDING" checked> Ubehandlede
+                            </label>
+                            <label style="margin-right: 1rem;">
+                                <input type="radio" name="receipt-filter" value="MATCHED"> Matchet
+                            </label>
+                            <label>
+                                <input type="radio" name="receipt-filter" value="all"> Alle
+                            </label>
+                        </div>
+                    </div>
+
+                    <p class="subtitle">Koble kvitteringer til transaksjoner</p>
+
+                    <div id="receipts-list"></div>
+                </div>
+
+                <div id="bank-accounts-view" class="content-view" style="display: none;">
+                    <div class="view-header">
+                        <h1>Bankkontoer</h1>
+                        <button id="new-bank-account-btn" class="btn btn-primary">Ny bankkonto</button>
+                    </div>
+                    <div id="bank-accounts-list"></div>
+                </div>
+
+                <div id="accounts-view" class="content-view" style="display: none;">
+                    <div class="view-header">
+                        <h1>Kontoplan</h1>
+                        <button id="new-account-btn" class="btn btn-primary">Ny konto</button>
+                    </div>
+                    <div class="filters">
+                        <select id="account-type-filter">
+                            <option value="">Alle typer</option>
+                            <option value="ASSET">Eiendeler</option>
+                            <option value="LIABILITY">Gjeld</option>
+                            <option value="EQUITY">Egenkapital</option>
+                            <option value="REVENUE">Inntekter</option>
+                            <option value="EXPENSE">Kostnader</option>
+                        </select>
+                        <label style="margin-left: 1rem;">
+                            <input type="checkbox" id="show-hidden-accounts">
+                            Vis skjulte kontoer
+                        </label>
+                    </div>
+                    <div id="accounts-list"></div>
+                </div>
+
+                <div id="budgets-view" class="content-view" style="display: none;">
+                    <div class="view-header">
+                        <h1>Budsjetter</h1>
+                        <button id="new-budget-btn" class="btn btn-primary">Nytt budsjett</button>
+                    </div>
+                    <div id="budgets-list"></div>
+                </div>
+
+                <div id="reports-view" class="content-view" style="display: none;">
+                    <h1>Rapporter</h1>
+                    <div class="reports-tabs">
+                        <button class="tab-btn active" data-report="balance-sheet">Balanse</button>
+                        <button class="tab-btn" data-report="income-statement">Resultat</button>
+                    </div>
+
+                    <div id="balance-sheet-report" class="report-content">
+                        <h2>Balanse</h2>
+                        <div class="report-filters">
+                            <label>Per dato:</label>
+                            <input type="date" id="balance-date">
+                            <button id="generate-balance-btn" class="btn btn-secondary">Generer</button>
+                        </div>
+                        <div id="balance-sheet-content"></div>
+                    </div>
+
+                    <div id="income-statement-report" class="report-content" style="display: none;">
+                        <h2>Resultatregnskap</h2>
+                        <div class="report-filters">
+                            <label>Fra:</label>
+                            <input type="date" id="income-start-date">
+                            <label>Til:</label>
+                            <input type="date" id="income-end-date">
+                            <button id="generate-income-btn" class="btn btn-secondary">Generer</button>
+                        </div>
+                        <div id="income-statement-content"></div>
+                    </div>
+                </div>
+
+                <div id="ledger-settings-view" class="content-view" style="display: none;">
+                    <h1>Regnskapsinnstillinger</h1>
+
+                    <div class="card">
+                        <h2>Passkeys (Biometrisk innlogging)</h2>
+                        <p>Bruk fingeravtrykk, Face ID, eller PIN for å logge inn uten passord.</p>
+
+                        <div id="passkey-support-warning" style="display: none; padding: 0.75rem; background: #fef3c7; border-left: 4px solid #f59e0b; margin-bottom: 1rem;">
+                            ⚠️ Passkeys er ikke støttet i denne nettleseren
+                        </div>
+
+                        <div id="passkeys-list"></div>
+
+                        <button id="add-passkey-btn" class="btn btn-primary" style="margin-top: 1rem;">
+                            ➕ Legg til passkey
+                        </button>
+                    </div>
+
+                    <div class="card">
+                        <h2>Regnskapsdetaljer</h2>
+                        <p><strong>Din rolle:</strong> <span id="ledger-role"></span></p>
+                        <div class="form-group">
+                            <label for="ledger-name">Navn</label>
+                            <input type="text" id="ledger-name" placeholder="Mitt regnskap">
+                        </div>
+                        <button id="save-ledger-btn" class="btn btn-primary">Lagre endringer</button>
+                    </div>
+
+                    <div class="card">
+                        <h2>Medlemmer</h2>
+                        <table class="table" id="members-table">
+                            <thead>
+                                <tr>
+                                    <th>Navn</th>
+                                    <th>E-post</th>
+                                    <th>Rolle</th>
+                                    <th>Handlinger</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                            </tbody>
+                        </table>
+                        <button id="invite-member-btn" class="btn btn-primary">Inviter medlem</button>
+                    </div>
+
+                    <div class="card">
+                        <h2>Farlig sone</h2>
+                        <button id="leave-ledger-btn" class="btn btn-danger">Forlat regnskap</button>
+                        <button id="delete-ledger-btn" class="btn btn-danger">Slett regnskap</button>
+                    </div>
+                </div>
+
+                <div id="admin-view" class="content-view" style="display: none;">
+                    <h1>🔐 Brukeradministrasjon</h1>
+
+                    <!-- Stats -->
+                    <div class="dashboard-grid">
+                        <div class="card">
+                            <h3>Totale brukere</h3>
+                            <p class="amount" id="admin-total-users">0</p>
+                        </div>
+                        <div class="card">
+                            <h3>Aktive brukere</h3>
+                            <p class="amount" id="admin-active-users">0</p>
+                        </div>
+                        <div class="card">
+                            <h3>Totale regnskap</h3>
+                            <p class="amount" id="admin-total-ledgers">0</p>
+                        </div>
+                        <div class="card">
+                            <h3>Aktive abonnementer</h3>
+                            <p class="amount" id="admin-active-subscriptions">0</p>
+                        </div>
+                    </div>
+
+                    <!-- User list -->
+                    <div class="card">
+                        <div class="view-header">
+                            <h2>Brukere</h2>
+                            <input type="text" id="admin-search" placeholder="Søk etter brukere..." style="max-width: 300px;">
+                        </div>
+
+                        <div id="admin-users-list"></div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <div id="modal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <div id="modal-body"></div>
+        </div>
+    </div>
+
+    <script src="/static/js/passkey.js?v=2"></script>
+    <script type="module" src="/static/js/main.js?v=2"></script>
+</body>
+</html>

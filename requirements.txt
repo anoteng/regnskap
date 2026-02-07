@@ -1,0 +1,10 @@
+# Minimal requirements - bruk Debian-pakker der det er mulig
+# Installer først disse Debian-pakkene:
+# sudo apt install python3-fastapi python3-uvicorn python3-sqlalchemy
+# sudo apt install python3-pymysql python3-cryptography python3-passlib
+# sudo apt install python3-dotenv python3-pydantic python3-pydantic-settings
+# sudo apt install python3-multipart
+
+# Kun python-jose og webauthn mangler fra Debian, installer via pip:
+python-jose[cryptography]
+webauthn>=1.11.0
