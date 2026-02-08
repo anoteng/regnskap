@@ -38,6 +38,38 @@ class ReceiptStatus(str, enum.Enum):
     ARCHIVED = "ARCHIVED"
 
 
+class BankConnectionStatus(str, enum.Enum):
+    ACTIVE = "ACTIVE"
+    EXPIRED = "EXPIRED"
+    DISCONNECTED = "DISCONNECTED"
+    ERROR = "ERROR"
+
+
+class BankSyncType(str, enum.Enum):
+    MANUAL = "MANUAL"
+    AUTO = "AUTO"
+    OAUTH_CONNECT = "OAUTH_CONNECT"
+
+
+class BankSyncStatus(str, enum.Enum):
+    SUCCESS = "SUCCESS"
+    PARTIAL = "PARTIAL"
+    FAILED = "FAILED"
+
+
+class BankTransactionImportStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    IMPORTED = "IMPORTED"
+    DUPLICATE = "DUPLICATE"
+    IGNORED = "IGNORED"
+
+
+class TransactionSource(str, enum.Enum):
+    MANUAL = "MANUAL"
+    CSV_IMPORT = "CSV_IMPORT"
+    BANK_SYNC = "BANK_SYNC"
+
+
 class Ledger(Base):
     __tablename__ = "ledgers"
 
@@ -180,6 +212,8 @@ class Transaction(Base):
     reference = Column(String(100))
     is_reconciled = Column(Boolean, default=False)
     status = Column(SQLEnum(TransactionStatus), nullable=False, default=TransactionStatus.POSTED)
+    source = Column(SQLEnum(TransactionSource), default=TransactionSource.MANUAL)
+    source_reference = Column(String(255), nullable=True)
     ai_suggested = Column(Boolean, default=False)
     ai_suggestion_data = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -449,3 +483,159 @@ class AIUsage(Base):
     # Relationships
     user = relationship("User")
     ledger = relationship("Ledger")
+
+
+# Bank Integration Models
+
+class BankProvider(Base):
+    __tablename__ = "bank_providers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(50), unique=True, nullable=False)
+    display_name = Column(String(100), nullable=False)
+    is_active = Column(Boolean, default=True)
+    environment = Column(String(20), nullable=False)
+    config_data = Column(Text, nullable=True)
+    authorization_url = Column(String(500), nullable=True)
+    token_url = Column(String(500), nullable=True)
+    api_base_url = Column(String(500), nullable=True)
+    config_notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    connections = relationship("BankConnection", back_populates="provider")
+
+
+class BankConnection(Base):
+    __tablename__ = "bank_connections"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ledger_id = Column(Integer, ForeignKey("ledgers.id"), nullable=False)
+    bank_account_id = Column(Integer, ForeignKey("bank_accounts.id"), nullable=False)
+    provider_id = Column(Integer, ForeignKey("bank_providers.id"), nullable=False)
+
+    # External identifiers
+    external_bank_id = Column(String(255), nullable=True)
+    external_account_id = Column(String(255), nullable=False)
+    external_account_name = Column(String(255), nullable=True)
+    external_account_iban = Column(String(50), nullable=True)
+    external_account_bic = Column(String(20), nullable=True)
+
+    # OAuth tokens (encrypted)
+    access_token = Column(Text, nullable=True)
+    refresh_token = Column(Text, nullable=True)
+    token_expires_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Connection status
+    status = Column(SQLEnum(BankConnectionStatus), default=BankConnectionStatus.ACTIVE)
+    connection_error = Column(Text, nullable=True)
+
+    # Sync settings
+    last_sync_at = Column(DateTime(timezone=True), nullable=True)
+    last_successful_sync_at = Column(DateTime(timezone=True), nullable=True)
+    auto_sync_enabled = Column(Boolean, default=True)
+    sync_frequency_hours = Column(Integer, default=24)
+
+    # Metadata
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+
+    ledger = relationship("Ledger")
+    bank_account = relationship("BankAccount")
+    provider = relationship("BankProvider", back_populates="connections")
+    creator = relationship("User")
+    transactions = relationship("BankTransaction", back_populates="connection")
+    sync_logs = relationship("BankSyncLog", back_populates="connection")
+
+
+class BankTransaction(Base):
+    __tablename__ = "bank_transactions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    bank_connection_id = Column(Integer, ForeignKey("bank_connections.id"), nullable=False)
+
+    # External identifiers
+    external_transaction_id = Column(String(255), nullable=False)
+
+    # Transaction data
+    transaction_date = Column(Date, nullable=False)
+    booking_date = Column(Date, nullable=True)
+    value_date = Column(Date, nullable=True)
+    amount = Column(DECIMAL(15, 2), nullable=False)
+    currency = Column(String(3), default="NOK")
+    description = Column(Text, nullable=True)
+    reference = Column(String(255), nullable=True)
+
+    # Merchant information
+    merchant_name = Column(String(255), nullable=True)
+    merchant_category = Column(String(100), nullable=True)
+
+    # Deduplication
+    dedup_hash = Column(String(32), nullable=False)
+
+    # Import status
+    import_status = Column(SQLEnum(BankTransactionImportStatus), default=BankTransactionImportStatus.PENDING)
+    imported_transaction_id = Column(Integer, ForeignKey("transactions.id"), nullable=True)
+
+    # Raw data
+    raw_data = Column(Text, nullable=True)
+    fetched_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    connection = relationship("BankConnection", back_populates="transactions")
+    imported_transaction = relationship("Transaction")
+
+
+class BankSyncLog(Base):
+    __tablename__ = "bank_sync_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    bank_connection_id = Column(Integer, ForeignKey("bank_connections.id"), nullable=False)
+
+    # Sync operation
+    sync_type = Column(SQLEnum(BankSyncType), nullable=False)
+    sync_status = Column(SQLEnum(BankSyncStatus), nullable=False)
+
+    # Results
+    transactions_fetched = Column(Integer, default=0)
+    transactions_imported = Column(Integer, default=0)
+    transactions_duplicate = Column(Integer, default=0)
+
+    # Date range
+    sync_from_date = Column(Date, nullable=True)
+    sync_to_date = Column(Date, nullable=True)
+
+    # Error handling
+    error_message = Column(Text, nullable=True)
+    error_code = Column(String(50), nullable=True)
+
+    # Timing
+    started_at = Column(DateTime(timezone=True), nullable=False)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    duration_seconds = Column(Integer, nullable=True)
+
+    # Who triggered
+    triggered_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    connection = relationship("BankConnection", back_populates="sync_logs")
+    trigger_user = relationship("User")
+
+
+class OAuthState(Base):
+    __tablename__ = "oauth_states"
+
+    id = Column(Integer, primary_key=True, index=True)
+    state_token = Column(String(64), unique=True, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    ledger_id = Column(Integer, ForeignKey("ledgers.id"), nullable=False)
+    bank_account_id = Column(Integer, ForeignKey("bank_accounts.id"), nullable=False)
+    provider_id = Column(Integer, ForeignKey("bank_providers.id"), nullable=False)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+
+    user = relationship("User")
+    ledger = relationship("Ledger")
+    bank_account = relationship("BankAccount")
+    provider = relationship("BankProvider")

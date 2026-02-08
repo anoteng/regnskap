@@ -369,5 +369,140 @@ class PasswordResetComplete(BaseModel):
     new_password: str
 
 
+# Bank Integration schemas
+
+class BankProviderBase(BaseModel):
+    name: str
+    display_name: str
+    environment: str  # SANDBOX or PRODUCTION
+    authorization_url: Optional[str] = None
+    token_url: Optional[str] = None
+    api_base_url: Optional[str] = None
+    config_notes: Optional[str] = None
+
+
+class BankProviderCreate(BankProviderBase):
+    config_data: Optional[str] = None  # JSON string
+
+
+class BankProviderUpdate(BaseModel):
+    display_name: Optional[str] = None
+    is_active: Optional[bool] = None
+    environment: Optional[str] = None
+    config_data: Optional[str] = None
+    authorization_url: Optional[str] = None
+    token_url: Optional[str] = None
+    api_base_url: Optional[str] = None
+    config_notes: Optional[str] = None
+
+
+class BankProvider(BankProviderBase):
+    id: int
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class BankConnectionBase(BaseModel):
+    external_account_name: Optional[str] = None
+    external_account_iban: Optional[str] = None
+
+
+class BankConnectionCreate(BaseModel):
+    bank_account_id: int
+    provider_id: int
+    external_bank_id: Optional[str] = None  # For provider bank selection
+
+
+class BankConnection(BankConnectionBase):
+    id: int
+    ledger_id: int
+    bank_account_id: int
+    provider_id: int
+    external_bank_id: Optional[str] = None
+    external_account_id: str
+    external_account_iban: Optional[str] = None
+    external_account_bic: Optional[str] = None
+    status: str
+    connection_error: Optional[str] = None
+    last_sync_at: Optional[datetime] = None
+    last_successful_sync_at: Optional[datetime] = None
+    auto_sync_enabled: bool
+    created_at: datetime
+    created_by: int
+
+    class Config:
+        from_attributes = True
+
+
+class BankTransactionBase(BaseModel):
+    transaction_date: date
+    amount: Decimal
+    description: Optional[str] = None
+
+
+class BankTransaction(BankTransactionBase):
+    id: int
+    bank_connection_id: int
+    external_transaction_id: str
+    booking_date: Optional[date] = None
+    value_date: Optional[date] = None
+    currency: str
+    reference: Optional[str] = None
+    merchant_name: Optional[str] = None
+    merchant_category: Optional[str] = None
+    import_status: str
+    imported_transaction_id: Optional[int] = None
+    fetched_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class BankSyncLogBase(BaseModel):
+    sync_type: str
+    sync_from_date: Optional[date] = None
+    sync_to_date: Optional[date] = None
+
+
+class BankSyncLog(BankSyncLogBase):
+    id: int
+    bank_connection_id: int
+    sync_status: str
+    transactions_fetched: int
+    transactions_imported: int
+    transactions_duplicate: int
+    error_message: Optional[str] = None
+    error_code: Optional[str] = None
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    duration_seconds: Optional[int] = None
+    triggered_by: Optional[int] = None
+
+    class Config:
+        from_attributes = True
+
+
+class SyncParams(BaseModel):
+    from_date: Optional[date] = None
+    to_date: Optional[date] = None
+
+
+class SyncResponse(BaseModel):
+    status: str
+    transactions_fetched: int
+    imported: int
+    duplicates: int
+    message: Optional[str] = None
+
+
+class OAuthInitiateResponse(BaseModel):
+    authorization_url: str
+    state_token: str
+
+
 # Rebuild models to resolve forward references
 JournalEntry.model_rebuild()
