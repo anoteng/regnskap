@@ -310,6 +310,14 @@ class Receipt(ReceiptBase):
     matched_transaction_id: Optional[int] = None
     matched_at: Optional[datetime] = None
     matched_by: Optional[int] = None
+    ai_extracted_date: Optional[date] = None
+    ai_extracted_amount: Optional[Decimal] = None
+    ai_extracted_vendor: Optional[str] = None
+    ai_extracted_description: Optional[str] = None
+    ai_suggested_account: Optional[str] = None
+    ai_confidence: Optional[Decimal] = None
+    ai_processed_at: Optional[datetime] = None
+    ai_processing_error: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

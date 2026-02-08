@@ -6,6 +6,10 @@ class API {
         this.currentLedgerId = localStorage.getItem('currentLedgerId');
     }
 
+    get baseURL() {
+        return API_BASE;
+    }
+
     setToken(token) {
         this.token = token;
         localStorage.setItem('token', token);
@@ -365,7 +369,7 @@ class API {
 
         const headers = {
             'Authorization': `Bearer ${this.token}`,
-            'X-Ledger-ID': this.currentLedger
+            'X-Ledger-ID': this.currentLedgerId
         };
 
         const response = await fetch(`${this.baseURL}/receipts/upload`, {

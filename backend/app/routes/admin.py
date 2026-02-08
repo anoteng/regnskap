@@ -2,11 +2,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
 from typing import List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from backend.database import get_db
 from backend.app import models, schemas
 from backend.app.auth import get_current_user, get_password_hash
 from pydantic import BaseModel, EmailStr
+from decimal import Decimal
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -78,10 +79,70 @@ class SubscriptionPlanInfo(BaseModel):
     tier: str
     description: Optional[str]
     price_monthly: float
+    features: Optional[str]
+    max_documents: Optional[int]
+    max_monthly_uploads: Optional[int]
+    ai_enabled: bool
+    max_ai_operations_per_month: Optional[int]
     is_active: bool
 
     class Config:
         from_attributes = True
+
+
+class UpdateSubscriptionPlanRequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    price_monthly: Optional[float] = None
+    features: Optional[str] = None
+    max_documents: Optional[int] = None
+    max_monthly_uploads: Optional[int] = None
+    ai_enabled: Optional[bool] = None
+    max_ai_operations_per_month: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+class AIConfigInfo(BaseModel):
+    id: int
+    provider: str
+    model: str
+    is_active: bool
+    max_tokens: int
+    temperature: float
+    config_notes: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class CreateAIConfigRequest(BaseModel):
+    provider: str
+    api_key: str
+    model: str
+    max_tokens: Optional[int] = 4000
+    temperature: Optional[float] = 0.3
+    config_notes: Optional[str] = None
+
+
+class UpdateAIConfigRequest(BaseModel):
+    api_key: Optional[str] = None
+    model: Optional[str] = None
+    is_active: Optional[bool] = None
+    max_tokens: Optional[int] = None
+    temperature: Optional[float] = None
+    config_notes: Optional[str] = None
+
+
+class UserAIUsageStats(BaseModel):
+    user_id: int
+    user_email: str
+    user_name: str
+    total_operations: int
+    total_tokens: int
+    total_cost_usd: float
+    last_used: Optional[datetime]
 
 
 class UpdateUserRequest(BaseModel):
@@ -296,10 +357,56 @@ def list_subscription_plans(
             tier=plan.tier.value,
             description=plan.description,
             price_monthly=float(plan.price_monthly),
+            features=plan.features,
+            max_documents=plan.max_documents,
+            max_monthly_uploads=plan.max_monthly_uploads,
+            ai_enabled=plan.ai_enabled,
+            max_ai_operations_per_month=plan.max_ai_operations_per_month,
             is_active=plan.is_active
         )
         for plan in plans
     ]
+
+
+@router.patch("/subscription-plans/{plan_id}")
+def update_subscription_plan(
+    plan_id: int,
+    data: UpdateSubscriptionPlanRequest,
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(require_admin)
+):
+    """Update subscription plan details"""
+    plan = db.query(models.SubscriptionPlan).filter(
+        models.SubscriptionPlan.id == plan_id
+    ).first()
+
+    if not plan:
+        raise HTTPException(status_code=404, detail="Subscription plan not found")
+
+    # Update fields if provided
+    if data.name is not None:
+        plan.name = data.name
+    if data.description is not None:
+        plan.description = data.description
+    if data.price_monthly is not None:
+        plan.price_monthly = data.price_monthly
+    if data.features is not None:
+        plan.features = data.features
+    if data.max_documents is not None:
+        plan.max_documents = data.max_documents
+    if data.max_monthly_uploads is not None:
+        plan.max_monthly_uploads = data.max_monthly_uploads
+    if data.ai_enabled is not None:
+        plan.ai_enabled = data.ai_enabled
+    if data.max_ai_operations_per_month is not None:
+        plan.max_ai_operations_per_month = data.max_ai_operations_per_month
+    if data.is_active is not None:
+        plan.is_active = data.is_active
+
+    db.commit()
+    db.refresh(plan)
+
+    return {"message": "Subscription plan updated successfully"}
 
 
 @router.post("/users/{user_id}/subscription")
@@ -408,4 +515,197 @@ def get_admin_stats(
         "total_ledgers": total_ledgers,
         "active_subscriptions": active_subscriptions,
         "tier_distribution": tier_distribution
+    }
+
+
+# ============================================
+# AI CONFIGURATION ENDPOINTS
+# ============================================
+
+@router.get("/ai-config", response_model=List[AIConfigInfo])
+def list_ai_configs(
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(require_admin)
+):
+    """List all AI configurations"""
+    configs = db.query(models.AIConfig).all()
+    return configs
+
+
+@router.post("/ai-config")
+def create_ai_config(
+    data: CreateAIConfigRequest,
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(require_admin)
+):
+    """Create a new AI configuration"""
+    # Deactivate other configs if this is being set as active
+    if data.provider:
+        db.query(models.AIConfig).update({"is_active": False})
+
+    config = models.AIConfig(
+        provider=data.provider,
+        api_key=data.api_key,
+        model=data.model,
+        max_tokens=data.max_tokens,
+        temperature=data.temperature,
+        config_notes=data.config_notes,
+        is_active=True
+    )
+
+    db.add(config)
+    db.commit()
+    db.refresh(config)
+
+    return {"message": "AI configuration created", "id": config.id}
+
+
+@router.patch("/ai-config/{config_id}")
+def update_ai_config(
+    config_id: int,
+    data: UpdateAIConfigRequest,
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(require_admin)
+):
+    """Update AI configuration"""
+    config = db.query(models.AIConfig).filter(
+        models.AIConfig.id == config_id
+    ).first()
+
+    if not config:
+        raise HTTPException(status_code=404, detail="AI config not found")
+
+    # If activating this config, deactivate others
+    if data.is_active and not config.is_active:
+        db.query(models.AIConfig).update({"is_active": False})
+
+    if data.api_key is not None:
+        config.api_key = data.api_key
+    if data.model is not None:
+        config.model = data.model
+    if data.is_active is not None:
+        config.is_active = data.is_active
+    if data.max_tokens is not None:
+        config.max_tokens = data.max_tokens
+    if data.temperature is not None:
+        config.temperature = data.temperature
+    if data.config_notes is not None:
+        config.config_notes = data.config_notes
+
+    db.commit()
+    db.refresh(config)
+
+    return {"message": "AI configuration updated"}
+
+
+@router.delete("/ai-config/{config_id}")
+def delete_ai_config(
+    config_id: int,
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(require_admin)
+):
+    """Delete AI configuration"""
+    config = db.query(models.AIConfig).filter(
+        models.AIConfig.id == config_id
+    ).first()
+
+    if not config:
+        raise HTTPException(status_code=404, detail="AI config not found")
+
+    db.delete(config)
+    db.commit()
+
+    return {"message": "AI configuration deleted"}
+
+
+# ============================================
+# AI USAGE TRACKING ENDPOINTS
+# ============================================
+
+@router.get("/ai-usage/users", response_model=List[UserAIUsageStats])
+def get_ai_usage_by_users(
+    start_date: Optional[date] = None,
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(require_admin)
+):
+    """Get AI usage statistics grouped by user"""
+    query = db.query(
+        models.AIUsage.user_id,
+        models.User.email,
+        models.User.full_name,
+        func.count(models.AIUsage.id).label('total_operations'),
+        func.sum(models.AIUsage.tokens_used).label('total_tokens'),
+        func.sum(models.AIUsage.cost_usd).label('total_cost_usd'),
+        func.max(models.AIUsage.created_at).label('last_used')
+    ).join(models.User).group_by(
+        models.AIUsage.user_id,
+        models.User.email,
+        models.User.full_name
+    )
+
+    if start_date:
+        query = query.filter(models.AIUsage.created_at >= start_date)
+
+    results = query.all()
+
+    return [
+        UserAIUsageStats(
+            user_id=r.user_id,
+            user_email=r.email,
+            user_name=r.full_name,
+            total_operations=r.total_operations,
+            total_tokens=r.total_tokens or 0,
+            total_cost_usd=float(r.total_cost_usd or 0),
+            last_used=r.last_used
+        )
+        for r in results
+    ]
+
+
+@router.get("/ai-usage/user/{user_id}")
+def get_user_ai_usage(
+    user_id: int,
+    start_date: Optional[date] = None,
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(require_admin)
+):
+    """Get detailed AI usage for a specific user"""
+    query = db.query(models.AIUsage).filter(
+        models.AIUsage.user_id == user_id
+    )
+
+    if start_date:
+        query = query.filter(models.AIUsage.created_at >= start_date)
+
+    usages = query.order_by(models.AIUsage.created_at.desc()).all()
+
+    total_tokens = sum(u.tokens_used for u in usages)
+    total_cost = sum(u.cost_usd or 0 for u in usages)
+
+    by_operation = {}
+    for usage in usages:
+        if usage.operation_type not in by_operation:
+            by_operation[usage.operation_type] = {'count': 0, 'tokens': 0, 'cost': 0}
+        by_operation[usage.operation_type]['count'] += 1
+        by_operation[usage.operation_type]['tokens'] += usage.tokens_used
+        by_operation[usage.operation_type]['cost'] += float(usage.cost_usd or 0)
+
+    return {
+        'user_id': user_id,
+        'total_operations': len(usages),
+        'total_tokens': total_tokens,
+        'total_cost_usd': float(total_cost),
+        'by_operation': by_operation,
+        'recent_usage': [
+            {
+                'id': u.id,
+                'operation_type': u.operation_type,
+                'provider': u.provider,
+                'model': u.model,
+                'tokens_used': u.tokens_used,
+                'cost_usd': float(u.cost_usd or 0),
+                'created_at': u.created_at
+            }
+            for u in usages[:20]  # Last 20 operations
+        ]
     }

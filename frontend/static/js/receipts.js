@@ -71,6 +71,22 @@ class ReceiptsManager {
                     ${receipt.amount ? `<div><small>Beløp: ${parseFloat(receipt.amount).toFixed(2)} kr</small></div>` : ''}
                     ${receipt.description ? `<div><small>${receipt.description}</small></div>` : ''}
 
+                    ${receipt.ai_extracted_date || receipt.ai_extracted_amount || receipt.ai_extracted_vendor ? `
+                        <div style="background: #f0f9ff; padding: 0.5rem; border-radius: 4px; margin-top: 0.5rem; border-left: 3px solid #3b82f6;">
+                            <small><strong>🤖 AI-analyse:</strong></small><br>
+                            ${receipt.ai_extracted_vendor ? `<small>Leverandør: ${receipt.ai_extracted_vendor}</small><br>` : ''}
+                            ${receipt.ai_extracted_date ? `<small>Dato: ${formatDate(receipt.ai_extracted_date)}</small><br>` : ''}
+                            ${receipt.ai_extracted_amount ? `<small>Beløp: ${parseFloat(receipt.ai_extracted_amount).toFixed(2)} kr</small><br>` : ''}
+                            ${receipt.ai_confidence ? `<small>Sikkerhet: ${(parseFloat(receipt.ai_confidence) * 100).toFixed(0)}%</small>` : ''}
+                        </div>
+                    ` : ''}
+
+                    ${receipt.ai_processing_error ? `
+                        <div style="background: #fee2e2; padding: 0.5rem; border-radius: 4px; margin-top: 0.5rem;">
+                            <small><strong>AI-feil:</strong> ${receipt.ai_processing_error}</small>
+                        </div>
+                    ` : ''}
+
                     ${receipt.status === 'MATCHED' ? `
                         <div class="receipt-status">
                             ✓ Matchet til transaksjon #${receipt.matched_transaction_id}
@@ -85,6 +101,11 @@ class ReceiptsManager {
                         </div>
                     ` : `
                         <div class="receipt-actions">
+                            ${!receipt.ai_processed_at ? `
+                                <button class="btn btn-sm" style="background: #3b82f6; color: white;" onclick="receiptsManager.analyzeWithAI(${receipt.id}, event)">
+                                    🤖 Analyser med AI
+                                </button>
+                            ` : ''}
                             <button class="btn btn-sm btn-primary" onclick="receiptsManager.showMatchModal(${receipt.id})">
                                 Koble til transaksjon
                             </button>
@@ -535,6 +556,51 @@ class ReceiptsManager {
             img.onerror = () => reject(new Error('Failed to load image'));
             img.src = imageUrl;
         });
+    }
+
+    async analyzeWithAI(id, event) {
+        const receipt = this.receipts.find(r => r.id === id);
+        if (!receipt) return;
+
+        const confirmed = confirm('Analysere denne kvitteringen med AI? Dette vil bruke en AI-operasjon fra ditt månedlige abonnement.');
+        if (!confirmed) return;
+
+        try {
+            // Show loading state
+            let button = null;
+            if (event && event.target) {
+                button = event.target;
+                const originalText = button.innerHTML;
+                button.innerHTML = '⏳ Analyserer...';
+                button.disabled = true;
+            }
+
+            const response = await fetch(`${api.baseURL}/ai/analyze-receipt/${id}`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${api.token}`,
+                    'X-Ledger-ID': api.currentLedgerId
+                }
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || 'AI-analyse feilet');
+            }
+
+            const result = await response.json();
+
+            if (result.success) {
+                showSuccess('AI-analyse fullført! Data er ekstrahert og lagret.');
+                await this.loadReceipts();
+            } else {
+                throw new Error(result.error || 'AI-analyse feilet');
+            }
+        } catch (error) {
+            showError('Kunne ikke analysere kvittering: ' + error.message);
+            // Reload to reset button state
+            await this.loadReceipts();
+        }
     }
 }
 

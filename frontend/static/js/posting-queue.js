@@ -212,6 +212,12 @@ class PostingQueueManager {
                 </div>
 
                 <h4>Posteringer</h4>
+                <div style="margin-bottom: 1rem;">
+                    <button type="button" class="btn" style="background: #3b82f6; color: white;" onclick="postingQueueManager.suggestWithAI(${id}, event)">
+                        🤖 Få AI-forslag til postering
+                    </button>
+                </div>
+
                 <div id="journal-entries-container">
                     ${transaction.journal_entries.map((entry, idx) => this.renderJournalEntryEdit(entry, idx)).join('')}
                 </div>
@@ -589,6 +595,153 @@ class PostingQueueManager {
         } catch (error) {
             console.error('Error posting all transactions:', error);
             showError('Kunne ikke postere transaksjoner: ' + error.message);
+        }
+    }
+
+    async suggestWithAI(transactionId, event) {
+        const transaction = this.currentEditingTransaction || this.transactions.find(t => t.id === transactionId);
+        if (!transaction) {
+            showError('Transaksjon ikke funnet');
+            return;
+        }
+
+        const confirmed = confirm('Be AI om forslag til postering? Dette vil bruke en AI-operasjon fra ditt månedlige abonnement.');
+        if (!confirmed) return;
+
+        try {
+            // Get current form values
+            const description = document.getElementById('trans-description').value;
+            const transactionDate = document.getElementById('trans-date').value;
+
+            // Try to get amount from existing entries first
+            let amount = 0;
+            if (transaction.journal_entries && transaction.journal_entries.length > 0) {
+                // Get amount from first entry with non-zero value
+                for (const entry of transaction.journal_entries) {
+                    const entryAmount = Math.abs(parseFloat(entry.debit || entry.credit || 0));
+                    if (entryAmount > 0) {
+                        amount = entryAmount;
+                        break;
+                    }
+                }
+            }
+
+            // If no amount from entries, try to get from current form inputs
+            if (!amount) {
+                const debitInputs = document.querySelectorAll('.entry-debit');
+                const creditInputs = document.querySelectorAll('.entry-credit');
+
+                for (const input of debitInputs) {
+                    const val = Math.abs(parseFloat(input.value || 0));
+                    if (val > 0) {
+                        amount = val;
+                        break;
+                    }
+                }
+
+                if (!amount) {
+                    for (const input of creditInputs) {
+                        const val = Math.abs(parseFloat(input.value || 0));
+                        if (val > 0) {
+                            amount = val;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (!description) {
+                showError('Vennligst fyll ut beskrivelse før du ber om AI-forslag');
+                return;
+            }
+
+            if (!amount || amount === 0) {
+                showError('Vennligst fyll ut beløp i minst én postering før du ber om AI-forslag. For eksempel: hvis du har en banktransaksjon på 500 kr, fyll ut kredit 500 kr på bankkontoen først.');
+                return;
+            }
+
+            // Show loading state
+            let button = null;
+            if (event && event.target) {
+                button = event.target;
+                const originalText = button.innerHTML;
+                button.innerHTML = '⏳ Henter forslag...';
+                button.disabled = true;
+            }
+
+            const response = await fetch(`${api.baseURL}/ai/suggest-posting`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${api.token}`,
+                    'X-Ledger-ID': api.currentLedgerId,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    description,
+                    amount,
+                    transaction_date: transactionDate
+                })
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || 'AI-forslag feilet');
+            }
+
+            const result = await response.json();
+
+            if (result.success && result.suggestion) {
+                // Clear existing entries
+                document.getElementById('journal-entries-container').innerHTML = '';
+
+                // Add suggested entries
+                result.suggestion.entries.forEach((entry, idx) => {
+                    if (idx > 0) {
+                        this.addJournalEntry();
+                    }
+
+                    // Find account by number
+                    const account = this.accounts.find(a => a.account_number === entry.account);
+
+                    if (account) {
+                        const accountInput = document.querySelector(`.entry-account-input[data-idx="${idx}"]`);
+                        const accountIdInput = document.querySelector(`.entry-account[data-idx="${idx}"]`);
+                        const accountNameDisplay = document.getElementById(`account-name-${idx}`);
+
+                        if (accountInput) accountInput.value = account.account_number;
+                        if (accountIdInput) accountIdInput.value = account.id;
+                        if (accountNameDisplay) accountNameDisplay.textContent = account.account_name;
+                    }
+
+                    const debitInput = document.querySelector(`.entry-debit[data-idx="${idx}"]`);
+                    const creditInput = document.querySelector(`.entry-credit[data-idx="${idx}"]`);
+
+                    if (debitInput) debitInput.value = entry.debit || 0;
+                    if (creditInput) creditInput.value = entry.credit || 0;
+                });
+
+                this.updateBalance();
+
+                // Show explanation
+                if (result.suggestion.explanation) {
+                    showSuccess(`AI-forslag: ${result.suggestion.explanation}`);
+                }
+            } else {
+                throw new Error(result.error || 'AI-forslag feilet');
+            }
+
+            // Reset button
+            button.innerHTML = originalText;
+            button.disabled = false;
+
+        } catch (error) {
+            showError('Kunne ikke hente AI-forslag: ' + error.message);
+
+            // Reset button
+            if (event && event.target) {
+                event.target.innerHTML = '🤖 Få AI-forslag til postering';
+                event.target.disabled = false;
+            }
         }
     }
 }

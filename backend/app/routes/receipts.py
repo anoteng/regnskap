@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from typing import List, Optional
 from datetime import date, datetime
 from decimal import Decimal
@@ -9,7 +10,7 @@ import uuid
 from pathlib import Path
 
 from backend.database import get_db
-from ..models import Receipt, User, Ledger, Transaction, ReceiptStatus
+from ..models import Receipt, User, Ledger, Transaction, ReceiptStatus, UserSubscription, SubscriptionPlan, UserMonthlyUsage, SubscriptionStatus
 from ..schemas import Receipt as ReceiptSchema, ReceiptCreate
 from ..auth import get_current_active_user, get_current_ledger, get_user_from_query_token, get_ledger_from_query
 
@@ -23,6 +24,83 @@ ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.pdf', '.heic'}
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 
 
+def check_subscription_limits(user: User, ledger: Ledger, db: Session):
+    """Check if user can upload based on subscription limits"""
+    # Get user's active subscription
+    subscription = db.query(UserSubscription).filter(
+        UserSubscription.user_id == user.id,
+        UserSubscription.status == SubscriptionStatus.ACTIVE
+    ).first()
+
+    # If no subscription, block upload
+    if not subscription:
+        raise HTTPException(
+            status_code=403,
+            detail="Du må ha et aktivt abonnement for å laste opp bilag. Kontakt administrator."
+        )
+
+    # Get subscription plan
+    plan = subscription.plan
+
+    # Check document limit (total receipts for this ledger)
+    if plan.max_documents is not None:
+        document_count = db.query(func.count(Receipt.id)).filter(
+            Receipt.ledger_id == ledger.id
+        ).scalar()
+
+        if document_count >= plan.max_documents:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Du har nådd maksgrensen på {plan.max_documents} bilag for {plan.name}-abonnementet. Oppgrader for å laste opp flere."
+            )
+
+    # Check monthly upload limit
+    if plan.max_monthly_uploads is not None:
+        now = datetime.utcnow()
+        current_year = now.year
+        current_month = now.month
+
+        # Get or create monthly usage record
+        usage = db.query(UserMonthlyUsage).filter(
+            UserMonthlyUsage.user_id == user.id,
+            UserMonthlyUsage.year == current_year,
+            UserMonthlyUsage.month == current_month
+        ).first()
+
+        if usage and usage.upload_count >= plan.max_monthly_uploads:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Du har nådd månedens grense på {plan.max_monthly_uploads} opplastinger for {plan.name}-abonnementet. Oppgrader for ubegrenset opplasting."
+            )
+
+
+def increment_monthly_usage(user: User, db: Session):
+    """Increment user's monthly upload count"""
+    now = datetime.utcnow()
+    current_year = now.year
+    current_month = now.month
+
+    # Get or create monthly usage record
+    usage = db.query(UserMonthlyUsage).filter(
+        UserMonthlyUsage.user_id == user.id,
+        UserMonthlyUsage.year == current_year,
+        UserMonthlyUsage.month == current_month
+    ).first()
+
+    if usage:
+        usage.upload_count += 1
+    else:
+        usage = UserMonthlyUsage(
+            user_id=user.id,
+            year=current_year,
+            month=current_month,
+            upload_count=1
+        )
+        db.add(usage)
+
+    db.commit()
+
+
 @router.post("/upload", response_model=ReceiptSchema)
 async def upload_receipt(
     file: UploadFile = File(...),
@@ -34,6 +112,9 @@ async def upload_receipt(
     current_ledger: Ledger = Depends(get_current_ledger)
 ):
     """Upload a receipt image"""
+
+    # Check subscription limits before processing
+    check_subscription_limits(current_user, current_ledger, db)
 
     # Validate file extension
     file_ext = Path(file.filename).suffix.lower()
@@ -79,6 +160,9 @@ async def upload_receipt(
     db.add(receipt)
     db.commit()
     db.refresh(receipt)
+
+    # Increment monthly usage counter
+    increment_monthly_usage(current_user, db)
 
     return receipt
 
