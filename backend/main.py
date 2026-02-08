@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from backend.app.routes import auth, accounts, bank_accounts, transactions, categories, budgets, reports, csv_mappings, ledgers, receipts, passkey, admin, ai
+from backend.app.routes import auth, accounts, bank_accounts, transactions, categories, budgets, reports, csv_mappings, ledgers, receipts, passkey, admin, ai, bank_admin, bank_connections
 
 app = FastAPI(
     title="Regnskap API",
@@ -31,6 +31,8 @@ app.include_router(csv_mappings.router, prefix="/api")
 app.include_router(receipts.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
 app.include_router(ai.router, prefix="/api")
+app.include_router(bank_admin.router, prefix="/api")
+app.include_router(bank_connections.router, prefix="/api")
 
 
 @app.get("/api/health")
