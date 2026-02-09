@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_from: str = ""
 
+    # Bank integration settings
+    frontend_url: str = "http://localhost:8002"
+
     class Config:
         env_file = ".env"
 

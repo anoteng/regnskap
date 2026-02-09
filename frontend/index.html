@@ -86,6 +86,7 @@
                 <ul class="navbar-menu" id="navbar-menu">
                     <li><a href="#" data-view="dashboard">Dashboard</a></li>
                     <li><a href="#" data-view="bank-accounts">Bankkontoer</a></li>
+                    <li><a href="/bank-connections.html">🏦 Bankkoblinger</a></li>
                     <li><a href="#" data-view="transactions">Transaksjoner</a></li>
                     <li><a href="#" data-view="posting-queue">📋 Posteringskø</a></li>
                     <li><a href="#" data-view="receipts">📎 Vedlegg</a></li>
@@ -338,6 +339,25 @@
                         </div>
 
                         <div id="admin-ai-usage-list"></div>
+                    </div>
+
+                    <!-- Bank Integration Providers -->
+                    <div class="card">
+                        <div class="view-header">
+                            <h2>🏦 Bankintegrasjon</h2>
+                            <button class="btn btn-primary" onclick="adminManager.showNewBankProviderModal()">+ Legg til provider</button>
+                        </div>
+
+                        <div id="admin-bank-providers-list"></div>
+                    </div>
+
+                    <!-- Bank Integration Statistics -->
+                    <div class="card">
+                        <div class="view-header">
+                            <h2>📈 Banksynkronisering</h2>
+                        </div>
+
+                        <div id="admin-bank-stats"></div>
                     </div>
 
                     <!-- Subscription plans -->

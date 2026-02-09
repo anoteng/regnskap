@@ -118,8 +118,9 @@ class BaseBankProvider(ABC):
         self,
         access_token: str,
         account_id: str,
-        from_date: date,
-        to_date: date
+        from_date: Optional[date],
+        to_date: date,
+        is_initial_sync: bool = False
     ) -> List[Dict[str, Any]]:
         """
         Fetch transactions for an account within date range.
@@ -127,8 +128,9 @@ class BaseBankProvider(ABC):
         Args:
             access_token: Valid OAuth access token
             account_id: Account identifier from provider
-            from_date: Start date (inclusive)
+            from_date: Start date (inclusive) - None for initial sync to fetch maximum history
             to_date: End date (inclusive)
+            is_initial_sync: If True, attempt to fetch maximum available history
 
         Returns:
             List of normalized transaction dictionaries with keys:

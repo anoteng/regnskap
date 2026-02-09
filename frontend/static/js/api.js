@@ -160,6 +160,18 @@ class API {
         return this.post('/bank-accounts/', data);
     }
 
+    async getBankAccount(id) {
+        return this.get(`/bank-accounts/${id}`);
+    }
+
+    async updateBankAccount(id, data) {
+        return this.put(`/bank-accounts/${id}`, data);
+    }
+
+    async deleteBankAccount(id) {
+        return this.delete(`/bank-accounts/${id}`);
+    }
+
     async getTransactions(filters = {}) {
         const params = new URLSearchParams(filters).toString();
         return this.get(`/transactions/?${params}`);

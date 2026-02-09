@@ -535,6 +535,7 @@ class BankConnection(Base):
     last_successful_sync_at = Column(DateTime(timezone=True), nullable=True)
     auto_sync_enabled = Column(Boolean, default=True)
     sync_frequency_hours = Column(Integer, default=24)
+    initial_sync_from_date = Column(Date, nullable=True)  # Limit historical data for initial sync
 
     # Metadata
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -630,10 +631,13 @@ class OAuthState(Base):
     ledger_id = Column(Integer, ForeignKey("ledgers.id"), nullable=False)
     bank_account_id = Column(Integer, ForeignKey("bank_accounts.id"), nullable=False)
     provider_id = Column(Integer, ForeignKey("bank_providers.id"), nullable=False)
+    external_bank_id = Column(String(100), nullable=True)  # ASPSP ID like "NO_BANK_NORWEGIAN"
+    initial_sync_from_date = Column(Date, nullable=True)  # Limit historical data for initial sync
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     expires_at = Column(DateTime(timezone=True), nullable=False)
     used_at = Column(DateTime(timezone=True), nullable=True)
+    accounts_data = Column(Text, nullable=True)  # JSON array of accounts from OAuth provider
 
     user = relationship("User")
     ledger = relationship("Ledger")

@@ -111,6 +111,14 @@ class BankAccountCreate(BankAccountBase):
     account_id: int
 
 
+class BankAccountUpdate(BaseModel):
+    name: Optional[str] = None
+    account_type: Optional[str] = None
+    account_number: Optional[str] = None
+    account_id: Optional[int] = None
+    opening_balance: Optional[Decimal] = None  # Sets IB transaction for year start
+
+
 class BankAccount(BankAccountBase):
     id: int
     ledger_id: int
@@ -161,6 +169,8 @@ class Transaction(TransactionBase):
     created_by: Optional[int] = None
     is_reconciled: bool
     status: str  # DRAFT, POSTED, RECONCILED
+    source: Optional[str] = None  # MANUAL, CSV_IMPORT, BANK_SYNC
+    source_reference: Optional[str] = None  # External transaction ID if from bank sync
     created_at: datetime
     journal_entries: List[JournalEntry] = []
 
@@ -415,6 +425,13 @@ class BankConnectionCreate(BaseModel):
     bank_account_id: int
     provider_id: int
     external_bank_id: Optional[str] = None  # For provider bank selection
+    initial_sync_from_date: Optional[date] = None  # Limit historical data for initial sync
+
+
+class AccountSelectionRequest(BaseModel):
+    state_token: str
+    selected_account_id: str
+    bank_account_id: int
 
 
 class BankConnection(BankConnectionBase):

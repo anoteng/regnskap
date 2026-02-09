@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Velg konto - Regnskap</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <style>
+        .account-selection-container {
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 30px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .account-selection-container h1 {
+            font-size: 24px;
+            margin-bottom: 10px;
+            color: #333;
+        }
+
+        .account-selection-container p {
+            color: #666;
+            margin-bottom: 30px;
+        }
+
+        .account-option {
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 15px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .account-option:hover {
+            border-color: #4CAF50;
+            background-color: #f9f9f9;
+        }
+
+        .account-option.selected {
+            border-color: #4CAF50;
+            background-color: #e8f5e9;
+        }
+
+        .account-option input[type="radio"] {
+            margin-right: 15px;
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+        }
+
+        .account-info {
+            display: inline-block;
+            vertical-align: middle;
+        }
+
+        .account-name {
+            font-weight: bold;
+            font-size: 16px;
+            color: #333;
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        .account-details {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .account-type-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            margin-left: 10px;
+        }
+
+        .badge-savings {
+            background-color: #e3f2fd;
+            color: #1976d2;
+        }
+
+        .badge-credit {
+            background-color: #fff3e0;
+            color: #f57c00;
+        }
+
+        .badge-checking {
+            background-color: #f3e5f5;
+            color: #7b1fa2;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 15px;
+            margin-top: 30px;
+        }
+
+        .btn-connect {
+            flex: 1;
+            padding: 12px 24px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .btn-connect:hover {
+            background-color: #45a049;
+        }
+
+        .btn-connect:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+
+        .btn-cancel {
+            flex: 1;
+            padding: 12px 24px;
+            background-color: #f44336;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .btn-cancel:hover {
+            background-color: #da190b;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .error-message {
+            background-color: #ffebee;
+            color: #c62828;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #4CAF50;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="account-selection-container">
+        <h1>Velg konto å koble til</h1>
+        <p>Vi fant flere kontoer. Velg hvilken konto du ønsker å koble til regnskapet ditt.</p>
+
+        <div id="loading" class="loading">
+            <div class="spinner"></div>
+            <p>Henter kontoer...</p>
+        </div>
+
+        <div id="error-container" style="display: none;">
+            <div class="error-message" id="error-message"></div>
+            <button class="btn-cancel" onclick="window.location.href='/bank-connections.html'">
+                Tilbake til bankkoblinger
+            </button>
+        </div>
+
+        <div id="account-list" style="display: none;">
+            <!-- Accounts will be inserted here -->
+        </div>
+
+        <div class="button-group" id="button-group" style="display: none;">
+            <button class="btn-cancel" onclick="cancelSelection()">Avbryt</button>
+            <button class="btn-connect" id="btn-connect" disabled onclick="connectAccount()">
+                Koble til konto
+            </button>
+        </div>
+    </div>
+
+    <script>
+        let selectedAccountId = null;
+        let selectedBankAccountId = null;
+        let stateToken = null;
+        let bankAccounts = [];
+
+        // Get state token from URL
+        const urlParams = new URLSearchParams(window.location.search);
+        stateToken = urlParams.get('state');
+
+        if (!stateToken) {
+            showError('Mangler state token. Vennligst prøv på nytt.');
+        } else {
+            loadAccounts();
+        }
+
+        async function loadAccounts() {
+            try {
+                // Load both external accounts and internal bank accounts
+                const accountsResponse = await fetch(`/api/bank-connections/accounts-for-selection?state_token=${encodeURIComponent(stateToken)}`);
+
+                if (!accountsResponse.ok) {
+                    const error = await accountsResponse.json();
+                    throw new Error(error.detail || 'Kunne ikke laste kontoer');
+                }
+
+                const data = await accountsResponse.json();
+                bankAccounts = data.bank_accounts || [];
+
+                displayAccounts(data.accounts);
+
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('account-list').style.display = 'block';
+                document.getElementById('button-group').style.display = 'flex';
+            } catch (error) {
+                showError(`Feil ved lasting av kontoer: ${error.message}`);
+            }
+        }
+
+        function displayAccounts(accounts) {
+            const accountList = document.getElementById('account-list');
+            accountList.innerHTML = '';
+
+            accounts.forEach((account, index) => {
+                const accountDiv = document.createElement('div');
+                accountDiv.className = 'account-option';
+
+                // Determine badge type
+                const accountType = account.account_type || '';
+                let badgeClass = 'badge-checking';
+                if (accountType.toLowerCase().includes('credit')) {
+                    badgeClass = 'badge-credit';
+                } else if (accountType.toLowerCase().includes('savings')) {
+                    badgeClass = 'badge-savings';
+                }
+
+                // Build dropdown for internal bank accounts
+                let bankAccountOptions = '<option value="">Velg bankkonto i regnskapet...</option>';
+                bankAccounts.forEach(ba => {
+                    bankAccountOptions += `<option value="${ba.id}">${ba.name} (${ba.account_number || 'ingen kontonr'})</option>`;
+                });
+
+                accountDiv.innerHTML = `
+                    <div style="display: flex; align-items: center; gap: 15px;">
+                        <input type="radio" name="account" value="${account.account_id}" id="account-${index}"
+                               onclick="selectAccount('${account.account_id}', this.parentElement.parentElement)">
+                        <div class="account-info" style="flex: 1;">
+                            <span class="account-name">
+                                ${account.account_name}
+                                <span class="account-type-badge ${badgeClass}">${accountType}</span>
+                            </span>
+                            <div class="account-details">
+                                ${account.iban || account.bban || 'Ingen kontonummer'}
+                                · ${account.currency || 'NOK'}
+                            </div>
+                        </div>
+                        <div style="flex: 1;">
+                            <label style="display: block; font-size: 12px; margin-bottom: 5px; color: #666;">
+                                Koble til bankkonto:
+                            </label>
+                            <select class="bank-account-select" data-external-account="${account.account_id}"
+                                    style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;"
+                                    onchange="updateSelectedBankAccount('${account.account_id}', this.value)">
+                                ${bankAccountOptions}
+                            </select>
+                        </div>
+                    </div>
+                `;
+
+                accountList.appendChild(accountDiv);
+            });
+
+            // Auto-select if only one account
+            if (accounts.length === 1) {
+                const firstOption = accountList.querySelector('.account-option');
+                firstOption.querySelector('input[type="radio"]').checked = true;
+                selectAccount(accounts[0].account_id, firstOption);
+            }
+        }
+
+        function selectAccount(accountId, element) {
+            // Remove previous selection
+            document.querySelectorAll('.account-option').forEach(opt => {
+                opt.classList.remove('selected');
+            });
+
+            // Mark as selected
+            element.classList.add('selected');
+            element.querySelector('input[type="radio"]').checked = true;
+
+            selectedAccountId = accountId;
+
+            // Check if bank account is also selected
+            const select = element.querySelector('.bank-account-select');
+            selectedBankAccountId = select ? select.value : null;
+
+            // Enable connect button only if both are selected
+            document.getElementById('btn-connect').disabled = !selectedAccountId || !selectedBankAccountId;
+        }
+
+        function updateSelectedBankAccount(externalAccountId, bankAccountId) {
+            selectedBankAccountId = bankAccountId ? parseInt(bankAccountId) : null;
+
+            // Enable connect button only if both are selected
+            document.getElementById('btn-connect').disabled = !selectedAccountId || !selectedBankAccountId;
+        }
+
+        async function connectAccount() {
+            if (!selectedAccountId) {
+                alert('Vennligst velg en konto fra banken');
+                return;
+            }
+
+            if (!selectedBankAccountId) {
+                alert('Vennligst velg hvilken bankkonto i regnskapet denne skal kobles til');
+                return;
+            }
+
+            const btn = document.getElementById('btn-connect');
+            btn.disabled = true;
+            btn.textContent = 'Kobler til...';
+
+            try {
+                const response = await fetch('/api/bank-connections/select-account', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        state_token: stateToken,
+                        selected_account_id: selectedAccountId,
+                        bank_account_id: selectedBankAccountId
+                    })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    // Handle both string and structured error details
+                    let errorMsg = 'Kunne ikke koble til konto';
+                    if (typeof error.detail === 'string') {
+                        errorMsg = error.detail;
+                    } else if (Array.isArray(error.detail)) {
+                        errorMsg = error.detail.map(e => e.msg || JSON.stringify(e)).join(', ');
+                    } else if (error.detail) {
+                        errorMsg = JSON.stringify(error.detail);
+                    }
+                    throw new Error(errorMsg);
+                }
+
+                const result = await response.json();
+
+                // Show success and option to connect another account
+                if (confirm('✅ Konto koblet til!\n\nVil du koble til en annen konto fra samme bank?')) {
+                    // Reload to select another account
+                    window.location.reload();
+                } else {
+                    // Redirect to bank connections page
+                    window.location.href = `/bank-connections.html?success=true&connection_id=${result.connection_id}`;
+                }
+            } catch (error) {
+                console.error('Connection error:', error);
+                // Check if account already connected
+                if (error.message.includes('already connected')) {
+                    alert(`❌ ${error.message}\n\nVelg en annen konto eller avslutt.`);
+                } else {
+                    alert(`Feil ved tilkobling: ${error.message}`);
+                }
+                btn.disabled = false;
+                btn.textContent = 'Koble til konto';
+            }
+        }
+
+        function cancelSelection() {
+            window.location.href = '/bank-connections.html';
+        }
+
+        function showError(message) {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('error-container').style.display = 'block';
+            document.getElementById('error-message').textContent = message;
+        }
+    </script>
+</body>
+</html>

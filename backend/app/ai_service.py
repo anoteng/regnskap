@@ -157,7 +157,9 @@ class AIService:
         transaction_date: date,
         user: User,
         ledger: Ledger,
-        vendor: Optional[str] = None
+        vendor: Optional[str] = None,
+        bank_account_number: Optional[str] = None,
+        existing_entry: Optional[Dict] = None
     ) -> Dict[str, Any]:
         """
         Suggest journal entries for a transaction
@@ -176,7 +178,7 @@ class AIService:
 
         # Build prompt
         prompt = self._build_posting_suggestion_prompt(
-            description, amount, transaction_date, vendor, accounts
+            description, amount, transaction_date, vendor, accounts, bank_account_number, existing_entry
         )
 
         # Call AI provider
@@ -208,8 +210,8 @@ class AIService:
         return result['suggestion']
 
     def _get_ledger_accounts(self, ledger: Ledger) -> list:
-        """Get formatted list of accounts for the ledger"""
-        from .models import LedgerAccountSettings
+        """Get formatted list of accounts for the ledger, prioritizing EXPENSE accounts"""
+        from .models import LedgerAccountSettings, AccountType
 
         # Get active accounts
         query = self.db.query(Account).filter(Account.is_active == True)
@@ -226,20 +228,29 @@ class AIService:
 
         accounts = query.all()
 
+        # Sort accounts: EXPENSE first (most used in AI suggestions), then others by number
+        sorted_accounts = sorted(accounts, key=lambda a: (
+            0 if a.account_type == AccountType.EXPENSE else
+            1 if a.account_type == AccountType.REVENUE else
+            2 if a.account_type == AccountType.ASSET else
+            3,
+            a.account_number
+        ))
+
         return [
             {
                 'number': acc.account_number,
                 'name': acc.account_name,
                 'type': acc.account_type.value
             }
-            for acc in accounts
+            for acc in sorted_accounts
         ]
 
     def _build_receipt_analysis_prompt(self, accounts: list) -> str:
         """Build prompt for receipt analysis"""
         account_list = "\n".join([
             f"{acc['number']}: {acc['name']} ({acc['type']})"
-            for acc in accounts[:50]  # Limit to avoid token overflow
+            for acc in accounts[:80]  # Increased limit to include more expense accounts
         ])
 
         return f"""Analyser denne kvitteringen og ekstraher følgende informasjon i JSON-format:
@@ -272,22 +283,33 @@ Returner BARE JSON, ingen annen tekst."""
         amount: Decimal,
         transaction_date: date,
         vendor: Optional[str],
-        accounts: list
+        accounts: list,
+        bank_account_number: Optional[str] = None,
+        existing_entry: Optional[Dict] = None
     ) -> str:
         """Build prompt for posting suggestion"""
         account_list = "\n".join([
             f"{acc['number']}: {acc['name']} ({acc['type']})"
-            for acc in accounts[:50]
+            for acc in accounts[:80]  # Increased limit, EXPENSE accounts prioritized first
         ])
 
         vendor_info = f"\nLeverandør: {vendor}" if vendor else ""
+        bank_account_info = f"\nBankkonto (MÅ brukes): {bank_account_number}" if bank_account_number else ""
+
+        # Build existing entry info
+        existing_entry_info = ""
+        if existing_entry:
+            if existing_entry['debit'] > 0:
+                existing_entry_info = f"\n\nEKSISTERENDE POSTERING (allerede lagt inn):\n- Konto {existing_entry['account']} ({existing_entry['account_name']}): Debet {existing_entry['debit']:.2f} kr\n\nDu skal KUN foreslå MOTPOSTERINGEN(E) til denne. IKKE inkluder konto {existing_entry['account']} i ditt forslag."
+            elif existing_entry['credit'] > 0:
+                existing_entry_info = f"\n\nEKSISTERENDE POSTERING (allerede lagt inn):\n- Konto {existing_entry['account']} ({existing_entry['account_name']}): Kredit {existing_entry['credit']:.2f} kr\n\nDu skal KUN foreslå MOTPOSTERINGEN(E) til denne. IKKE inkluder konto {existing_entry['account']} i ditt forslag."
 
         return f"""Foreslå bokføring for denne transaksjonen i JSON-format:
 
 Transaksjon:
 - Dato: {transaction_date}
 - Beløp: {amount} kr
-- Beskrivelse: {description}{vendor_info}
+- Beskrivelse: {description}{vendor_info}{bank_account_info}{existing_entry_info}
 
 Tilgjengelige kontoer:
 {account_list}
@@ -304,9 +326,34 @@ Returner forslag i dette formatet:
 
 Regler for dobbelt bokføring:
 - Sum av debet må være lik sum av kredit
-- Utgifter: debiteres utgiftskonto, krediteres bankkonto
-- Inntekter: debiteres bankkonto, krediteres inntektskonto
-- confidence: Din sikkerhet (0-1)
+- EXPENSE kontoer (4000-6999): Brukes for utgifter - DEBITERES ved utgift
+- REVENUE kontoer (3000-3999): Brukes for inntekter - KREDITERES ved inntekt
+- LIABILITY kontoer (2000-2999): Gjeld/kredittkort - KREDITERES ved ny gjeld, DEBITERES ved betaling
+- ASSET kontoer (1000-1999): Bankkonto - DEBITERES ved innskudd, KREDITERES ved uttak
+
+Standard posteringer:
+- Utgift på kredittkort: Debet EXPENSE + Kredit LIABILITY
+- Betaling av kredittkort: Debet LIABILITY + Kredit ASSET
+- Utgift fra bankkonto: Debet EXPENSE + Kredit ASSET
+- Inntekt til bankkonto: Debet ASSET + Kredit REVENUE
+
+VIKTIG - Hvis det finnes EKSISTERENDE POSTERING:
+Du skal BARE foreslå motposteringen som balanserer den eksisterende posten!
+
+Analyser først HVA transaksjonen er (utgift/inntekt/betaling) basert på beskrivelse:
+- Hvis beskrivelse indikerer UTGIFT (f.eks. "Ruter", butikk, restaurant):
+  * Eksisterende er Debet LIABILITY → FEIL import, men foreslå: Kredit EXPENSE (for å balansere)
+  * Eksisterende er Kredit LIABILITY → RIKTIG, foreslå: Debet EXPENSE
+  * Eksisterende er Debet EXPENSE → Foreslå: Kredit LIABILITY/ASSET
+  * Eksisterende er Kredit ASSET → Foreslå: Debet EXPENSE
+
+- Hvis beskrivelse indikerer BETALING/OVERFØRING:
+  * Eksisterende er Debet LIABILITY → RIKTIG, foreslå: Kredit ASSET
+  * Eksisterende er Kredit ASSET → Foreslå: Debet LIABILITY/EXPENSE
+
+Leverandørnavn: "Ruter" = 6204 Kollektivtransport, "AYTO" = 6203 Parkering
+Kontolisten er sortert med EXPENSE-kontoer først
+confidence: Din sikkerhet (0-1)
 
 Returner BARE JSON, ingen annen tekst."""
 

@@ -9,7 +9,7 @@ from backend.config import get_settings
 from backend.email import send_password_reset_email
 from ..models import User, PasswordResetToken, WebAuthnCredential
 from ..schemas import Token, UserCreate, User as UserSchema, PasswordResetRequest, PasswordResetComplete, PasswordResetResponse
-from ..auth import authenticate_user, create_access_token, get_password_hash
+from ..auth import authenticate_user, create_access_token, get_password_hash, get_current_active_user
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 settings = get_settings()
@@ -129,3 +129,9 @@ def complete_password_reset(request: PasswordResetComplete, db: Session = Depend
     db.commit()
 
     return {"message": "Passord tilbakestilt!"}
+
+
+@router.get("/me", response_model=UserSchema)
+async def get_me(current_user: User = Depends(get_current_active_user)):
+    """Get current authenticated user information"""
+    return current_user

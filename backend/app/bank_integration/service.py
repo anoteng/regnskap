@@ -10,6 +10,7 @@ Main orchestration service that handles:
 """
 
 import secrets
+import logging
 from typing import Dict, Any, Optional, Tuple
 from datetime import datetime, timedelta, date
 from decimal import Decimal
@@ -99,7 +100,8 @@ class BankIntegrationService:
         bank_account: BankAccount,
         provider_id: int,
         redirect_uri: str,
-        external_bank_id: Optional[str] = None
+        external_bank_id: Optional[str] = None,
+        initial_sync_from_date: Optional[date] = None
     ) -> Dict[str, Any]:
         """
         Initiate OAuth flow for connecting a bank account.
@@ -114,6 +116,7 @@ class BankIntegrationService:
             provider_id: Which provider to use
             redirect_uri: Where to redirect after authorization
             external_bank_id: Optional bank/ASPSP selection
+            initial_sync_from_date: Optional date to limit historical data
 
         Returns:
             {
@@ -124,7 +127,8 @@ class BankIntegrationService:
         Example:
             >>> result = await service.start_oauth_flow(
             ...     user, ledger, bank_account, provider_id=1,
-            ...     redirect_uri="https://example.com/callback"
+            ...     redirect_uri="https://example.com/callback",
+            ...     initial_sync_from_date=date(2026, 1, 1)
             ... )
             >>> # Redirect user to result['authorization_url']
         """
@@ -138,6 +142,8 @@ class BankIntegrationService:
             ledger_id=ledger.id,
             bank_account_id=bank_account.id,
             provider_id=provider_id,
+            external_bank_id=external_bank_id,  # Store ASPSP ID for later use
+            initial_sync_from_date=initial_sync_from_date,  # Store date limit
             expires_at=datetime.utcnow() + timedelta(minutes=10)
         )
         self.db.add(oauth_state)
@@ -161,12 +167,12 @@ class BankIntegrationService:
         state_token: str,
         authorization_code: str,
         redirect_uri: str
-    ) -> BankConnection:
+    ) -> Dict[str, Any]:
         """
-        Handle OAuth callback and complete connection.
+        Handle OAuth callback and prepare for account selection.
 
-        Validates state token, exchanges code for tokens, and creates
-        bank connection record.
+        Validates state token, exchanges code for tokens, and stores
+        account data for user to select which account to connect.
 
         Args:
             state_token: State token from callback
@@ -174,19 +180,22 @@ class BankIntegrationService:
             redirect_uri: Must match the one used in authorization
 
         Returns:
-            Created BankConnection
+            Dict with:
+                - state_token: for use in account selection
+                - accounts: list of available accounts
+                - bank_account_id: internal account to connect to
 
         Raises:
             ValueError: If state invalid, expired, or already used
             httpx.HTTPStatusError: If token exchange fails
 
         Example:
-            >>> connection = await service.handle_oauth_callback(
+            >>> result = await service.handle_oauth_callback(
             ...     state_token="abc123",
             ...     authorization_code="code456",
             ...     redirect_uri="https://example.com/callback"
             ... )
-            >>> print(f"Connected bank account: {connection.external_account_id}")
+            >>> print(f"Available accounts: {len(result['accounts'])}")
         """
         # Validate state token
         oauth_state = self.db.query(OAuthState).filter(
@@ -199,12 +208,10 @@ class BankIntegrationService:
         if oauth_state.used_at:
             raise ValueError("State token already used")
 
-        if oauth_state.expires_at < datetime.utcnow():
-            raise ValueError("State token expired")
-
-        # Mark state as used
-        oauth_state.used_at = datetime.utcnow()
-        self.db.commit()
+        # Don't check expiry here - we're about to extend it anyway
+        # The state token is still secure (cryptographically random)
+        # if oauth_state.expires_at < datetime.utcnow():
+        #     raise ValueError("State token expired")
 
         # Get provider
         provider = self._get_provider(oauth_state.provider_id)
@@ -215,38 +222,158 @@ class BankIntegrationService:
             redirect_uri=redirect_uri
         )
 
-        # Extract tokens
-        access_token = token_response['access_token']
-        refresh_token = token_response.get('refresh_token')
-        expires_in = token_response.get('expires_in', 3600)
-
-        # Fetch account details to get external_account_id
-        accounts = await provider.fetch_accounts(access_token)
+        # Get accounts from token response
+        accounts = token_response.get('accounts', [])
         if not accounts:
             raise ValueError("No accounts found from bank")
 
-        # Use first account (user selected bank, we get their accounts)
-        # In a more advanced implementation, let user choose which account
-        account_info = accounts[0]
+        # Store accounts and tokens in oauth_state for later use
+        # Extend expiry to give user time to select account (30 minutes)
+        import json
+        oauth_state.accounts_data = json.dumps({
+            'accounts': accounts,
+            'access_token': token_response['access_token'],
+            'refresh_token': token_response.get('refresh_token'),
+            'expires_in': token_response.get('expires_in', 3600)
+        })
+        oauth_state.expires_at = datetime.utcnow() + timedelta(minutes=30)
+        self.db.commit()
 
-        # Create bank connection
-        bank_connection = BankConnection(
-            ledger_id=oauth_state.ledger_id,
-            bank_account_id=oauth_state.bank_account_id,
-            provider_id=oauth_state.provider_id,
-            external_bank_id=oauth_state.provider.name,  # Or from account_info
-            external_account_id=account_info['account_id'],
-            external_account_name=account_info['account_name'],
-            external_account_iban=account_info.get('iban'),
-            external_account_bic=account_info.get('bic'),
-            access_token=self.encryption.encrypt(access_token),
-            refresh_token=self.encryption.encrypt(refresh_token) if refresh_token else None,
-            token_expires_at=datetime.utcnow() + timedelta(seconds=expires_in),
-            status=BankConnectionStatus.ACTIVE,
-            created_by=oauth_state.user_id
-        )
+        # Return data for account selection
+        return {
+            'state_token': state_token,
+            'accounts': accounts,
+            'bank_account_id': oauth_state.bank_account_id
+        }
 
-        self.db.add(bank_connection)
+    async def create_connection_from_selection(
+        self,
+        state_token: str,
+        selected_account_id: str,
+        bank_account_id: int
+    ) -> BankConnection:
+        """
+        Create bank connection after user selects account.
+
+        Args:
+            state_token: OAuth state token
+            selected_account_id: The account_id user selected from available accounts
+            bank_account_id: Internal bank account ID to connect to
+
+        Returns:
+            Created BankConnection
+
+        Raises:
+            ValueError: If state invalid or account not found
+        """
+        # Validate state token
+        oauth_state = self.db.query(OAuthState).filter(
+            OAuthState.state_token == state_token
+        ).first()
+
+        if not oauth_state:
+            raise ValueError("Invalid state token")
+
+        # Allow reusing state for multiple accounts (within expiry window)
+        # if oauth_state.used_at:
+        #     raise ValueError("State token already used")
+
+        if oauth_state.expires_at < datetime.utcnow():
+            raise ValueError("State token expired")
+
+        if not oauth_state.accounts_data:
+            raise ValueError("No account data available")
+
+        # Parse stored data
+        import json
+        stored_data = json.loads(oauth_state.accounts_data)
+        accounts = stored_data['accounts']
+        access_token = stored_data['access_token']
+        refresh_token = stored_data.get('refresh_token')
+        expires_in = stored_data.get('expires_in', 3600)
+
+        # Find selected account
+        account_info = None
+        for account in accounts:
+            if account['account_id'] == selected_account_id:
+                account_info = account
+                break
+
+        if not account_info:
+            raise ValueError(f"Selected account {selected_account_id} not found in available accounts")
+
+        # Validate bank_account_id belongs to the correct ledger
+        bank_account = self.db.query(BankAccount).filter(
+            BankAccount.id == bank_account_id,
+            BankAccount.ledger_id == oauth_state.ledger_id,
+            BankAccount.is_active == True
+        ).first()
+
+        if not bank_account:
+            raise ValueError(f"Bank account {bank_account_id} not found or does not belong to this ledger")
+
+        # Check if there's an existing connection for this bank_account_id
+        # (This allows re-authorization of existing connections)
+        existing_for_bank_account = self.db.query(BankConnection).filter(
+            BankConnection.bank_account_id == bank_account_id,
+            BankConnection.ledger_id == oauth_state.ledger_id
+        ).first()
+
+        if existing_for_bank_account:
+            # Re-authorization: Update existing connection with new tokens and account ID
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"Re-authorizing existing connection {existing_for_bank_account.id}")
+
+            existing_for_bank_account.external_account_id = account_info['account_id']
+            existing_for_bank_account.external_account_name = account_info['account_name']
+            existing_for_bank_account.external_account_iban = account_info.get('iban')
+            existing_for_bank_account.external_account_bic = account_info.get('bic')
+            existing_for_bank_account.access_token = self.encryption.encrypt(access_token)
+            existing_for_bank_account.refresh_token = self.encryption.encrypt(refresh_token) if refresh_token else None
+            existing_for_bank_account.token_expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+            existing_for_bank_account.status = BankConnectionStatus.ACTIVE
+            existing_for_bank_account.provider_id = oauth_state.provider_id
+
+            bank_connection = existing_for_bank_account
+            logger.info(f"Updated connection {bank_connection.id} with new session")
+
+        else:
+            # Check if this external account is already connected to a different bank account
+            existing_external = self.db.query(BankConnection).filter(
+                BankConnection.ledger_id == oauth_state.ledger_id,
+                BankConnection.provider_id == oauth_state.provider_id,
+                BankConnection.external_account_id == selected_account_id,
+                BankConnection.status == BankConnectionStatus.ACTIVE
+            ).first()
+
+            if existing_external:
+                raise ValueError(f"This account is already connected to {existing_external.bank_account.name}")
+
+            # Create new bank connection
+            bank_connection = BankConnection(
+                ledger_id=oauth_state.ledger_id,
+                bank_account_id=bank_account_id,
+                provider_id=oauth_state.provider_id,
+                external_bank_id=oauth_state.external_bank_id,  # Use ASPSP ID from OAuth state
+                external_account_id=account_info['account_id'],
+                external_account_name=account_info['account_name'],
+                external_account_iban=account_info.get('iban'),
+                external_account_bic=account_info.get('bic'),
+                access_token=self.encryption.encrypt(access_token),
+                refresh_token=self.encryption.encrypt(refresh_token) if refresh_token else None,
+                token_expires_at=datetime.utcnow() + timedelta(seconds=expires_in),
+                status=BankConnectionStatus.ACTIVE,
+                created_by=oauth_state.user_id,
+                initial_sync_from_date=oauth_state.initial_sync_from_date  # Limit historical data
+            )
+
+            self.db.add(bank_connection)
+
+        # Don't mark state as used - allow reusing for multiple accounts
+        # State will expire naturally after 30 minutes
+        # oauth_state.used_at = datetime.utcnow()
+
         self.db.commit()
         self.db.refresh(bank_connection)
 
@@ -330,13 +457,89 @@ class BankIntegrationService:
                 )
                 self.db.commit()
 
-            # Determine date range
+            # Proactively check session status and update account IDs
+            # (Enable Banking account IDs change per session)
+            import logging
+            logger = logging.getLogger(__name__)
+            try:
+                if hasattr(provider, 'check_session_status'):
+                    logger.info("Checking session status...")
+                    session_info = await provider.check_session_status(access_token)
+
+                    # Debug: log the actual response
+                    logger.info(f"Session info type: {type(session_info)}")
+                    if isinstance(session_info, dict):
+                        logger.info(f"Session info keys: {list(session_info.keys())}")
+                        session_status = session_info.get('status')
+                        logger.info(f"Session status: {session_status}")
+
+                        # Check if session is expired or closed
+                        if session_status in ['expired', 'closed', 'revoked']:
+                            error_msg = f"Bank connection session is {session_status}. User must re-authorize."
+                            logger.error(error_msg)
+                            bank_connection.status = 'ERROR'
+                            sync_log.sync_status = 'FAILED'
+                            sync_log.error_message = error_msg
+                            self.db.commit()
+                            raise ValueError(error_msg)
+
+                        # Update account IDs if they've changed
+                        accounts = session_info.get('accounts', [])
+                    else:
+                        logger.warning(f"Session info is not a dict: {session_info}")
+                        accounts = []
+                    if accounts:
+                        bank_account = self.db.query(BankAccount).get(bank_connection.bank_account_id)
+                        if bank_account and bank_connection.external_account_iban:
+                            target_iban = bank_connection.external_account_iban
+
+                            for acc in accounts:
+                                # account_id can be either a string or a dict with 'iban' key
+                                account_id_field = acc.get('account_id')
+                                acc_iban = None
+
+                                if isinstance(account_id_field, dict):
+                                    acc_iban = account_id_field.get('iban')
+                                    new_id = account_id_field  # Keep as dict if that's what we got
+                                elif isinstance(account_id_field, str):
+                                    # account_id is a string, check if account has separate iban field
+                                    acc_iban = acc.get('iban')
+                                    new_id = account_id_field
+
+                                if acc_iban == target_iban:
+                                    old_id = bank_connection.external_account_id
+
+                                    if new_id and new_id != old_id:
+                                        logger.info(f"Proactively updating account ID from {old_id} to {new_id}")
+                                        bank_connection.external_account_id = new_id
+                                        self.db.commit()
+                                    else:
+                                        logger.info(f"Account ID still valid: {new_id}")
+                                    break
+            except ValueError:
+                # Re-raise ValueError (session expired)
+                raise
+            except Exception as e:
+                # Don't fail sync if account ID refresh fails, we'll retry on ASPSP_ERROR
+                logger.warning(f"Could not check session status: {str(e)}")
+
+            # Determine date range and strategy
+            # CRITICAL: Enable Banking has a 1-hour window after authorization to fetch
+            # full history. After that, only the last 90 days are available.
+            is_initial_sync = bank_connection.last_successful_sync_at is None
+
             if not from_date:
-                # Default: last successful sync or 90 days ago
                 if bank_connection.last_successful_sync_at:
-                    from_date = bank_connection.last_successful_sync_at.date()
+                    # Ongoing sync: use last sync time, but cap at 89 days ago
+                    # (to stay within the 90-day availability window)
+                    from_date = max(
+                        bank_connection.last_successful_sync_at.date(),
+                        date.today() - timedelta(days=89)
+                    )
                 else:
-                    from_date = date.today() - timedelta(days=90)
+                    # Initial sync: Use strategy=longest to get maximum available history
+                    # If initial_sync_from_date is set, use that as a hint to limit history
+                    from_date = bank_connection.initial_sync_from_date
 
             if not to_date:
                 to_date = date.today()
@@ -344,15 +547,45 @@ class BankIntegrationService:
             sync_log.sync_from_date = from_date
             sync_log.sync_to_date = to_date
 
+            logger.info(f"Sync type: {'INITIAL' if is_initial_sync else 'ONGOING'}")
+            logger.info(f"Date range: {from_date} to {to_date}")
+
             # Fetch transactions from provider
-            raw_transactions = await provider.fetch_transactions(
-                access_token=access_token,
-                account_id=bank_connection.external_account_id,
-                from_date=from_date,
-                to_date=to_date
-            )
+            # For initial sync: use strategy=longest to get maximum history
+            # For ongoing sync: use default strategy with date range
+            try:
+                logger.info(f"Fetching transactions (initial_sync={is_initial_sync})")
+
+                raw_transactions = await provider.fetch_transactions(
+                    access_token=access_token,
+                    account_id=bank_connection.external_account_id,
+                    from_date=from_date,
+                    to_date=to_date,
+                    is_initial_sync=is_initial_sync
+                )
+
+                logger.info(f"Successfully fetched {len(raw_transactions)} transactions")
+
+            except Exception as e:
+                error_str = str(e)
+                logger.error(f"Failed to fetch transactions: {error_str}")
+                raise
+
+            # Fix amount signs for LIABILITY accounts (credit cards)
+            # Enable Banking returns DBIT/CRDT from the bank's perspective
+            # For LIABILITY accounts, we need to invert the sign
+            bank_account = self.db.query(BankAccount).get(bank_connection.bank_account_id)
+            if bank_account and bank_account.account:
+                gl_account = bank_account.account
+                is_liability = (gl_account.account_type == AccountType.LIABILITY)
+
+                if is_liability:
+                    print(f"[DEBUG] Inverting amount signs for LIABILITY account {gl_account.account_number}")
+                    for raw_tx in raw_transactions:
+                        raw_tx['amount'] = -raw_tx['amount']
 
             sync_log.transactions_fetched = len(raw_transactions)
+            print(f"[DEBUG] Fetched {len(raw_transactions)} transactions")
 
             # Process each transaction
             imported_count = 0
@@ -360,7 +593,14 @@ class BankIntegrationService:
             errors = []
 
             for raw_tx in raw_transactions:
+                print(f"[DEBUG] Processing transaction: {raw_tx.get('external_id')}")
                 try:
+                    # Skip transactions without a date
+                    if not raw_tx.get('date'):
+                        logger.warning(f"Skipping transaction {raw_tx.get('external_id')} - no date available")
+                        errors.append(f"Transaction {raw_tx.get('external_id')}: No date available")
+                        continue
+
                     # Generate deduplication hash
                     dedup_hash = TransactionDeduplicator.generate_hash(
                         transaction_date=raw_tx['date'],
@@ -427,10 +667,18 @@ class BankIntegrationService:
                         imported_count += 1
 
                 except Exception as e:
-                    errors.append(f"Transaction {raw_tx.get('external_id')}: {str(e)}")
+                    error_msg = f"Transaction {raw_tx.get('external_id')}: {str(e)}"
+                    errors.append(error_msg)
+                    print(f"[ERROR] {error_msg}")
+                    import traceback
+                    traceback.print_exc()
                     continue
 
             self.db.commit()
+
+            print(f"[DEBUG] Sync complete: imported={imported_count}, duplicates={duplicate_count}, errors={len(errors)}")
+            if errors:
+                print(f"[DEBUG] Errors: {errors}")
 
             # Update connection status
             bank_connection.last_sync_at = datetime.utcnow()

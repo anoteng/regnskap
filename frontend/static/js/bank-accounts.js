@@ -55,6 +55,7 @@ class BankAccountsManager {
                         <th>Kontonummer</th>
                         <th>Kontoplan-konto</th>
                         <th>Saldo</th>
+                        <th>Handlinger</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -67,6 +68,10 @@ class BankAccountsManager {
                                 <td>${ba.account_number || '-'}</td>
                                 <td>${account ? `${account.account_number} - ${account.account_name}` : '-'}</td>
                                 <td>${ba.balance} kr</td>
+                                <td>
+                                    <button class="btn-small btn-edit" onclick="bankAccountsManager.showEditBankAccountModal(${ba.id})">Rediger</button>
+                                    <button class="btn-small btn-delete" onclick="bankAccountsManager.deleteBankAccount(${ba.id})">Slett</button>
+                                </td>
                             </tr>
                         `;
                     }).join('')}
@@ -277,8 +282,124 @@ class BankAccountsManager {
             showError(error.message);
         }
     }
+
+    async showEditBankAccountModal(bankAccountId) {
+        try {
+            const bankAccount = await api.getBankAccount(bankAccountId);
+            const account = this.accounts.find(a => a.id === bankAccount.account_id);
+
+            const typeNames = {
+                'CHECKING': 'Brukskonto',
+                'SAVINGS': 'Sparekonto',
+                'CREDIT_CARD': 'Kredittkort'
+            };
+
+            const content = `
+                <form id="edit-bank-account-form">
+                    <div class="form-group">
+                        <label>Navn</label>
+                        <input type="text" id="edit-ba-name" value="${bankAccount.name}" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Type</label>
+                        <select id="edit-ba-type" required>
+                            <option value="CHECKING" ${bankAccount.account_type === 'CHECKING' ? 'selected' : ''}>Brukskonto</option>
+                            <option value="SAVINGS" ${bankAccount.account_type === 'SAVINGS' ? 'selected' : ''}>Sparekonto</option>
+                            <option value="CREDIT_CARD" ${bankAccount.account_type === 'CREDIT_CARD' ? 'selected' : ''}>Kredittkort</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Kontonummer</label>
+                        <input type="text" id="edit-ba-number" value="${bankAccount.account_number || ''}" placeholder="1234.56.78900">
+                    </div>
+                    <div class="form-group">
+                        <label>Kontoplan-konto</label>
+                        <select id="edit-ba-account" required>
+                            ${this.accounts.map(a => `
+                                <option value="${a.id}" ${a.id === bankAccount.account_id ? 'selected' : ''}>
+                                    ${a.account_number} - ${a.account_name}
+                                </option>
+                            `).join('')}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Ingående balans (startsaldo ved nyttår)</label>
+                        <input type="number" id="edit-ba-opening-balance" step="0.01" placeholder="0.00">
+                        <small style="color: var(--text-secondary);">
+                            Setter startsaldo 1. januar 2026. Oppretter IB-transaksjon mot konto 2050.
+                            <br><strong>Obs:</strong> Kan kun settes én gang. Bruk forsiktig!
+                        </small>
+                    </div>
+                    <div class="form-group" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #ddd;">
+                        <p><strong>Nåværende saldo:</strong> ${bankAccount.balance} kr</p>
+                        <p><strong>Koblet til:</strong> ${account ? `${account.account_number} - ${account.account_name}` : '-'}</p>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Lagre endringer</button>
+                </form>
+            `;
+
+            showModal('Rediger bankkonto', content);
+
+            document.getElementById('edit-bank-account-form').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                await this.updateBankAccount(bankAccountId);
+            });
+        } catch (error) {
+            showError(error.message);
+        }
+    }
+
+    async updateBankAccount(bankAccountId) {
+        const name = document.getElementById('edit-ba-name').value;
+        const type = document.getElementById('edit-ba-type').value;
+        const number = document.getElementById('edit-ba-number').value;
+        const accountId = parseInt(document.getElementById('edit-ba-account').value);
+        const openingBalance = document.getElementById('edit-ba-opening-balance').value;
+
+        try {
+            const updateData = {
+                name,
+                account_type: type,
+                account_number: number || null,
+                account_id: accountId
+            };
+
+            // Only include opening_balance if user entered a value
+            if (openingBalance && openingBalance !== '') {
+                updateData.opening_balance = parseFloat(openingBalance);
+            }
+
+            await api.updateBankAccount(bankAccountId, updateData);
+
+            closeModal();
+            showSuccess('Bankkonto oppdatert');
+
+            // Reload accounts and bank accounts
+            await this.loadAccounts();
+            await this.loadBankAccounts();
+        } catch (error) {
+            showError(error.message);
+        }
+    }
+
+    async deleteBankAccount(bankAccountId) {
+        if (!confirm('Er du sikker på at du vil slette denne bankontoen?\n\nDu kan bare slette kontoer uten transaksjoner i år.')) {
+            return;
+        }
+
+        try {
+            await api.deleteBankAccount(bankAccountId);
+            showSuccess('Bankkonto slettet');
+            await this.loadBankAccounts();
+        } catch (error) {
+            showError(error.message);
+        }
+    }
 }
 
 const bankAccountsManager = new BankAccountsManager();
+
+// Expose globally for onclick handlers
+window.bankAccountsManager = bankAccountsManager;
 
 export default bankAccountsManager;

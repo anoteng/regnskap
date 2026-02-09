@@ -14,6 +14,8 @@ class AdminManager {
         await this.loadPlans();
         await this.loadAIConfigs();
         await this.loadAIUsageStats();
+        await this.loadBankProviders();
+        await this.loadBankStats();
         await this.loadUsers();
         this.renderPlans();
         this.renderAIConfigs();
@@ -827,6 +829,402 @@ class AdminManager {
                 <td>${stat.last_used ? formatDate(stat.last_used) : 'Aldri'}</td>
             </tr>
         `;
+    }
+
+    // Bank Integration Provider Management
+
+    async loadBankProviders() {
+        try {
+            const providers = await api.request('/admin/bank-providers/');
+            this.renderBankProviders(providers);
+        } catch (error) {
+            console.error('Error loading bank providers:', error);
+            showError('Kunne ikke laste bankproviders: ' + error.message);
+        }
+    }
+
+    renderBankProviders(providers) {
+        const container = document.getElementById('admin-bank-providers-list');
+
+        if (!providers || providers.length === 0) {
+            container.innerHTML = '<p>Ingen bankproviders konfigurert.</p>';
+            return;
+        }
+
+        const html = `
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Provider</th>
+                        <th>Miljø</th>
+                        <th>Status</th>
+                        <th>Opprettet</th>
+                        <th>Handlinger</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${providers.map(p => `
+                        <tr>
+                            <td>
+                                <strong>${p.display_name}</strong><br>
+                                <small>${p.name}</small>
+                            </td>
+                            <td>
+                                <span class="badge ${p.environment === 'PRODUCTION' ? 'badge-success' : 'badge-warning'}">
+                                    ${p.environment}
+                                </span>
+                            </td>
+                            <td>
+                                <span class="badge ${p.is_active ? 'badge-success' : 'badge-secondary'}">
+                                    ${p.is_active ? 'Aktiv' : 'Inaktiv'}
+                                </span>
+                            </td>
+                            <td>${formatDate(p.created_at)}</td>
+                            <td>
+                                <button class="btn btn-sm" onclick="adminManager.showEditBankProviderModal(${p.id})">
+                                    Rediger
+                                </button>
+                            </td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        `;
+
+        container.innerHTML = html;
+    }
+
+    showNewBankProviderModal() {
+        const html = `
+            <h2>Legg til bankprovider</h2>
+            <form id="bank-provider-form">
+                <div class="form-group">
+                    <label for="provider-name">Provider-navn *</label>
+                    <select id="provider-name" required>
+                        <option value="">Velg provider...</option>
+                        <option value="enable_banking">Enable Banking</option>
+                        <option value="tink">Tink</option>
+                        <option value="neonomics">Neonomics</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="provider-display-name">Visningsnavn *</label>
+                    <input type="text" id="provider-display-name" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="provider-environment">Miljø *</label>
+                    <select id="provider-environment" required>
+                        <option value="SANDBOX">SANDBOX (testing)</option>
+                        <option value="PRODUCTION">PRODUCTION</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="provider-auth-url">Authorization URL</label>
+                    <input type="url" id="provider-auth-url" placeholder="https://api.provider.com/auth">
+                </div>
+
+                <div class="form-group">
+                    <label for="provider-token-url">Token URL</label>
+                    <input type="url" id="provider-token-url" placeholder="https://api.provider.com/token">
+                </div>
+
+                <div class="form-group">
+                    <label for="provider-api-url">API Base URL</label>
+                    <input type="url" id="provider-api-url" placeholder="https://api.provider.com">
+                </div>
+
+                <div class="form-group">
+                    <label for="provider-config">Konfigurasjon (JSON) *</label>
+                    <textarea id="provider-config" rows="6" placeholder='{"api_key":"","app_id":"","certificate_path":"","private_key_path":""}'></textarea>
+                    <small>JSON med API-nøkler og provider-spesifikk konfigurasjon</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="provider-notes">Notater</label>
+                    <textarea id="provider-notes" rows="3"></textarea>
+                </div>
+
+                <div style="margin-top: 1rem;">
+                    <button type="submit" class="btn btn-primary">Opprett provider</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Avbryt</button>
+                </div>
+            </form>
+        `;
+
+        showModal(html);
+
+        document.getElementById('bank-provider-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await this.saveBankProvider();
+        });
+    }
+
+    async showEditBankProviderModal(providerId) {
+        try {
+            const providers = await api.request('/admin/bank-providers/');
+            const provider = providers.find(p => p.id === providerId);
+
+            if (!provider) {
+                showError('Provider ikke funnet');
+                return;
+            }
+
+            const html = `
+                <h2>Rediger bankprovider</h2>
+                <form id="bank-provider-form">
+                    <input type="hidden" id="provider-id" value="${provider.id}">
+
+                    <div class="form-group">
+                        <label>Provider-navn</label>
+                        <input type="text" value="${provider.name}" disabled>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="provider-display-name">Visningsnavn *</label>
+                        <input type="text" id="provider-display-name" value="${provider.display_name}" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="provider-is-active">Status</label>
+                        <select id="provider-is-active">
+                            <option value="true" ${provider.is_active ? 'selected' : ''}>Aktiv</option>
+                            <option value="false" ${!provider.is_active ? 'selected' : ''}>Inaktiv</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="provider-environment">Miljø *</label>
+                        <select id="provider-environment" required>
+                            <option value="SANDBOX" ${provider.environment === 'SANDBOX' ? 'selected' : ''}>SANDBOX</option>
+                            <option value="PRODUCTION" ${provider.environment === 'PRODUCTION' ? 'selected' : ''}>PRODUCTION</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="provider-auth-url">Authorization URL</label>
+                        <input type="url" id="provider-auth-url" value="${provider.authorization_url || ''}">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="provider-token-url">Token URL</label>
+                        <input type="url" id="provider-token-url" value="${provider.token_url || ''}">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="provider-api-url">API Base URL</label>
+                        <input type="url" id="provider-api-url" value="${provider.api_base_url || ''}">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="provider-config">Konfigurasjon (JSON)</label>
+                        <textarea id="provider-config" rows="6">${provider.config_data || '{}'}</textarea>
+                        <small>API-nøkler, sertifikatbaner, etc.</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="provider-notes">Notater</label>
+                        <textarea id="provider-notes" rows="3">${provider.config_notes || ''}</textarea>
+                    </div>
+
+                    <div style="margin-top: 1rem;">
+                        <button type="submit" class="btn btn-primary">Lagre endringer</button>
+                        <button type="button" class="btn btn-secondary" onclick="closeModal()">Avbryt</button>
+                    </div>
+                </form>
+            `;
+
+            showModal(html);
+
+            document.getElementById('bank-provider-form').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                await this.updateBankProvider(providerId);
+            });
+
+        } catch (error) {
+            console.error('Error loading provider:', error);
+            showError('Kunne ikke laste provider: ' + error.message);
+        }
+    }
+
+    async saveBankProvider() {
+        try {
+            const name = document.getElementById('provider-name').value;
+            const displayName = document.getElementById('provider-display-name').value;
+            const environment = document.getElementById('provider-environment').value;
+            const authUrl = document.getElementById('provider-auth-url').value;
+            const tokenUrl = document.getElementById('provider-token-url').value;
+            const apiUrl = document.getElementById('provider-api-url').value;
+            const configData = document.getElementById('provider-config').value;
+            const notes = document.getElementById('provider-notes').value;
+
+            // Validate JSON
+            if (configData) {
+                try {
+                    JSON.parse(configData);
+                } catch (e) {
+                    showError('Ugyldig JSON i konfigurasjon');
+                    return;
+                }
+            }
+
+            await api.request('/admin/bank-providers/', {
+                method: 'POST',
+                body: JSON.stringify({
+                    name,
+                    display_name: displayName,
+                    environment,
+                    authorization_url: authUrl || null,
+                    token_url: tokenUrl || null,
+                    api_base_url: apiUrl || null,
+                    config_data: configData || '{}',
+                    config_notes: notes || null
+                })
+            });
+
+            showSuccess('Provider opprettet');
+            closeModal();
+            this.loadBankProviders();
+
+        } catch (error) {
+            console.error('Error saving provider:', error);
+            showError('Kunne ikke opprette provider: ' + error.message);
+        }
+    }
+
+    async updateBankProvider(providerId) {
+        try {
+            const displayName = document.getElementById('provider-display-name').value;
+            const isActive = document.getElementById('provider-is-active').value === 'true';
+            const environment = document.getElementById('provider-environment').value;
+            const authUrl = document.getElementById('provider-auth-url').value;
+            const tokenUrl = document.getElementById('provider-token-url').value;
+            const apiUrl = document.getElementById('provider-api-url').value;
+            const configData = document.getElementById('provider-config').value;
+            const notes = document.getElementById('provider-notes').value;
+
+            // Validate JSON
+            if (configData) {
+                try {
+                    JSON.parse(configData);
+                } catch (e) {
+                    showError('Ugyldig JSON i konfigurasjon');
+                    return;
+                }
+            }
+
+            await api.request(`/admin/bank-providers/${providerId}`, {
+                method: 'PUT',
+                body: JSON.stringify({
+                    display_name: displayName,
+                    is_active: isActive,
+                    environment,
+                    authorization_url: authUrl || null,
+                    token_url: tokenUrl || null,
+                    api_base_url: apiUrl || null,
+                    config_data: configData,
+                    config_notes: notes || null
+                })
+            });
+
+            showSuccess('Provider oppdatert');
+            closeModal();
+            this.loadBankProviders();
+
+        } catch (error) {
+            console.error('Error updating provider:', error);
+            showError('Kunne ikke oppdatere provider: ' + error.message);
+        }
+    }
+
+    async loadBankStats() {
+        try {
+            const stats = await api.request('/admin/bank-providers/stats');
+            this.renderBankStats(stats);
+        } catch (error) {
+            console.error('Error loading bank stats:', error);
+            // Don't show error, stats are optional
+        }
+    }
+
+    renderBankStats(stats) {
+        const container = document.getElementById('admin-bank-stats');
+
+        if (!stats) {
+            container.innerHTML = '<p>Ingen statistikk tilgjengelig.</p>';
+            return;
+        }
+
+        const html = `
+            <div class="dashboard-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
+                <div class="card">
+                    <h4>Totale synkroniseringer (30d)</h4>
+                    <p class="amount">${stats.sync_stats.total_syncs_30d}</p>
+                </div>
+                <div class="card">
+                    <h4>Suksessrate</h4>
+                    <p class="amount">${stats.sync_stats.success_rate}%</p>
+                </div>
+                <div class="card">
+                    <h4>Transaksjoner importert</h4>
+                    <p class="amount">${stats.sync_stats.total_transactions_imported}</p>
+                </div>
+            </div>
+
+            ${stats.providers && stats.providers.length > 0 ? `
+                <h3 style="margin-top: 1rem;">Koblinger per provider</h3>
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Provider</th>
+                            <th>Koblinger</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${stats.providers.map(p => `
+                            <tr>
+                                <td>${p.display_name}</td>
+                                <td>${p.connections}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            ` : ''}
+
+            ${stats.recent_syncs && stats.recent_syncs.length > 0 ? `
+                <h3 style="margin-top: 1rem;">Siste synkroniseringer</h3>
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Tidspunkt</th>
+                            <th>Status</th>
+                            <th>Hentet</th>
+                            <th>Importert</th>
+                            <th>Feil</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${stats.recent_syncs.map(log => `
+                            <tr>
+                                <td>${formatDate(log.started_at)}</td>
+                                <td>
+                                    <span class="badge ${log.status === 'SUCCESS' ? 'badge-success' : 'badge-danger'}">
+                                        ${log.status}
+                                    </span>
+                                </td>
+                                <td>${log.transactions_fetched}</td>
+                                <td>${log.transactions_imported}</td>
+                                <td>${log.error_message ? `<small>${log.error_message}</small>` : '-'}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            ` : ''}
+        `;
+
+        container.innerHTML = html;
     }
 }
 

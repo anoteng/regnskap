@@ -61,6 +61,7 @@ class PostingQueueManager {
                             <th>Dato</th>
                             <th>Beskrivelse</th>
                             <th>Referanse</th>
+                            <th>Kilde</th>
                             <th>Debet</th>
                             <th>Kredit</th>
                             <th>Handlinger</th>
@@ -97,6 +98,7 @@ class PostingQueueManager {
                     ${!canPost ? `<br><small style="color: var(--danger-color);">⚠ ${!balanced ? 'Ikke balansert' : 'Mangler posteringer'}</small>` : ''}
                 </td>
                 <td>${transaction.reference || '-'}</td>
+                <td>${this.getSourceBadge(transaction.source)}</td>
                 <td class="amount">${totalDebit.toFixed(2)} kr</td>
                 <td class="amount">${totalCredit.toFixed(2)} kr</td>
                 <td>
@@ -113,7 +115,7 @@ class PostingQueueManager {
             </tr>
             <tr id="details-${transaction.id}" class="transaction-details" style="display: none;">
                 <td></td>
-                <td colspan="6">
+                <td colspan="7">
                     <div style="padding: 1rem; background: var(--bg-secondary); border-radius: 4px;">
                         <h4 style="margin-top: 0;">Posteringer</h4>
                         <table class="table" style="margin-bottom: 0;">
@@ -158,6 +160,15 @@ class PostingQueueManager {
             detailsRow.style.display = 'none';
             toggleBtn.textContent = '▶';
         }
+    }
+
+    getSourceBadge(source) {
+        const badges = {
+            'MANUAL': '<span class="badge" style="background: #e5e7eb; color: #374151;">📝 Manuell</span>',
+            'CSV_IMPORT': '<span class="badge" style="background: #dbeafe; color: #1e40af;">📄 CSV</span>',
+            'BANK_SYNC': '<span class="badge" style="background: #d1fae5; color: #065f46;">🏦 Bank</span>'
+        };
+        return badges[source] || badges['MANUAL'];
     }
 
     getBookkeepingTip(transaction) {
@@ -662,9 +673,10 @@ class PostingQueueManager {
 
             // Show loading state
             let button = null;
+            let originalText = '🤖 Få AI-forslag til postering';
             if (event && event.target) {
                 button = event.target;
-                const originalText = button.innerHTML;
+                originalText = button.innerHTML;
                 button.innerHTML = '⏳ Henter forslag...';
                 button.disabled = true;
             }
@@ -679,7 +691,8 @@ class PostingQueueManager {
                 body: JSON.stringify({
                     description,
                     amount,
-                    transaction_date: transactionDate
+                    transaction_date: transactionDate,
+                    transaction_id: transactionId  // Include transaction ID for merchant data lookup
                 })
             });
 
@@ -691,48 +704,17 @@ class PostingQueueManager {
             const result = await response.json();
 
             if (result.success && result.suggestion) {
-                // Clear existing entries
-                document.getElementById('journal-entries-container').innerHTML = '';
-
-                // Add suggested entries
-                result.suggestion.entries.forEach((entry, idx) => {
-                    if (idx > 0) {
-                        this.addJournalEntry();
-                    }
-
-                    // Find account by number
-                    const account = this.accounts.find(a => a.account_number === entry.account);
-
-                    if (account) {
-                        const accountInput = document.querySelector(`.entry-account-input[data-idx="${idx}"]`);
-                        const accountIdInput = document.querySelector(`.entry-account[data-idx="${idx}"]`);
-                        const accountNameDisplay = document.getElementById(`account-name-${idx}`);
-
-                        if (accountInput) accountInput.value = account.account_number;
-                        if (accountIdInput) accountIdInput.value = account.id;
-                        if (accountNameDisplay) accountNameDisplay.textContent = account.account_name;
-                    }
-
-                    const debitInput = document.querySelector(`.entry-debit[data-idx="${idx}"]`);
-                    const creditInput = document.querySelector(`.entry-credit[data-idx="${idx}"]`);
-
-                    if (debitInput) debitInput.value = entry.debit || 0;
-                    if (creditInput) creditInput.value = entry.credit || 0;
-                });
-
-                this.updateBalance();
-
-                // Show explanation
-                if (result.suggestion.explanation) {
-                    showSuccess(`AI-forslag: ${result.suggestion.explanation}`);
-                }
+                // Show confirmation modal instead of auto-applying
+                this.showAISuggestionModal(result.suggestion, transaction);
             } else {
                 throw new Error(result.error || 'AI-forslag feilet');
             }
 
             // Reset button
-            button.innerHTML = originalText;
-            button.disabled = false;
+            if (button) {
+                button.innerHTML = originalText;
+                button.disabled = false;
+            }
 
         } catch (error) {
             showError('Kunne ikke hente AI-forslag: ' + error.message);
@@ -743,6 +725,195 @@ class PostingQueueManager {
                 event.target.disabled = false;
             }
         }
+    }
+
+    showAISuggestionModal(suggestion, transaction) {
+        const modal = document.getElementById('modal');
+        const modalBody = document.getElementById('modal-body');
+
+        // Store the current modal content so we can restore it
+        const previousModalContent = modalBody.innerHTML;
+
+        // Build entries table
+        let entriesHtml = '<table style="width: 100%; border-collapse: collapse; margin: 1rem 0;">';
+        entriesHtml += '<thead><tr style="background: #f3f4f6; text-align: left;">';
+        entriesHtml += '<th style="padding: 0.5rem; border: 1px solid #e5e7eb;">Konto</th>';
+        entriesHtml += '<th style="padding: 0.5rem; border: 1px solid #e5e7eb;">Kontonavn</th>';
+        entriesHtml += '<th style="padding: 0.5rem; border: 1px solid #e5e7eb; text-align: right;">Debet</th>';
+        entriesHtml += '<th style="padding: 0.5rem; border: 1px solid #e5e7eb; text-align: right;">Kredit</th>';
+        entriesHtml += '</tr></thead><tbody>';
+
+        suggestion.entries.forEach(entry => {
+            const account = this.accounts.find(a => a.account_number === entry.account);
+            const accountName = account ? account.account_name : 'Ukjent konto';
+
+            entriesHtml += '<tr>';
+            entriesHtml += `<td style="padding: 0.5rem; border: 1px solid #e5e7eb;">${entry.account}</td>`;
+            entriesHtml += `<td style="padding: 0.5rem; border: 1px solid #e5e7eb;">${accountName}</td>`;
+            entriesHtml += `<td style="padding: 0.5rem; border: 1px solid #e5e7eb; text-align: right;">${entry.debit ? entry.debit.toFixed(2) : '-'}</td>`;
+            entriesHtml += `<td style="padding: 0.5rem; border: 1px solid #e5e7eb; text-align: right;">${entry.credit ? entry.credit.toFixed(2) : '-'}</td>`;
+            entriesHtml += '</tr>';
+        });
+
+        entriesHtml += '</tbody></table>';
+
+        // Build modal content
+        modalBody.innerHTML = `
+            <h2 style="margin-top: 0;">🤖 AI-forslag til postering</h2>
+
+            <div style="background: #f0f9ff; padding: 1rem; border-radius: 4px; margin-bottom: 1rem; border-left: 4px solid #3b82f6;">
+                <strong>Forklaring:</strong>
+                <p style="margin: 0.5rem 0 0 0;">${suggestion.explanation || 'Ingen forklaring tilgjengelig'}</p>
+            </div>
+
+            <h3 style="margin-bottom: 0.5rem;">Foreslåtte posteringer:</h3>
+            ${entriesHtml}
+
+            <div style="display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1.5rem;">
+                <button id="ai-suggestion-cancel" class="btn btn-secondary">
+                    Avbryt
+                </button>
+                <button id="ai-suggestion-accept" class="btn btn-primary">
+                    ✓ Godta forslag
+                </button>
+            </div>
+        `;
+
+        // Show modal
+        modal.style.display = 'block';
+
+        // Function to restore the original modal
+        const restoreModal = (applyAI = false) => {
+            modalBody.innerHTML = previousModalContent;
+
+            // Re-attach form submit listener
+            const form = document.getElementById('edit-transaction-form');
+            if (form) {
+                form.addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    await this.saveTransaction(transaction.id);
+                });
+            }
+
+            // Restore proper modal close handlers (same as showModal in utils.js)
+            const closeBtn = modal.querySelector('.close');
+            if (closeBtn) {
+                closeBtn.onclick = () => {
+                    modal.style.display = 'none';
+                };
+            }
+
+            // Restore background click to close
+            modal.onclick = (event) => {
+                if (event.target === modal) {
+                    modal.style.display = 'none';
+                }
+            };
+
+            // Apply AI suggestion if requested
+            if (applyAI) {
+                // Small delay to ensure DOM is ready
+                setTimeout(() => {
+                    this.applyAISuggestion(suggestion, transaction);
+                    this.updateBalance();
+                }, 10);
+            } else {
+                this.updateBalance();
+            }
+        };
+
+        // Setup AI modal close handlers
+        const aiModalClose = (applyAI = false) => {
+            if (applyAI) {
+                showSuccess('AI-forslag er anvendt');
+            }
+            restoreModal(applyAI);
+        };
+
+        // Handle accept button
+        document.getElementById('ai-suggestion-accept').onclick = () => {
+            aiModalClose(true);
+        };
+
+        // Handle cancel button
+        document.getElementById('ai-suggestion-cancel').onclick = () => {
+            aiModalClose(false);
+        };
+
+        // Close on background click
+        modal.onclick = (e) => {
+            if (e.target === modal) {
+                aiModalClose(false);
+            }
+        };
+
+        // Close modal with close button if it exists
+        const closeBtn = modal.querySelector('.close');
+        if (closeBtn) {
+            closeBtn.onclick = () => {
+                aiModalClose(false);
+            };
+        }
+    }
+
+    applyAISuggestion(suggestion, transaction) {
+        // For bank-synced transactions, preserve the first entry (bank account)
+        // and only apply AI suggestions to counter-entries
+        const isBankSync = transaction.source === 'BANK_SYNC';
+        const existingEntries = transaction.journal_entries || [];
+
+        // Get the bank account number from the first existing entry
+        let bankAccountNumber = null;
+        if (isBankSync && existingEntries.length > 0) {
+            const firstEntry = existingEntries[0];
+            if (firstEntry.account) {
+                bankAccountNumber = firstEntry.account.account_number;
+            }
+        }
+
+        if (!isBankSync || existingEntries.length === 0) {
+            // Clear all entries for non-bank transactions or if no existing entries
+            document.getElementById('journal-entries-container').innerHTML = '';
+        }
+
+        // Add suggested entries, but skip any that match the existing bank account
+        let formIdx = isBankSync && existingEntries.length > 0 ? 1 : 0; // Start at 1 for bank sync (keep entry 0)
+
+        suggestion.entries.forEach((entry) => {
+            // For bank-synced transactions, skip entries that match the bank account (keep original)
+            if (isBankSync && bankAccountNumber && entry.account === bankAccountNumber) {
+                // Skip this entry - it's the bank account we already have
+                return;
+            }
+
+            // Add new entry if needed
+            if (formIdx > 0) {
+                this.addJournalEntry();
+            }
+
+            // Find account by number
+            const account = this.accounts.find(a => a.account_number === entry.account);
+
+            if (account) {
+                const accountInput = document.querySelector(`.entry-account-input[data-idx="${formIdx}"]`);
+                const accountIdInput = document.querySelector(`.entry-account[data-idx="${formIdx}"]`);
+                const accountNameDisplay = document.getElementById(`account-name-${formIdx}`);
+
+                if (accountInput) accountInput.value = account.account_number;
+                if (accountIdInput) accountIdInput.value = account.id;
+                if (accountNameDisplay) accountNameDisplay.textContent = account.account_name;
+            }
+
+            const debitInput = document.querySelector(`.entry-debit[data-idx="${formIdx}"]`);
+            const creditInput = document.querySelector(`.entry-credit[data-idx="${formIdx}"]`);
+
+            if (debitInput) debitInput.value = entry.debit || 0;
+            if (creditInput) creditInput.value = entry.credit || 0;
+
+            formIdx++; // Move to next form entry
+        });
+
+        this.updateBalance();
     }
 }
 

@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#2563eb">
+    <title>Bankkoblinger - Regnskap</title>
+    <link rel="stylesheet" href="/static/css/styles.css?v=4">
+    <style>
+        /* Ensure navbar menu is visible on desktop */
+        @media (min-width: 769px) {
+            .navbar-menu {
+                display: flex !important;
+            }
+        }
+
+        .navbar-menu a.active {
+            background: rgba(255, 255, 255, 0.15);
+            border-bottom: 2px solid white;
+        }
+
+        .connection-card {
+            background: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .connection-info {
+            flex: 1;
+        }
+
+        .connection-info h3 {
+            margin: 0 0 0.5rem 0;
+            font-size: 1.25rem;
+        }
+
+        .connection-info p {
+            margin: 0.25rem 0;
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        .connection-status {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 0.5rem;
+        }
+
+        .connection-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .status-badge {
+            padding: 0.25rem 0.75rem;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+
+        .status-active {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .status-error {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .status-expired {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .sync-progress {
+            margin-top: 1rem;
+            padding: 1rem;
+            background: #f3f4f6;
+            border-radius: 8px;
+            display: none;
+        }
+
+        .sync-progress.active {
+            display: block;
+        }
+
+        .sync-progress .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #cbd5e1;
+            border-top-color: #2563eb;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: #666;
+        }
+
+        .empty-state svg {
+            width: 64px;
+            height: 64px;
+            margin-bottom: 1rem;
+            opacity: 0.5;
+        }
+
+        @media (max-width: 768px) {
+            .connection-card {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .connection-status {
+                align-items: flex-start;
+            }
+
+            .connection-actions {
+                width: 100%;
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <nav class="navbar">
+            <button class="mobile-menu-toggle" id="mobile-menu-toggle" aria-label="Meny">
+                ☰
+            </button>
+            <div class="navbar-brand">
+                <a href="/" style="text-decoration: none; color: inherit;">Regnskap</a>
+            </div>
+            <ul class="navbar-menu" id="navbar-menu">
+                <li><a href="/">Dashboard</a></li>
+                <li><a href="/#bank-accounts">Bankkontoer</a></li>
+                <li><a href="/bank-connections.html" class="active">🏦 Bankkoblinger</a></li>
+                <li><a href="/#transactions">Transaksjoner</a></li>
+                <li><a href="/#posting-queue">📋 Posteringskø</a></li>
+                <li><a href="/#accounts">Kontoer</a></li>
+                <li><a href="/#budgets">Budsjett</a></li>
+                <li><a href="/#reports">Rapporter</a></li>
+            </ul>
+            <div class="navbar-user">
+                <span id="user-name"></span>
+                <button id="logout-btn" class="btn btn-secondary">Logg ut</button>
+            </div>
+        </nav>
+
+        <main class="container">
+            <div class="view-header">
+                <h1>🏦 Bankkoblinger</h1>
+                <button id="connect-bank-btn" class="btn btn-primary">+ Koble til bank</button>
+            </div>
+
+            <p class="subtitle">Automatisk synkronisering av banktransaksjoner</p>
+
+            <div id="sync-progress" class="sync-progress">
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <div class="spinner"></div>
+                    <span id="sync-status-text">Synkroniserer...</span>
+                </div>
+                <div id="sync-result" style="margin-top: 0.5rem; display: none;"></div>
+            </div>
+
+            <div id="connections-list"></div>
+
+            <div id="connection-help" style="margin-top: 2rem; padding: 1rem; background: #f0f9ff; border-left: 4px solid #3b82f6; border-radius: 4px;">
+                <h3 style="margin-top: 0;">💡 Hvordan virker det?</h3>
+                <ul style="margin-bottom: 0;">
+                    <li>Koble til banken din med sikker OAuth-autorisasjon</li>
+                    <li>Transaksjoner synkroniseres automatisk</li>
+                    <li>Nye transaksjoner havner i posteringskøen for gjennomgang</li>
+                    <li>Duplikater (f.eks. fra CSV-import) detekteres automatisk</li>
+                </ul>
+            </div>
+        </main>
+    </div>
+
+    <div id="modal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <div id="modal-body"></div>
+        </div>
+    </div>
+
+    <script type="module" src="/static/js/bank-connections.js"></script>
+</body>
+</html>

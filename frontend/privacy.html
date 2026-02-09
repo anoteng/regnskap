@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Personvernerklæring - Regnskap</title>
+    <link rel="stylesheet" href="/static/css/styles.css?v=4">
+    <style>
+        .legal-content {
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 2rem;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .legal-content h1 {
+            color: #1e40af;
+            margin-bottom: 1rem;
+        }
+        .legal-content h2 {
+            color: #1e40af;
+            margin-top: 2rem;
+            margin-bottom: 1rem;
+            font-size: 1.5rem;
+        }
+        .legal-content p {
+            line-height: 1.6;
+            margin-bottom: 1rem;
+        }
+        .legal-content ul {
+            line-height: 1.8;
+            margin-bottom: 1rem;
+        }
+        .legal-content .last-updated {
+            color: #666;
+            font-size: 0.9rem;
+            margin-bottom: 2rem;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="navbar-brand">
+            <a href="/" style="text-decoration: none; color: inherit;">Regnskap</a>
+        </div>
+    </nav>
+
+    <div class="legal-content">
+        <h1>Personvernerklæring</h1>
+        <p class="last-updated">Sist oppdatert: 8. februar 2026</p>
+
+        <h2>1. Innledning</h2>
+        <p>
+            Regnskap ("vi", "oss", "vår") respekterer ditt personvern og er forpliktet til å beskytte dine personopplysninger.
+            Denne personvernerklæringen beskriver hvordan vi samler inn, bruker og beskytter informasjonen din når du bruker vår tjeneste.
+        </p>
+
+        <h2>2. Behandlingsansvarlig</h2>
+        <p>
+            <strong>Andreas Noteng</strong><br>
+            E-post: <a href="mailto:privatregnskap@noteng.no">privatregnskap@noteng.no</a>
+        </p>
+
+        <h2>3. Hvilke opplysninger samler vi inn?</h2>
+        <p>Vi samler inn følgende typer informasjon:</p>
+        <ul>
+            <li><strong>Kontoinformasjon:</strong> Navn, e-postadresse og passord (kryptert)</li>
+            <li><strong>Regnskapsdata:</strong> Transaksjoner, kontoer, budsjetter og vedlegg du oppretter i systemet</li>
+            <li><strong>Banktransaksjoner:</strong> Når du kobler til banken din via Enable Banking, henter vi:
+                <ul>
+                    <li>Transaksjonshistorikk (dato, beløp, beskrivelse)</li>
+                    <li>Kontonummer og IBAN</li>
+                    <li>Kontosaldo</li>
+                </ul>
+            </li>
+            <li><strong>Teknisk informasjon:</strong> IP-adresse, nettlesertype, innloggingstidspunkt</li>
+        </ul>
+
+        <h2>4. Hvordan bruker vi informasjonen?</h2>
+        <p>Vi bruker dine opplysninger til å:</p>
+        <ul>
+            <li>Tilby og vedlikeholde regnskapstjenesten</li>
+            <li>Synkronisere banktransaksjoner automatisk</li>
+            <li>Autentisere deg og beskytte din konto</li>
+            <li>Forbedre tjenesten og utvikle nye funksjoner</li>
+            <li>Kommunisere med deg om tjenesten</li>
+        </ul>
+
+        <h2>5. Deling av opplysninger</h2>
+        <p>Vi deler <strong>ikke</strong> dine personopplysninger med tredjeparter, med følgende unntak:</p>
+        <ul>
+            <li><strong>Enable Banking:</strong> For å hente banktransaksjoner bruker vi Enable Banking som aggregeringstjeneste.
+                De har tilgang til dine banktransaksjoner i henhold til deres <a href="https://enablebanking.com/privacy" target="_blank">personvernerklæring</a>.</li>
+            <li><strong>Juridiske krav:</strong> Vi kan utlevere informasjon hvis loven krever det.</li>
+        </ul>
+
+        <h2>6. Lagring og sikkerhet</h2>
+        <p>Vi tar din sikkerhet på alvor og implementerer følgende tiltak:</p>
+        <ul>
+            <li><strong>Kryptering:</strong> Passord hashet med bcrypt, OAuth-tokens kryptert med Fernet</li>
+            <li><strong>HTTPS:</strong> All kommunikasjon er kryptert med TLS</li>
+            <li><strong>mTLS:</strong> Bankkommunikasjon bruker gjensidig TLS-autentisering med sertifikater</li>
+            <li><strong>Tilgangskontroll:</strong> Kun du har tilgang til ditt regnskap (eller de du eksplisitt inviterer)</li>
+            <li><strong>Lagringstid:</strong> Data lagres så lenge kontoen din er aktiv. Ved sletting fjernes alle data permanent.</li>
+        </ul>
+
+        <h2>7. Dine rettigheter (GDPR)</h2>
+        <p>Du har følgende rettigheter:</p>
+        <ul>
+            <li><strong>Innsyn:</strong> Du kan når som helst se alle dine data i systemet</li>
+            <li><strong>Retting:</strong> Du kan redigere eller korrigere dine opplysninger</li>
+            <li><strong>Sletting:</strong> Du kan slette kontoen din og alle tilknyttede data fra innstillinger</li>
+            <li><strong>Dataportabilitet:</strong> Du kan eksportere dine data (kontakt oss på e-post)</li>
+            <li><strong>Tilbaketrekking:</strong> Du kan når som helst koble fra bankkoblinger</li>
+        </ul>
+
+        <h2>8. Cookies</h2>
+        <p>
+            Vi bruker kun nødvendige cookies for å holde deg innlogget (sesjonskookie).
+            Vi bruker ikke sporings- eller reklamecookies.
+        </p>
+
+        <h2>9. Endringer i personvernerklæringen</h2>
+        <p>
+            Vi kan oppdatere denne personvernerklæringen fra tid til annen.
+            Endringer publiseres på denne siden med oppdatert dato.
+        </p>
+
+        <h2>10. Kontakt oss</h2>
+        <p>
+            For spørsmål om personvern, kontakt oss på:<br>
+            E-post: <a href="mailto:privatregnskap@noteng.no">privatregnskap@noteng.no</a>
+        </p>
+
+        <p style="margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #e5e7eb;">
+            <a href="/" class="btn btn-secondary">Tilbake til Regnskap</a>
+        </p>
+    </div>
+</body>
+</html>
