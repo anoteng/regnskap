@@ -41,7 +41,7 @@ This is a Norwegian accounting application called "Regnskap" (regnskap = account
 ## Current Work: Bank Integration (Enable Banking)
 
 ### Architecture
-- Provider abstraction pattern (similar to AIService)
+- Provider abstraction pattern for bank integrations
 - Multi-account support: One OAuth session can authorize multiple bank accounts
 - Each external account must be explicitly mapped to an internal bank account
 - Transactions imported as DRAFT status for user review
@@ -144,6 +144,21 @@ systemctl status backend
 - Test bank: DNB sandbox
 - Certificates required for mTLS
 - User has working sandbox credentials configured
+
+## Migration to Hetzner (planned)
+
+Migration scripts are in `/home/andreas/regnskap/migration/`:
+- `export.sh` - Run on old server to create export bundle
+- `setup-new-server.sh` - Run on new Hetzner server to set everything up
+- `MIGRATION_GUIDE.md` - Full step-by-step guide
+
+### Key migration notes
+- **New domain**: `privatregnskap.eu` (was `regnskap.noteng.no`)
+- **Callback URL** is built dynamically from `FRONTEND_URL` in `.env` — no hardcoded URLs
+- **Enable Banking**: All bank connections must be re-authorized after migration (new OAuth sessions)
+- **WebAuthn/Passkeys**: RP_ID changes with domain, so all passkeys must be re-registered
+- **MariaDB encryption at rest** will be enabled on the new server
+- **Enable Banking mTLS certificates** in `/certificates/` must be copied with correct permissions (private.key chmod 600)
 
 ## Language & Communication
 

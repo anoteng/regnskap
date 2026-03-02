@@ -144,8 +144,6 @@ class User(Base):
     full_name = Column(String(255), nullable=False)
     is_active = Column(Boolean, default=True)
     is_admin = Column(Boolean, default=False)
-    ai_access_enabled = Column(Boolean, default=True)
-    ai_access_blocked_reason = Column(Text, nullable=True)
     last_active_ledger_id = Column(Integer, ForeignKey("ledgers.id"))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -243,8 +241,6 @@ class Transaction(Base):
     status = Column(SQLEnum(TransactionStatus), nullable=False, default=TransactionStatus.POSTED)
     source = Column(SQLEnum(TransactionSource), default=TransactionSource.MANUAL)
     source_reference = Column(String(255), nullable=True)
-    ai_suggested = Column(Boolean, default=False)
-    ai_suggestion_data = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -373,16 +369,6 @@ class Receipt(Base):
     amount = Column(DECIMAL(10, 2), nullable=True)
     description = Column(Text, nullable=True)
 
-    # AI-extracted data
-    ai_extracted_date = Column(Date, nullable=True)
-    ai_extracted_amount = Column(DECIMAL(10, 2), nullable=True)
-    ai_extracted_vendor = Column(String(255), nullable=True)
-    ai_extracted_description = Column(Text, nullable=True)
-    ai_suggested_account = Column(String(10), nullable=True)
-    ai_confidence = Column(DECIMAL(3, 2), nullable=True)
-    ai_processed_at = Column(DateTime(timezone=True), nullable=True)
-    ai_processing_error = Column(Text, nullable=True)
-
     # Matching status
     status = Column(SQLEnum(ReceiptStatus), nullable=False, default=ReceiptStatus.PENDING)
     matched_transaction_id = Column(Integer, ForeignKey("transactions.id"), nullable=True)
@@ -424,8 +410,6 @@ class SubscriptionPlan(Base):
     features = Column(Text)  # JSON string of features
     max_documents = Column(Integer, nullable=True)  # NULL = unlimited
     max_monthly_uploads = Column(Integer, nullable=True)  # NULL = unlimited
-    ai_enabled = Column(Boolean, default=False)
-    max_ai_operations_per_month = Column(Integer, nullable=True)  # NULL = unlimited
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -471,47 +455,11 @@ class UserMonthlyUsage(Base):
     year = Column(Integer, nullable=False)
     month = Column(Integer, nullable=False)  # 1-12
     upload_count = Column(Integer, default=0)
-    ai_operations_count = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     # Relationships
     user = relationship("User")
-
-
-class AIConfig(Base):
-    __tablename__ = "ai_config"
-
-    id = Column(Integer, primary_key=True, index=True)
-    provider = Column(String(50), nullable=False)  # openai, anthropic
-    api_key = Column(Text, nullable=False)
-    model = Column(String(100), nullable=False)
-    is_active = Column(Boolean, default=True)
-    max_tokens = Column(Integer, default=4000)
-    temperature = Column(DECIMAL(3, 2), default=0.3)
-    config_notes = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
-
-class AIUsage(Base):
-    __tablename__ = "ai_usage"
-
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    ledger_id = Column(Integer, ForeignKey("ledgers.id"), nullable=True)
-    provider = Column(String(50), nullable=False)
-    model = Column(String(100), nullable=False)
-    operation_type = Column(String(50), nullable=False)
-    tokens_used = Column(Integer, nullable=False)
-    cost_usd = Column(DECIMAL(10, 6), nullable=True)
-    request_data = Column(Text, nullable=True)
-    response_data = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    # Relationships
-    user = relationship("User")
-    ledger = relationship("Ledger")
 
 
 # Bank Integration Models

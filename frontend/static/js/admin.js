@@ -5,21 +5,15 @@ class AdminManager {
     constructor() {
         this.users = [];
         this.plans = [];
-        this.aiConfigs = [];
-        this.aiUsageStats = [];
     }
 
     async init() {
         await this.loadStats();
         await this.loadPlans();
-        await this.loadAIConfigs();
-        await this.loadAIUsageStats();
         await this.loadBankProviders();
         await this.loadBankStats();
         await this.loadUsers();
         this.renderPlans();
-        this.renderAIConfigs();
-        this.renderAIUsageStats();
         this.setupEventListeners();
     }
 
@@ -70,7 +64,6 @@ class AdminManager {
                             <th>Navn</th>
                             <th>Tier</th>
                             <th>Pris (kr/mnd)</th>
-                            <th>AI</th>
                             <th>Maks bilag</th>
                             <th>Maks opplastinger/mnd</th>
                             <th>Status</th>
@@ -92,10 +85,6 @@ class AdminManager {
             ? '<span class="status-badge status-posted">Aktiv</span>'
             : '<span class="status-badge status-draft">Inaktiv</span>';
 
-        const aiBadge = plan.ai_enabled
-            ? '<span class="status-badge status-posted">✓</span>'
-            : '<span class="status-badge status-draft">✗</span>';
-
         const maxDocs = plan.max_documents ? plan.max_documents : 'Ubegrenset';
         const maxUploads = plan.max_monthly_uploads ? plan.max_monthly_uploads : 'Ubegrenset';
 
@@ -104,7 +93,6 @@ class AdminManager {
                 <td>${plan.name}</td>
                 <td>${plan.tier}</td>
                 <td>${plan.price_monthly}</td>
-                <td>${aiBadge}</td>
                 <td>${maxDocs}</td>
                 <td>${maxUploads}</td>
                 <td>${statusBadge}</td>
@@ -413,25 +401,6 @@ class AdminManager {
 
                 <hr style="margin: 2rem 0;">
 
-                <h3>AI-funksjoner</h3>
-
-                <div class="form-group">
-                    <label>
-                        <input type="checkbox" id="edit-plan-ai-enabled" ${plan.ai_enabled ? 'checked' : ''}>
-                        AI-funksjoner aktivert
-                    </label>
-                    <small>Gir tilgang til AI-analyse av kvitteringer og posteringsforslag</small>
-                </div>
-
-                <div class="form-group">
-                    <label>Maksimalt antall AI-operasjoner per måned</label>
-                    <input type="number" id="edit-plan-max-ai-operations" min="0" step="1"
-                        value="${plan.max_ai_operations_per_month || ''}">
-                    <small>Antall AI-operasjoner per måned (0 eller blank = ubegrenset)</small>
-                </div>
-
-                <hr style="margin: 2rem 0;">
-
                 <h3>Begrensninger</h3>
                 <small>La stå tom eller 0 for ubegrenset</small>
 
@@ -474,8 +443,6 @@ class AdminManager {
             const description = document.getElementById('edit-plan-description').value;
             const price_monthly = parseFloat(document.getElementById('edit-plan-price').value);
             const features = document.getElementById('edit-plan-features').value;
-            const ai_enabled = document.getElementById('edit-plan-ai-enabled').checked;
-            const max_ai_operations = document.getElementById('edit-plan-max-ai-operations').value;
             const max_documents = document.getElementById('edit-plan-max-documents').value;
             const max_monthly_uploads = document.getElementById('edit-plan-max-uploads').value;
             const is_active = document.getElementById('edit-plan-active').checked;
@@ -495,8 +462,6 @@ class AdminManager {
                     description,
                     price_monthly,
                     features,
-                    ai_enabled,
-                    max_ai_operations_per_month: max_ai_operations ? parseInt(max_ai_operations) : null,
                     max_documents: max_documents ? parseInt(max_documents) : null,
                     max_monthly_uploads: max_monthly_uploads ? parseInt(max_monthly_uploads) : null,
                     is_active
@@ -510,325 +475,6 @@ class AdminManager {
         } catch (error) {
             showError('Kunne ikke lagre endringer: ' + error.message);
         }
-    }
-
-    async loadAIConfigs() {
-        try {
-            this.aiConfigs = await api.request('/admin/ai-config');
-        } catch (error) {
-            console.error('Error loading AI configs:', error);
-        }
-    }
-
-    renderAIConfigs() {
-        const container = document.getElementById('admin-ai-configs-list');
-        if (!container) return;
-
-        if (this.aiConfigs.length === 0) {
-            container.innerHTML = `
-                <p>Ingen AI-konfigurasjoner funnet.</p>
-                <button class="btn btn-primary" onclick="adminManager.showNewAIConfigModal()">+ Legg til AI-konfigurasjon</button>
-            `;
-            return;
-        }
-
-        const html = `
-            <div class="table-wrapper">
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>Provider</th>
-                            <th>Modell</th>
-                            <th>Max tokens</th>
-                            <th>Temperature</th>
-                            <th>Status</th>
-                            <th>Handlinger</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${this.aiConfigs.map(config => this.renderAIConfigRow(config)).join('')}
-                    </tbody>
-                </table>
-            </div>
-            <button class="btn btn-primary" onclick="adminManager.showNewAIConfigModal()" style="margin-top: 1rem;">+ Legg til AI-konfigurasjon</button>
-        `;
-
-        container.innerHTML = html;
-    }
-
-    renderAIConfigRow(config) {
-        const statusBadge = config.is_active
-            ? '<span class="status-badge status-posted">Aktiv</span>'
-            : '<span class="status-badge status-draft">Inaktiv</span>';
-
-        const maskedKey = config.api_key ? '***' + config.api_key.slice(-4) : 'Ikke satt';
-
-        return `
-            <tr>
-                <td>${config.provider}</td>
-                <td>${config.model}</td>
-                <td>${config.max_tokens}</td>
-                <td>${config.temperature}</td>
-                <td>${statusBadge}</td>
-                <td>
-                    <button class="btn btn-sm btn-primary" onclick="adminManager.showEditAIConfigModal(${config.id})">
-                        Rediger
-                    </button>
-                    <button class="btn btn-sm btn-danger" onclick="adminManager.deleteAIConfig(${config.id})">
-                        Slett
-                    </button>
-                </td>
-            </tr>
-        `;
-    }
-
-    async showNewAIConfigModal() {
-        const content = `
-            <h2>Ny AI-konfigurasjon</h2>
-
-            <div class="form-group">
-                <label>Provider</label>
-                <select id="new-ai-provider">
-                    <option value="openai">OpenAI</option>
-                    <option value="anthropic">Anthropic (Claude)</option>
-                </select>
-            </div>
-
-            <div class="form-group">
-                <label>API-nøkkel</label>
-                <input type="password" id="new-ai-key" placeholder="sk-...">
-            </div>
-
-            <div class="form-group">
-                <label>Modell</label>
-                <input type="text" id="new-ai-model" placeholder="gpt-4o eller claude-3-5-sonnet-20241022">
-                <small>Eksempler: gpt-4o, gpt-4o-mini, claude-3-5-sonnet-20241022, claude-3-haiku-20240307</small>
-            </div>
-
-            <div class="form-group">
-                <label>Max tokens</label>
-                <input type="number" id="new-ai-max-tokens" value="4000" min="100" step="100">
-            </div>
-
-            <div class="form-group">
-                <label>Temperature</label>
-                <input type="number" id="new-ai-temperature" value="0.3" min="0" max="2" step="0.1">
-                <small>0 = deterministisk, 2 = veldig kreativ</small>
-            </div>
-
-            <div class="form-group">
-                <label>Notater</label>
-                <textarea id="new-ai-notes" rows="2" placeholder="Notater om denne konfigurasjonen..."></textarea>
-            </div>
-
-            <div style="display: flex; gap: 1rem; margin-top: 2rem;">
-                <button class="btn btn-primary" onclick="adminManager.saveNewAIConfig()">Opprett</button>
-                <button class="btn btn-secondary" onclick="closeModal()">Avbryt</button>
-            </div>
-        `;
-
-        showModal('Ny AI-konfigurasjon', content);
-    }
-
-    async saveNewAIConfig() {
-        try {
-            const provider = document.getElementById('new-ai-provider').value;
-            const api_key = document.getElementById('new-ai-key').value;
-            const model = document.getElementById('new-ai-model').value;
-            const max_tokens = parseInt(document.getElementById('new-ai-max-tokens').value);
-            const temperature = parseFloat(document.getElementById('new-ai-temperature').value);
-            const config_notes = document.getElementById('new-ai-notes').value;
-
-            if (!api_key || !model) {
-                showError('API-nøkkel og modell er påkrevd');
-                return;
-            }
-
-            await api.request('/admin/ai-config', {
-                method: 'POST',
-                body: JSON.stringify({
-                    provider,
-                    api_key,
-                    model,
-                    max_tokens,
-                    temperature,
-                    config_notes
-                })
-            });
-
-            closeModal();
-            showSuccess('AI-konfigurasjon opprettet!');
-            await this.loadAIConfigs();
-            this.renderAIConfigs();
-        } catch (error) {
-            showError('Kunne ikke opprette AI-konfigurasjon: ' + error.message);
-        }
-    }
-
-    async showEditAIConfigModal(configId) {
-        try {
-            const config = this.aiConfigs.find(c => c.id === configId);
-            if (!config) {
-                showError('Kunne ikke finne AI-konfigurasjon');
-                return;
-            }
-
-            const content = `
-                <h2>Rediger AI-konfigurasjon</h2>
-
-                <div class="form-group">
-                    <label>Provider (kan ikke endres)</label>
-                    <input type="text" value="${config.provider}" disabled>
-                </div>
-
-                <div class="form-group">
-                    <label>API-nøkkel</label>
-                    <input type="password" id="edit-ai-key" placeholder="La stå tom for å beholde">
-                    <small>Nåværende: ***${config.api_key ? config.api_key.slice(-4) : ''}</small>
-                </div>
-
-                <div class="form-group">
-                    <label>Modell</label>
-                    <input type="text" id="edit-ai-model" value="${config.model}">
-                </div>
-
-                <div class="form-group">
-                    <label>Max tokens</label>
-                    <input type="number" id="edit-ai-max-tokens" value="${config.max_tokens}" min="100" step="100">
-                </div>
-
-                <div class="form-group">
-                    <label>Temperature</label>
-                    <input type="number" id="edit-ai-temperature" value="${config.temperature}" min="0" max="2" step="0.1">
-                </div>
-
-                <div class="form-group">
-                    <label>
-                        <input type="checkbox" id="edit-ai-active" ${config.is_active ? 'checked' : ''}>
-                        Aktiv konfigurasjon
-                    </label>
-                    <small>Kun én konfigurasjon kan være aktiv om gangen</small>
-                </div>
-
-                <div class="form-group">
-                    <label>Notater</label>
-                    <textarea id="edit-ai-notes" rows="2">${config.config_notes || ''}</textarea>
-                </div>
-
-                <div style="display: flex; gap: 1rem; margin-top: 2rem;">
-                    <button class="btn btn-primary" onclick="adminManager.saveAIConfig(${configId})">Lagre endringer</button>
-                    <button class="btn btn-secondary" onclick="closeModal()">Avbryt</button>
-                </div>
-            `;
-
-            showModal('Rediger AI-konfigurasjon', content);
-        } catch (error) {
-            showError('Kunne ikke laste AI-konfigurasjon: ' + error.message);
-        }
-    }
-
-    async saveAIConfig(configId) {
-        try {
-            const api_key = document.getElementById('edit-ai-key').value || null;
-            const model = document.getElementById('edit-ai-model').value;
-            const max_tokens = parseInt(document.getElementById('edit-ai-max-tokens').value);
-            const temperature = parseFloat(document.getElementById('edit-ai-temperature').value);
-            const is_active = document.getElementById('edit-ai-active').checked;
-            const config_notes = document.getElementById('edit-ai-notes').value;
-
-            const payload = {
-                model,
-                max_tokens,
-                temperature,
-                is_active,
-                config_notes
-            };
-
-            if (api_key) {
-                payload.api_key = api_key;
-            }
-
-            await api.request(`/admin/ai-config/${configId}`, {
-                method: 'PATCH',
-                body: JSON.stringify(payload)
-            });
-
-            closeModal();
-            showSuccess('AI-konfigurasjon oppdatert!');
-            await this.loadAIConfigs();
-            this.renderAIConfigs();
-        } catch (error) {
-            showError('Kunne ikke lagre endringer: ' + error.message);
-        }
-    }
-
-    async deleteAIConfig(configId) {
-        if (!confirm('Er du sikker på at du vil slette denne AI-konfigurasjonen?')) {
-            return;
-        }
-
-        try {
-            await api.request(`/admin/ai-config/${configId}`, {
-                method: 'DELETE'
-            });
-
-            showSuccess('AI-konfigurasjon slettet!');
-            await this.loadAIConfigs();
-            this.renderAIConfigs();
-        } catch (error) {
-            showError('Kunne ikke slette AI-konfigurasjon: ' + error.message);
-        }
-    }
-
-    async loadAIUsageStats() {
-        try {
-            this.aiUsageStats = await api.request('/admin/ai-usage/users');
-        } catch (error) {
-            console.error('Error loading AI usage stats:', error);
-        }
-    }
-
-    renderAIUsageStats() {
-        const container = document.getElementById('admin-ai-usage-list');
-        if (!container) return;
-
-        if (this.aiUsageStats.length === 0) {
-            container.innerHTML = '<p>Ingen AI-bruk registrert ennå.</p>';
-            return;
-        }
-
-        const html = `
-            <div class="table-wrapper">
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>Bruker</th>
-                            <th>Operasjoner</th>
-                            <th>Tokens brukt</th>
-                            <th>Kostnad (USD)</th>
-                            <th>Sist brukt</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${this.aiUsageStats.map(stat => this.renderAIUsageRow(stat)).join('')}
-                    </tbody>
-                </table>
-            </div>
-        `;
-
-        container.innerHTML = html;
-    }
-
-    renderAIUsageRow(stat) {
-        return `
-            <tr>
-                <td>${stat.user_name}<br><small>${stat.user_email}</small></td>
-                <td>${stat.total_operations}</td>
-                <td>${stat.total_tokens.toLocaleString()}</td>
-                <td>$${stat.total_cost_usd.toFixed(4)}</td>
-                <td>${stat.last_used ? formatDate(stat.last_used) : 'Aldri'}</td>
-            </tr>
-        `;
     }
 
     // Bank Integration Provider Management
