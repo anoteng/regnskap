@@ -5,7 +5,7 @@ from typing import List
 from decimal import Decimal
 
 from backend.database import get_db
-from ..models import User, Ledger, Budget, BudgetLine, JournalEntry, Account
+from ..models import User, Ledger, Budget, BudgetLine, JournalEntry, Account, Transaction
 from ..schemas import (
     Budget as BudgetSchema,
     BudgetCreate,
@@ -93,7 +93,7 @@ def set_budget_lines(
         # Delete existing lines for this account
         db.query(BudgetLine).filter(
             BudgetLine.budget_id == budget_id,
-            BudgetLine.account_number == line_input.account_number
+            BudgetLine.account_id == line_input.account_id
         ).delete()
 
         # Calculate monthly amounts based on distribution type
@@ -124,7 +124,7 @@ def set_budget_lines(
         for month in range(1, 13):
             budget_line = BudgetLine(
                 budget_id=budget_id,
-                account_number=line_input.account_number,
+                account_id=line_input.account_id,
                 period=month,
                 amount=monthly_amounts[month - 1]
             )
@@ -156,49 +156,51 @@ def get_budget_report(
         BudgetLine.budget_id == budget_id
     ).all()
 
-    # Group budget lines by account
+    # Group budget lines by account_id
     budget_by_account = {}
     for line in budget_lines:
-        if line.account_number not in budget_by_account:
-            budget_by_account[line.account_number] = {}
-        budget_by_account[line.account_number][line.period] = float(line.amount)
+        if line.account_id not in budget_by_account:
+            budget_by_account[line.account_id] = {}
+        budget_by_account[line.account_id][line.period] = float(line.amount)
 
     # Get actual amounts from journal entries for this year
     actual_query = db.query(
-        JournalEntry.account_number,
-        extract('month', JournalEntry.entry_date).label('month'),
+        JournalEntry.account_id,
+        extract('month', Transaction.transaction_date).label('month'),
         func.sum(JournalEntry.debit - JournalEntry.credit).label('amount')
     ).join(
-        JournalEntry.transaction
+        Transaction, JournalEntry.transaction_id == Transaction.id
     ).filter(
-        JournalEntry.transaction.has(ledger_id=current_ledger.id),
-        extract('year', JournalEntry.entry_date) == budget.year
+        Transaction.ledger_id == current_ledger.id,
+        extract('year', Transaction.transaction_date) == budget.year
     ).group_by(
-        JournalEntry.account_number,
+        JournalEntry.account_id,
         'month'
     ).all()
 
-    # Group actual amounts by account and month
+    # Group actual amounts by account_id and month
     actual_by_account = {}
     for row in actual_query:
-        if row.account_number not in actual_by_account:
-            actual_by_account[row.account_number] = {}
-        actual_by_account[row.account_number][int(row.month)] = float(row.amount)
+        if row.account_id not in actual_by_account:
+            actual_by_account[row.account_id] = {}
+        actual_by_account[row.account_id][int(row.month)] = float(row.amount)
 
     # Get account details
-    all_account_numbers = set(budget_by_account.keys()) | set(actual_by_account.keys())
+    all_account_ids = set(budget_by_account.keys()) | set(actual_by_account.keys())
     accounts = db.query(Account).filter(
-        Account.account_number.in_(all_account_numbers)
+        Account.id.in_(all_account_ids)
     ).all()
-    account_map = {acc.account_number: acc for acc in accounts}
+    account_map = {acc.id: acc for acc in accounts}
 
     # Build report data
     report_lines = []
-    for account_number in sorted(all_account_numbers, key=lambda x: int(x) if x.isdigit() else x):
-        account = account_map.get(account_number)
+    for account_id in sorted(all_account_ids, key=lambda aid: account_map[aid].account_number if aid in account_map else str(aid)):
+        account = account_map.get(account_id)
         line = {
-            'account_number': account_number,
+            'account_id': account_id,
+            'account_number': account.account_number if account else str(account_id),
             'account_name': account.account_name if account else 'Unknown',
+            'account_type': account.account_type.value if account else 'EXPENSE',
             'months': []
         }
 
@@ -206,8 +208,8 @@ def get_budget_report(
         total_actual = 0
 
         for month in range(1, 13):
-            budget_amount = budget_by_account.get(account_number, {}).get(month, 0)
-            actual_amount = actual_by_account.get(account_number, {}).get(month, 0)
+            budget_amount = budget_by_account.get(account_id, {}).get(month, 0)
+            actual_amount = actual_by_account.get(account_id, {}).get(month, 0)
             variance = actual_amount - budget_amount
 
             total_budget += budget_amount
@@ -230,6 +232,60 @@ def get_budget_report(
         'budget': budget,
         'lines': report_lines
     }
+
+
+@router.get("/{budget_id}/drilldown")
+def get_budget_drilldown(
+    budget_id: int,
+    account_id: int = None,
+    month: int = None,
+    current_user: User = Depends(get_current_active_user),
+    current_ledger: Ledger = Depends(get_current_ledger),
+    db: Session = Depends(get_db)
+):
+    """Get transactions for a specific account and month in a budget year"""
+    budget = db.query(Budget).filter(
+        Budget.id == budget_id,
+        Budget.ledger_id == current_ledger.id
+    ).first()
+
+    if not budget:
+        raise HTTPException(status_code=404, detail="Budget not found")
+
+    if not account_id:
+        raise HTTPException(status_code=400, detail="account_id required")
+
+    query = db.query(
+        Transaction.id,
+        Transaction.transaction_date,
+        Transaction.description,
+        Transaction.status,
+        JournalEntry.debit,
+        JournalEntry.credit
+    ).join(
+        JournalEntry, JournalEntry.transaction_id == Transaction.id
+    ).filter(
+        Transaction.ledger_id == current_ledger.id,
+        JournalEntry.account_id == account_id,
+        extract('year', Transaction.transaction_date) == budget.year
+    )
+
+    if month:
+        query = query.filter(
+            extract('month', Transaction.transaction_date) == month
+        )
+
+    rows = query.order_by(Transaction.transaction_date).all()
+
+    return [{
+        'id': r.id,
+        'date': r.transaction_date.isoformat(),
+        'description': r.description,
+        'status': r.status.value if hasattr(r.status, 'value') else r.status,
+        'debit': float(r.debit),
+        'credit': float(r.credit),
+        'amount': float(r.debit - r.credit)
+    } for r in rows]
 
 
 @router.delete("/{budget_id}")

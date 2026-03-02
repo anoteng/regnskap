@@ -70,17 +70,53 @@ class TransactionSource(str, enum.Enum):
     BANK_SYNC = "BANK_SYNC"
 
 
+class ChartOfAccountsTemplate(Base):
+    __tablename__ = "chart_of_accounts_templates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), unique=True, nullable=False)
+    display_name = Column(String(255), nullable=False)
+    description = Column(Text)
+    is_active = Column(Boolean, default=True)
+    is_default = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    template_accounts = relationship("TemplateAccount", back_populates="template", cascade="all, delete-orphan")
+    ledgers = relationship("Ledger", back_populates="chart_template")
+
+
+class TemplateAccount(Base):
+    __tablename__ = "template_accounts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    template_id = Column(Integer, ForeignKey("chart_of_accounts_templates.id"), nullable=False)
+    account_number = Column(String(10), nullable=False)
+    account_name = Column(String(255), nullable=False)
+    account_type = Column(SQLEnum(AccountType), nullable=False)
+    parent_account_number = Column(String(10), nullable=True)
+    description = Column(Text)
+    is_default = Column(Boolean, default=True, comment="If true, included by default when creating ledger")
+    sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    template = relationship("ChartOfAccountsTemplate", back_populates="template_accounts")
+
+
 class Ledger(Base):
     __tablename__ = "ledgers"
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(255), nullable=False)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    chart_template_id = Column(Integer, ForeignKey("chart_of_accounts_templates.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     is_active = Column(Boolean, default=True)
 
     creator = relationship("User", foreign_keys=[created_by], back_populates="created_ledgers")
+    chart_template = relationship("ChartOfAccountsTemplate", back_populates="ledgers")
     members = relationship("LedgerMember", back_populates="ledger")
+    accounts = relationship("Account", back_populates="ledger", cascade="all, delete-orphan")
     bank_accounts = relationship("BankAccount", back_populates="ledger")
     transactions = relationship("Transaction", back_populates="ledger")
     categories = relationship("Category", back_populates="ledger")
@@ -152,33 +188,26 @@ class PasswordResetToken(Base):
 
 class Account(Base):
     __tablename__ = "accounts"
+    __table_args__ = (
+        # account_number must be unique per ledger
+        # Using tuple syntax to define composite unique constraint
+        {'mysql_engine': 'InnoDB', 'mysql_charset': 'utf8mb4'},
+    )
 
     id = Column(Integer, primary_key=True, index=True)
-    account_number = Column(String(10), unique=True, nullable=False)
+    ledger_id = Column(Integer, ForeignKey("ledgers.id"), nullable=False)
+    account_number = Column(String(10), nullable=False)
     account_name = Column(String(255), nullable=False)
     account_type = Column(SQLEnum(AccountType), nullable=False)
     parent_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
     is_active = Column(Boolean, default=True)
-    is_system = Column(Boolean, default=True)
     description = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    ledger = relationship("Ledger", back_populates="accounts")
     parent_account = relationship("Account", remote_side=[id], backref="sub_accounts")
     journal_entries = relationship("JournalEntry", back_populates="account")
-    ledger_settings = relationship("LedgerAccountSettings", back_populates="account")
-
-
-class LedgerAccountSettings(Base):
-    __tablename__ = "ledger_account_settings"
-
-    ledger_id = Column(Integer, ForeignKey("ledgers.id"), primary_key=True)
-    account_id = Column(Integer, ForeignKey("accounts.id"), primary_key=True)
-    is_hidden = Column(Boolean, default=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
-    ledger = relationship("Ledger")
-    account = relationship("Account", back_populates="ledger_settings")
+    bank_accounts = relationship("BankAccount", back_populates="account")
 
 
 class BankAccount(Base):
@@ -284,7 +313,7 @@ class BudgetLine(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     budget_id = Column(Integer, ForeignKey("budgets.id"), nullable=False)
-    account_number = Column(String(10), ForeignKey("accounts.account_number"), nullable=False)
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)
     period = Column(Integer, nullable=False)  # 1-12 for months
     amount = Column(DECIMAL(15, 2), nullable=False, default=0)
 

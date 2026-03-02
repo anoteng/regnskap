@@ -304,8 +304,13 @@ async def complete_login(
                 detail="User not found or inactive"
             )
 
-        # Create access token
-        access_token = create_access_token(data={"sub": user.email})
+        # Create access token with configured expiration
+        from datetime import timedelta
+        access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
+        access_token = create_access_token(
+            data={"sub": user.email},
+            expires_delta=access_token_expires
+        )
 
         return {
             'access_token': access_token,

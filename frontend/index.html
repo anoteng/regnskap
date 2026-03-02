@@ -138,7 +138,13 @@
                         <button id="new-transaction-btn" class="btn btn-primary">Ny transaksjon</button>
                     </div>
 
-                    <div class="filters">
+                    <div class="filters" style="display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;">
+                        <select id="filter-account" style="min-width: 200px;">
+                            <option value="">Alle kontoer</option>
+                        </select>
+                        <select id="filter-month" style="min-width: 160px;">
+                            <option value="">Velg periode...</option>
+                        </select>
                         <input type="date" id="filter-start-date">
                         <input type="date" id="filter-end-date">
                         <button id="filter-btn" class="btn btn-secondary">Filtrer</button>

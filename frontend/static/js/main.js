@@ -7,7 +7,7 @@ import postingQueueManager from './posting-queue.js';
 import receiptsManager from './receipts.js';
 import reportsManager from './reports.js';
 import adminManager from './admin.js';
-import { formatCurrency, getTodayDate, getFirstDayOfMonth, getLastDayOfMonth, showModal, closeModal, showError, showSuccess } from './utils.js';
+import { formatCurrency, formatDate, getTodayDate, getFirstDayOfMonth, getLastDayOfMonth, showModal, closeModal, showError, showSuccess } from './utils.js';
 
 // Make auth available globally for passkey management
 window.auth = auth;
@@ -577,26 +577,54 @@ class App {
                             <tbody id="budget-accounts-list">
             `;
 
+            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Des'];
+
             for (const account of budgetAccounts) {
-                const existingLine = budget.lines?.find(l => l.account_number === account.account_number);
-                const totalAmount = existingLine ?
-                    budget.lines.filter(l => l.account_number === account.account_number)
-                        .reduce((sum, l) => sum + parseFloat(l.amount), 0) : 0;
+                const accountLines = budget.lines?.filter(l => l.account_id === account.id) || [];
+                const totalAmount = accountLines.reduce((sum, l) => sum + parseFloat(l.amount), 0);
+
+                // Detect existing distribution type
+                let existingDistType = '';
+                let monthlyAmounts = [0,0,0,0,0,0,0,0,0,0,0,0];
+                if (accountLines.length === 12) {
+                    for (const l of accountLines) {
+                        monthlyAmounts[l.period - 1] = parseFloat(l.amount);
+                    }
+                    const allSame = monthlyAmounts.every(a => Math.abs(a - monthlyAmounts[0]) < 0.01);
+                    if (allSame && monthlyAmounts[0] !== 0) {
+                        existingDistType = 'same';
+                    } else if (totalAmount !== 0) {
+                        existingDistType = 'manual';
+                    }
+                }
 
                 html += `
-                    <tr data-account="${account.account_number}">
+                    <tr data-account-id="${account.id}">
                         <td><strong>${account.account_number}</strong> ${account.account_name}</td>
                         <td>
-                            <select class="distribution-type" data-account="${account.account_number}">
+                            <select class="distribution-type" onchange="app.onDistributionTypeChanged(this)">
                                 <option value="">Ikke satt</option>
-                                <option value="same">Samme beløp alle måneder</option>
+                                <option value="same" ${existingDistType === 'same' ? 'selected' : ''}>Samme beløp alle måneder</option>
                                 <option value="total">Totalsum fordelt på 12 måneder</option>
+                                <option value="manual" ${existingDistType === 'manual' ? 'selected' : ''}>Spesifiser per måned</option>
                             </select>
                         </td>
-                        <td>
+                        <td class="budget-amount-cell">
                             <input type="number" step="0.01" class="budget-amount"
-                                data-account="${account.account_number}"
-                                placeholder="0.00" value="${totalAmount || ''}">
+                                placeholder="0.00" value="${existingDistType === 'same' ? monthlyAmounts[0] : (existingDistType === 'manual' ? '' : (totalAmount || ''))}"
+                                style="${existingDistType === 'manual' ? 'display:none' : ''}">
+                            <div class="monthly-amounts" style="${existingDistType === 'manual' ? '' : 'display:none'}">
+                                <div style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px;">
+                                    ${monthNames.map((m, i) => `
+                                        <div>
+                                            <label style="font-size: 0.75rem; color: #666;">${m}</label>
+                                            <input type="number" step="0.01" class="month-amount" data-month="${i}"
+                                                style="width: 100%; padding: 2px 4px; font-size: 0.85rem;"
+                                                placeholder="0" value="${existingDistType === 'manual' ? (monthlyAmounts[i] || '') : ''}">
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
                         </td>
                     </tr>
                 `;
@@ -623,22 +651,51 @@ class App {
         }
     }
 
+    onDistributionTypeChanged(select) {
+        const row = select.closest('tr');
+        const amountInput = row.querySelector('.budget-amount');
+        const monthlyDiv = row.querySelector('.monthly-amounts');
+
+        if (select.value === 'manual') {
+            amountInput.style.display = 'none';
+            monthlyDiv.style.display = '';
+        } else {
+            amountInput.style.display = '';
+            monthlyDiv.style.display = 'none';
+        }
+    }
+
     async saveBudgetLines(budgetId) {
         try {
             const rows = document.querySelectorAll('#budget-accounts-list tr');
             const lines = [];
 
             for (const row of rows) {
-                const accountNumber = row.dataset.account;
+                const accountId = parseInt(row.dataset.accountId);
                 const distType = row.querySelector('.distribution-type').value;
-                const amount = parseFloat(row.querySelector('.budget-amount').value) || 0;
 
-                if (distType && amount !== 0) {
-                    lines.push({
-                        account_number: accountNumber,
-                        distribution_type: distType,
-                        amount: amount
-                    });
+                if (!distType) continue;
+
+                if (distType === 'manual') {
+                    const monthInputs = row.querySelectorAll('.month-amount');
+                    const monthlyAmounts = Array.from(monthInputs).map(inp => parseFloat(inp.value) || 0);
+                    const hasAny = monthlyAmounts.some(a => a !== 0);
+                    if (hasAny) {
+                        lines.push({
+                            account_id: accountId,
+                            distribution_type: 'manual',
+                            monthly_amounts: monthlyAmounts
+                        });
+                    }
+                } else {
+                    const amount = parseFloat(row.querySelector('.budget-amount').value) || 0;
+                    if (amount !== 0) {
+                        lines.push({
+                            account_id: accountId,
+                            distribution_type: distType,
+                            amount: amount
+                        });
+                    }
                 }
             }
 
@@ -661,69 +718,168 @@ class App {
             const report = await api.getBudgetReport(budgetId);
             const budget = report.budget;
             const lines = report.lines;
+            this._currentBudgetId = budgetId;
 
-            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Des'];
+            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Des'];
+            const now = new Date();
+            const currentMonth = now.getMonth(); // 0-indexed
+            const prevMonth = currentMonth === 0 ? 11 : currentMonth - 1;
+
+            // Default visible months: previous, current, and total
+            const defaultVisibleMonths = new Set([prevMonth, currentMonth]);
+
+            // Split lines by type
+            const expenseLines = lines.filter(l => l.account_type === 'EXPENSE');
+            const revenueLines = lines.filter(l => l.account_type === 'REVENUE');
+            const otherLines = lines.filter(l => l.account_type !== 'EXPENSE' && l.account_type !== 'REVENUE');
+
+            // Positive variance = over budget = red, negative = under budget = green
+            const varianceColor = (variance) => {
+                if (variance === 0) return 'inherit';
+                return variance > 0 ? '#c0392b' : '#27ae60';
+            };
+
+            const renderSection = (title, sectionLines, sectionId, defaultShow) => {
+                if (sectionLines.length === 0) return '';
+                let s = `
+                    <div style="margin-bottom: 1.5rem;">
+                        <h3 style="cursor: pointer; user-select: none; margin-bottom: 0.5rem;"
+                            onclick="app.toggleBudgetSection('${sectionId}')">
+                            <span id="${sectionId}-arrow">${defaultShow ? '▼' : '▶'}</span> ${title}
+                        </h3>
+                        <div id="${sectionId}" style="display: ${defaultShow ? 'block' : 'none'}; overflow-x: auto;">
+                            <table class="data-table" style="width: 100%; font-size: 0.85rem;">
+                                <thead>
+                                    <tr>
+                                        <th style="position: sticky; left: 0; background: var(--bg-primary, white); z-index: 1; min-width: 200px;">Konto</th>
+                `;
+                for (let i = 0; i < 12; i++) {
+                    const visible = defaultVisibleMonths.has(i);
+                    s += `<th class="budget-month-col budget-month-${i}" style="text-align: right;${visible ? '' : ' display: none;'}">${monthNames[i]}</th>`;
+                }
+                s += `<th style="text-align: right; background: var(--bg-secondary, #f5f5f5);">Hittil i år</th>`;
+                s += `<th style="text-align: right;">Totalt</th></tr></thead><tbody>`;
+
+                // Sum row
+                const totals = { months: Array(12).fill(null).map(() => ({budget: 0, actual: 0, variance: 0})), budget: 0, actual: 0, variance: 0, ytdBudget: 0, ytdActual: 0, ytdVariance: 0 };
+
+                for (const line of sectionLines) {
+                    s += `<tr>
+                        <td style="position: sticky; left: 0; background: var(--bg-primary, white); z-index: 1;">
+                            <strong>${line.account_number}</strong> ${line.account_name}
+                        </td>`;
+
+                    let ytdBudget = 0, ytdActual = 0;
+                    for (let i = 0; i < 12; i++) {
+                        const md = line.months[i];
+                        const visible = defaultVisibleMonths.has(i);
+                        const color = varianceColor(md.variance);
+                        totals.months[i].budget += md.budget;
+                        totals.months[i].actual += md.actual;
+                        totals.months[i].variance += md.variance;
+
+                        // YTD: include months up to and including current month
+                        if (i <= currentMonth) {
+                            ytdBudget += md.budget;
+                            ytdActual += md.actual;
+                        }
+
+                        const drilldown = md.actual !== 0 ? `<a href="#" onclick="app.showBudgetDrilldown(${line.account_id}, ${i + 1}, '${line.account_number} ${line.account_name}', '${monthNames[i]}'); return false;" style="color: gray; text-decoration: none; border-bottom: 1px dashed gray;">${formatCurrency(md.actual)}</a>` : `<span style="color: gray;">${formatCurrency(md.actual)}</span>`;
+
+                        s += `<td class="budget-month-col budget-month-${i}" style="text-align: right; font-size: 0.8rem;${visible ? '' : ' display: none;'}">
+                            <div>${formatCurrency(md.budget)}</div>
+                            <div>${drilldown}</div>
+                            <div style="color: ${color}; font-weight: bold;">${md.variance >= 0 ? '+' : ''}${formatCurrency(md.variance)}</div>
+                        </td>`;
+                    }
+
+                    const ytdVariance = ytdActual - ytdBudget;
+                    totals.ytdBudget += ytdBudget;
+                    totals.ytdActual += ytdActual;
+                    totals.ytdVariance += ytdVariance;
+
+                    totals.budget += line.total_budget;
+                    totals.actual += line.total_actual;
+                    totals.variance += line.total_variance;
+
+                    const ytdDrilldown = ytdActual !== 0 ? `<a href="#" onclick="app.showBudgetDrilldown(${line.account_id}, null, '${line.account_number} ${line.account_name}', 'Hittil i år'); return false;" style="color: gray; text-decoration: none; border-bottom: 1px dashed gray;">${formatCurrency(ytdActual)}</a>` : `<span style="color: gray;">${formatCurrency(ytdActual)}</span>`;
+
+                    s += `<td style="text-align: right; font-weight: bold; background: var(--bg-secondary, #f5f5f5); font-size: 0.8rem;">
+                        <div>${formatCurrency(ytdBudget)}</div>
+                        <div>${ytdDrilldown}</div>
+                        <div style="color: ${varianceColor(ytdVariance)};">${ytdVariance >= 0 ? '+' : ''}${formatCurrency(ytdVariance)}</div>
+                    </td>`;
+
+                    const totalDrilldown = line.total_actual !== 0 ? `<a href="#" onclick="app.showBudgetDrilldown(${line.account_id}, null, '${line.account_number} ${line.account_name}', 'Hele året'); return false;" style="color: gray; text-decoration: none; border-bottom: 1px dashed gray;">${formatCurrency(line.total_actual)}</a>` : `<span style="color: gray;">${formatCurrency(line.total_actual)}</span>`;
+
+                    const tc = varianceColor(line.total_variance);
+                    s += `<td style="text-align: right; font-weight: bold;">
+                        <div>${formatCurrency(line.total_budget)}</div>
+                        <div>${totalDrilldown}</div>
+                        <div style="color: ${tc};">${line.total_variance >= 0 ? '+' : ''}${formatCurrency(line.total_variance)}</div>
+                    </td></tr>`;
+                }
+
+                // Sum row
+                if (sectionLines.length > 1) {
+                    s += `<tr style="border-top: 2px solid var(--border-color, #ccc); font-weight: bold;">
+                        <td style="position: sticky; left: 0; background: var(--bg-primary, white); z-index: 1;">Sum ${title.toLowerCase()}</td>`;
+                    for (let i = 0; i < 12; i++) {
+                        const mt = totals.months[i];
+                        const visible = defaultVisibleMonths.has(i);
+                        const color = varianceColor(mt.variance);
+                        s += `<td class="budget-month-col budget-month-${i}" style="text-align: right; font-size: 0.8rem;${visible ? '' : ' display: none;'}">
+                            <div>${formatCurrency(mt.budget)}</div>
+                            <div style="color: gray;">${formatCurrency(mt.actual)}</div>
+                            <div style="color: ${color}; font-weight: bold;">${mt.variance >= 0 ? '+' : ''}${formatCurrency(mt.variance)}</div>
+                        </td>`;
+                    }
+                    s += `<td style="text-align: right; background: var(--bg-secondary, #f5f5f5);">
+                        <div>${formatCurrency(totals.ytdBudget)}</div>
+                        <div style="color: gray;">${formatCurrency(totals.ytdActual)}</div>
+                        <div style="color: ${varianceColor(totals.ytdVariance)};">${totals.ytdVariance >= 0 ? '+' : ''}${formatCurrency(totals.ytdVariance)}</div>
+                    </td>`;
+                    s += `<td style="text-align: right;">
+                        <div>${formatCurrency(totals.budget)}</div>
+                        <div style="color: gray;">${formatCurrency(totals.actual)}</div>
+                        <div style="color: ${varianceColor(totals.variance)};">${totals.variance >= 0 ? '+' : ''}${formatCurrency(totals.variance)}</div>
+                    </td></tr>`;
+                }
+
+                s += `</tbody></table></div></div>`;
+                return s;
+            };
+
+            // Month toggle buttons
+            let monthToggles = '<div style="display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 1rem;">';
+            monthToggles += '<span style="margin-right: 0.5rem; font-weight: bold; align-self: center;">Måneder:</span>';
+            for (let i = 0; i < 12; i++) {
+                const active = defaultVisibleMonths.has(i);
+                monthToggles += `<button class="btn btn-sm budget-month-toggle" data-month="${i}"
+                    style="padding: 0.25rem 0.5rem; font-size: 0.8rem; ${active ? 'background: var(--primary-color, #007bff); color: white;' : ''}"
+                    onclick="app.toggleBudgetMonth(${i}, this)">${monthNames[i]}</button>`;
+            }
+            monthToggles += `<button class="btn btn-sm" style="padding: 0.25rem 0.5rem; font-size: 0.8rem; margin-left: 0.5rem;"
+                onclick="app.toggleAllBudgetMonths(true)">Vis alle</button>`;
+            monthToggles += `<button class="btn btn-sm" style="padding: 0.25rem 0.5rem; font-size: 0.8rem;"
+                onclick="app.toggleAllBudgetMonths(false)">Skjul alle</button>`;
+            monthToggles += '</div>';
 
             let html = `
                 <div class="card">
                     <h2>${budget.name} - Budsjett vs Faktisk</h2>
+                    ${monthToggles}
+                    ${renderSection('Utgifter', expenseLines, 'budget-expenses', true)}
+                    ${renderSection('Inntekter', revenueLines, 'budget-revenue', false)}
+                    ${renderSection('Andre', otherLines, 'budget-other', false)}
 
-                    <div style="overflow-x: auto;">
-                        <table class="data-table" style="width: 100%; font-size: 0.85rem;">
-                            <thead>
-                                <tr>
-                                    <th style="position: sticky; left: 0; background: white;">Konto</th>
-            `;
-
-            for (const month of months) {
-                html += `<th style="text-align: right;">${month}</th>`;
-            }
-            html += `<th style="text-align: right;">Totalt</th></tr></thead><tbody>`;
-
-            for (const line of lines) {
-                html += `
-                    <tr>
-                        <td style="position: sticky; left: 0; background: white;">
-                            <strong>${line.account_number}</strong> ${line.account_name}
-                        </td>
-                `;
-
-                for (const monthData of line.months) {
-                    const budget = monthData.budget;
-                    const actual = monthData.actual;
-                    const variance = monthData.variance;
-                    const color = variance > 0 ? 'green' : variance < 0 ? 'red' : 'black';
-
-                    html += `
-                        <td style="text-align: right; font-size: 0.8rem;">
-                            <div>${formatCurrency(budget)}</div>
-                            <div style="color: gray;">${formatCurrency(actual)}</div>
-                            <div style="color: ${color}; font-weight: bold;">${variance >= 0 ? '+' : ''}${formatCurrency(variance)}</div>
-                        </td>
-                    `;
-                }
-
-                const totalColor = line.total_variance > 0 ? 'green' : line.total_variance < 0 ? 'red' : 'black';
-                html += `
-                    <td style="text-align: right; font-weight: bold;">
-                        <div>${formatCurrency(line.total_budget)}</div>
-                        <div style="color: gray;">${formatCurrency(line.total_actual)}</div>
-                        <div style="color: ${totalColor};">${line.total_variance >= 0 ? '+' : ''}${formatCurrency(line.total_variance)}</div>
-                    </td>
-                </tr>`;
-            }
-
-            html += `
-                            </tbody>
-                        </table>
+                    <div style="margin-top: 1rem; padding: 0.75rem; background: var(--bg-secondary, #f0f0f0); border-radius: 4px; font-size: 0.85rem;">
+                        <strong>Forklaring:</strong>
+                        Linje 1: Budsjett | Linje 2: <span style="color: gray;">Faktisk</span> |
+                        Linje 3: Avvik (<span style="color: #c0392b;">rød = over budsjett</span>, <span style="color: #27ae60;">grønn = under budsjett</span>)
                     </div>
 
-                    <div style="margin-top: 1rem; padding: 1rem; background: #f0f0f0; border-radius: 4px;">
-                        <p><strong>Forklaring:</strong></p>
-                        <p>Første linje: Budsjett | Andre linje: Faktisk | Tredje linje: Avvik (grønn = bedre enn budsjett, rød = dårligere)</p>
-                    </div>
-
-                    <div style="margin-top: 1rem;">
+                    <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
                         <button class="btn btn-secondary" onclick="app.showBudgetEditor(${budgetId})">Rediger budsjett</button>
                         <button class="btn btn-secondary" onclick="app.loadBudgets()">Tilbake</button>
                     </div>
@@ -735,6 +891,117 @@ class App {
         } catch (error) {
             console.error('Error loading budget report:', error);
             showError('Kunne ikke laste rapport');
+        }
+    }
+
+    toggleBudgetSection(sectionId) {
+        const section = document.getElementById(sectionId);
+        const arrow = document.getElementById(sectionId + '-arrow');
+        if (section.style.display === 'none') {
+            section.style.display = 'block';
+            arrow.textContent = '▼';
+        } else {
+            section.style.display = 'none';
+            arrow.textContent = '▶';
+        }
+    }
+
+    toggleBudgetMonth(monthIndex, btn) {
+        const cols = document.querySelectorAll(`.budget-month-${monthIndex}`);
+        const isVisible = cols.length > 0 && cols[0].style.display !== 'none';
+        for (const col of cols) {
+            col.style.display = isVisible ? 'none' : '';
+        }
+        if (isVisible) {
+            btn.style.background = '';
+            btn.style.color = '';
+        } else {
+            btn.style.background = 'var(--primary-color, #007bff)';
+            btn.style.color = 'white';
+        }
+    }
+
+    toggleAllBudgetMonths(show) {
+        for (let i = 0; i < 12; i++) {
+            const cols = document.querySelectorAll(`.budget-month-${i}`);
+            for (const col of cols) {
+                col.style.display = show ? '' : 'none';
+            }
+        }
+        const btns = document.querySelectorAll('.budget-month-toggle');
+        for (const btn of btns) {
+            if (show) {
+                btn.style.background = 'var(--primary-color, #007bff)';
+                btn.style.color = 'white';
+            } else {
+                btn.style.background = '';
+                btn.style.color = '';
+            }
+        }
+    }
+
+    async showBudgetDrilldown(accountId, month, accountLabel, periodLabel) {
+        try {
+            const transactions = await api.getBudgetDrilldown(this._currentBudgetId, accountId, month);
+
+            let totalDebit = 0, totalCredit = 0;
+            const rows = transactions.map(t => {
+                totalDebit += t.debit;
+                totalCredit += t.credit;
+                return `<tr>
+                    <td style="white-space: nowrap;">${formatDate(t.date)}</td>
+                    <td>${t.description}</td>
+                    <td style="text-align: right;">${t.debit ? formatCurrency(t.debit) : ''}</td>
+                    <td style="text-align: right;">${t.credit ? formatCurrency(t.credit) : ''}</td>
+                    <td style="text-align: right; font-weight: bold;">${formatCurrency(t.amount)}</td>
+                </tr>`;
+            }).join('');
+
+            const netAmount = totalDebit - totalCredit;
+            const content = `
+                <div style="max-height: 70vh; overflow-y: auto;">
+                    <p style="color: gray; margin-bottom: 1rem;">${transactions.length} transaksjoner</p>
+                    <table class="data-table" style="width: 100%; font-size: 0.85rem;">
+                        <thead>
+                            <tr>
+                                <th>Dato</th>
+                                <th>Beskrivelse</th>
+                                <th style="text-align: right;">Debet</th>
+                                <th style="text-align: right;">Kredit</th>
+                                <th style="text-align: right;">Netto</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${rows || '<tr><td colspan="5">Ingen transaksjoner</td></tr>'}
+                            <tr style="border-top: 2px solid var(--border-color, #ccc); font-weight: bold;">
+                                <td colspan="2">Sum</td>
+                                <td style="text-align: right;">${formatCurrency(totalDebit)}</td>
+                                <td style="text-align: right;">${formatCurrency(totalCredit)}</td>
+                                <td style="text-align: right;">${formatCurrency(netAmount)}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            `;
+
+            showModal(`${accountLabel} — ${periodLabel}`, content);
+        } catch (error) {
+            console.error('Error loading drilldown:', error);
+            showError('Kunne ikke laste transaksjoner');
+        }
+    }
+
+    async deleteBudget(budgetId, budgetName) {
+        if (!confirm(`Er du sikker på at du vil slette budsjettet "${budgetName}"?`)) {
+            return;
+        }
+        try {
+            await api.deleteBudget(budgetId);
+            showSuccess('Budsjett slettet');
+            this.loadBudgets();
+        } catch (error) {
+            console.error('Error deleting budget:', error);
+            showError('Kunne ikke slette budsjett: ' + error.message);
         }
     }
 
@@ -760,6 +1027,9 @@ class App {
                             </button>
                             <button class="btn btn-secondary" onclick="app.showBudgetEditor(${budget.id})">
                                 Rediger
+                            </button>
+                            <button class="btn btn-danger" onclick="app.deleteBudget(${budget.id}, '${budget.name.replace(/'/g, "\\'")}')">
+                                Slett
                             </button>
                         </div>
                     </div>

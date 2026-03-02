@@ -211,22 +211,13 @@ class AIService:
 
     def _get_ledger_accounts(self, ledger: Ledger) -> list:
         """Get formatted list of accounts for the ledger, prioritizing EXPENSE accounts"""
-        from .models import LedgerAccountSettings, AccountType
+        from .models import AccountType
 
-        # Get active accounts
-        query = self.db.query(Account).filter(Account.is_active == True)
-
-        # Filter out hidden accounts for this ledger
-        hidden_settings = self.db.query(LedgerAccountSettings).filter(
-            LedgerAccountSettings.ledger_id == ledger.id,
-            LedgerAccountSettings.is_hidden == True
+        # Get active accounts for this specific ledger
+        accounts = self.db.query(Account).filter(
+            Account.ledger_id == ledger.id,
+            Account.is_active == True
         ).all()
-        hidden_ids = [s.account_id for s in hidden_settings]
-
-        if hidden_ids:
-            query = query.filter(~Account.id.in_(hidden_ids))
-
-        accounts = query.all()
 
         # Sort accounts: EXPENSE first (most used in AI suggestions), then others by number
         sorted_accounts = sorted(accounts, key=lambda a: (

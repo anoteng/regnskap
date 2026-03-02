@@ -3,7 +3,10 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from backend.database import get_db
-from ..models import User, Ledger, LedgerMember, LedgerRole
+from ..models import (
+    User, Ledger, LedgerMember, LedgerRole, Account,
+    ChartOfAccountsTemplate, TemplateAccount
+)
 from ..schemas import (
     Ledger as LedgerSchema,
     LedgerCreate,
@@ -54,14 +57,29 @@ async def create_ledger(
     db: Session = Depends(get_db)
 ):
     """Create a new ledger."""
+    # If no template specified, use the default one
+    chart_template_id = ledger.chart_template_id
+    if chart_template_id is None:
+        default_template = db.query(ChartOfAccountsTemplate).filter(
+            ChartOfAccountsTemplate.is_default == True,
+            ChartOfAccountsTemplate.is_active == True
+        ).first()
+        if default_template:
+            chart_template_id = default_template.id
+
     # Create the ledger
     db_ledger = Ledger(
         name=ledger.name,
-        created_by=current_user.id
+        created_by=current_user.id,
+        chart_template_id=chart_template_id
     )
     db.add(db_ledger)
     db.commit()
     db.refresh(db_ledger)
+
+    # Copy accounts from template
+    if chart_template_id:
+        _copy_accounts_from_template(db, db_ledger.id, chart_template_id)
 
     # Add creator as owner
     membership = LedgerMember(
@@ -79,6 +97,42 @@ async def create_ledger(
     db.refresh(db_ledger)
 
     return db_ledger
+
+
+def _copy_accounts_from_template(db: Session, ledger_id: int, template_id: int):
+    """Copy accounts from a template to a ledger."""
+    # Get all template accounts that should be included by default
+    template_accounts = db.query(TemplateAccount).filter(
+        TemplateAccount.template_id == template_id,
+        TemplateAccount.is_default == True
+    ).order_by(TemplateAccount.sort_order).all()
+
+    # Map of account_number -> created Account object (for parent relationships)
+    account_map = {}
+
+    # First pass: create all accounts without parent relationships
+    for template_account in template_accounts:
+        account = Account(
+            ledger_id=ledger_id,
+            account_number=template_account.account_number,
+            account_name=template_account.account_name,
+            account_type=template_account.account_type,
+            description=template_account.description,
+            is_active=True
+        )
+        db.add(account)
+        db.flush()  # Get the ID without committing
+        account_map[template_account.account_number] = account
+
+    # Second pass: set up parent relationships
+    for template_account in template_accounts:
+        if template_account.parent_account_number:
+            parent_account = account_map.get(template_account.parent_account_number)
+            if parent_account:
+                child_account = account_map[template_account.account_number]
+                child_account.parent_account_id = parent_account.id
+
+    db.commit()
 
 
 @router.get("/{ledger_id}", response_model=LedgerWithRole)

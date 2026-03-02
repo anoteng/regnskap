@@ -10,8 +10,9 @@ import json
 
 from backend.database import get_db
 from ..models import Transaction, JournalEntry, User, Ledger, BankAccount, Account, TransactionCategory, Receipt, ImportLog, CSVMapping, TransactionStatus
-from ..schemas import Transaction as TransactionSchema, TransactionCreate
+from ..schemas import Transaction as TransactionSchema, TransactionCreate, PaginatedTransactions, ChainSuggestionsResponse, ChainTransactionsRequest
 from ..auth import get_current_active_user, get_current_ledger
+from ..transaction_chaining import TransactionChainMatcher
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
@@ -22,6 +23,7 @@ def get_transactions(
     limit: int = 100,
     start_date: date = None,
     end_date: date = None,
+    account_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
     current_ledger: Ledger = Depends(get_current_ledger)
@@ -34,6 +36,10 @@ def get_transactions(
         query = query.filter(Transaction.transaction_date >= start_date)
     if end_date:
         query = query.filter(Transaction.transaction_date <= end_date)
+    if account_id:
+        query = query.filter(
+            Transaction.journal_entries.any(JournalEntry.account_id == account_id)
+        )
 
     transactions = query.order_by(Transaction.transaction_date.desc()).offset(skip).limit(limit).all()
     return transactions
@@ -87,15 +93,22 @@ def create_transaction(
     return db_transaction
 
 
-@router.get("/queue", response_model=List[TransactionSchema])
+@router.get("/queue", response_model=PaginatedTransactions)
 def get_posting_queue(
     skip: int = 0,
-    limit: int = 100,
+    limit: int = 50,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
     current_ledger: Ledger = Depends(get_current_ledger)
 ):
-    """Get all DRAFT transactions (posting queue)"""
+    """Get all DRAFT transactions (posting queue) with pagination"""
+    # Get total count
+    total = db.query(Transaction).filter(
+        Transaction.ledger_id == current_ledger.id,
+        Transaction.status == TransactionStatus.DRAFT
+    ).count()
+
+    # Get paginated transactions
     transactions = db.query(Transaction).options(
         joinedload(Transaction.journal_entries).joinedload(JournalEntry.account)
     ).filter(
@@ -103,7 +116,66 @@ def get_posting_queue(
         Transaction.status == TransactionStatus.DRAFT
     ).order_by(Transaction.transaction_date.desc()).offset(skip).limit(limit).all()
 
-    return transactions
+    return {
+        "transactions": transactions,
+        "total": total,
+        "skip": skip,
+        "limit": limit
+    }
+
+
+@router.get("/chain-suggestions", response_model=ChainSuggestionsResponse)
+def get_chain_suggestions(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    current_ledger: Ledger = Depends(get_current_ledger)
+):
+    """Find pairs of DRAFT bank-synced transactions that can be chained together."""
+    suggestions = TransactionChainMatcher.find_chain_candidates(db, current_ledger.id)
+    return {
+        "suggestions": [
+            {
+                "primary_transaction_id": s.primary_transaction_id,
+                "secondary_transaction_id": s.secondary_transaction_id,
+                "primary_description": s.primary_description,
+                "secondary_description": s.secondary_description,
+                "primary_account_name": s.primary_account_name,
+                "secondary_account_name": s.secondary_account_name,
+                "amount": s.amount,
+                "primary_date": s.primary_date,
+                "secondary_date": s.secondary_date,
+                "confidence": s.confidence
+            }
+            for s in suggestions
+        ],
+        "total": len(suggestions)
+    }
+
+
+@router.post("/chain")
+def chain_transactions(
+    request: ChainTransactionsRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    current_ledger: Ledger = Depends(get_current_ledger)
+):
+    """Merge two DRAFT transactions into one balanced transaction."""
+    try:
+        merged = TransactionChainMatcher.chain_transactions(
+            db=db,
+            ledger_id=current_ledger.id,
+            primary_id=request.primary_transaction_id,
+            secondary_id=request.secondary_transaction_id,
+            auto_post=request.auto_post
+        )
+        return {
+            "message": "Transaksjoner kjedet sammen",
+            "transaction_id": merged.id,
+            "status": merged.status.value if hasattr(merged.status, 'value') else str(merged.status),
+            "journal_entries": len(merged.journal_entries)
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/{transaction_id}", response_model=TransactionSchema)

@@ -37,17 +37,64 @@ class User(UserBase):
         from_attributes = True
 
 
+# Chart of Accounts Templates
+class ChartOfAccountsTemplateBase(BaseModel):
+    name: str
+    display_name: str
+    description: Optional[str] = None
+    is_active: bool = True
+    is_default: bool = False
+
+
+class ChartOfAccountsTemplateCreate(ChartOfAccountsTemplateBase):
+    pass
+
+
+class ChartOfAccountsTemplate(ChartOfAccountsTemplateBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class TemplateAccountBase(BaseModel):
+    account_number: str
+    account_name: str
+    account_type: str
+    parent_account_number: Optional[str] = None
+    description: Optional[str] = None
+    is_default: bool = True
+    sort_order: int = 0
+
+
+class TemplateAccountCreate(TemplateAccountBase):
+    template_id: int
+
+
+class TemplateAccount(TemplateAccountBase):
+    id: int
+    template_id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# Ledgers
 class LedgerBase(BaseModel):
     name: str
 
 
 class LedgerCreate(LedgerBase):
-    pass
+    chart_template_id: Optional[int] = None
 
 
 class Ledger(LedgerBase):
     id: int
     created_by: int
+    chart_template_id: Optional[int] = None
     created_at: datetime
     is_active: bool
 
@@ -91,9 +138,9 @@ class AccountCreate(AccountBase):
 
 class Account(AccountBase):
     id: int
+    ledger_id: int
     parent_account_id: Optional[int] = None
     is_active: bool
-    is_system: bool
     description: Optional[str] = None
     created_at: datetime
 
@@ -178,6 +225,13 @@ class Transaction(TransactionBase):
         from_attributes = True
 
 
+class PaginatedTransactions(BaseModel):
+    transactions: List[Transaction]
+    total: int
+    skip: int
+    limit: int
+
+
 class CategoryBase(BaseModel):
     name: str
     color: Optional[str] = None
@@ -198,7 +252,7 @@ class Category(CategoryBase):
 
 
 class BudgetLineBase(BaseModel):
-    account_number: str
+    account_id: int
     period: int  # 1-12
     amount: Decimal
 
@@ -237,7 +291,7 @@ class Budget(BudgetBase):
 
 class BudgetLineInput(BaseModel):
     """Input for setting budget amounts for an account"""
-    account_number: str
+    account_id: int
     distribution_type: str  # 'same', 'total', or 'manual'
     amount: Optional[Decimal] = None  # For 'same' or 'total'
     monthly_amounts: Optional[List[Decimal]] = None  # For 'manual' (12 values)
@@ -501,6 +555,30 @@ class BankSyncLog(BankSyncLogBase):
 
     class Config:
         from_attributes = True
+
+
+class ChainSuggestion(BaseModel):
+    primary_transaction_id: int
+    secondary_transaction_id: int
+    primary_description: str
+    secondary_description: str
+    primary_account_name: str
+    secondary_account_name: str
+    amount: Decimal
+    primary_date: date
+    secondary_date: date
+    confidence: str  # HIGH or MEDIUM
+
+
+class ChainSuggestionsResponse(BaseModel):
+    suggestions: List[ChainSuggestion]
+    total: int
+
+
+class ChainTransactionsRequest(BaseModel):
+    primary_transaction_id: int
+    secondary_transaction_id: int
+    auto_post: bool = False
 
 
 class SyncParams(BaseModel):

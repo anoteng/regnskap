@@ -8,7 +8,7 @@ User-facing endpoints for:
 - Disconnecting banks
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict
@@ -46,6 +46,66 @@ def list_available_providers(
         }
         for p in providers
     ]
+
+
+@router.get("/aspsps")
+async def list_aspsps(
+    country: Optional[str] = Query(None, description="Country code filter (e.g., 'NO', 'SE')"),
+    provider_id: Optional[int] = Query(None, description="Provider ID"),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user)
+) -> Dict:
+    """
+    List available banks (ASPSPs) from the banking provider.
+
+    Fetches the list directly from Enable Banking API to ensure it's always up to date.
+    """
+    # Find the provider to use
+    if provider_id:
+        provider_model = db.query(models.BankProvider).get(provider_id)
+    else:
+        # Use first active provider
+        provider_model = db.query(models.BankProvider).filter(
+            models.BankProvider.is_active == True
+        ).first()
+
+    if not provider_model:
+        raise HTTPException(status_code=404, detail="No active provider found")
+
+    service = BankIntegrationService(db)
+    provider = service._get_provider(provider_model.id)
+
+    # Check if provider supports listing ASPSPs
+    if not hasattr(provider, 'list_aspsps'):
+        raise HTTPException(status_code=400, detail="Provider does not support ASPSP listing")
+
+    try:
+        aspsps = await provider.list_aspsps(country=country)
+
+        # Return simplified list for frontend
+        result = []
+        for aspsp in aspsps:
+            result.append({
+                'name': aspsp.get('name', ''),
+                'country': aspsp.get('country', ''),
+                'logo': aspsp.get('logo', ''),
+                'bic': aspsp.get('bic', ''),
+                'beta': aspsp.get('beta', False),
+                'psu_types': aspsp.get('psu_types', []),
+            })
+
+        # Sort by name within each country
+        result.sort(key=lambda x: (x['country'], x['name']))
+
+        # Extract unique countries
+        countries = sorted(set(a['country'] for a in result))
+
+        return {
+            'aspsps': result,
+            'countries': countries
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not fetch banks: {str(e)}")
 
 
 @router.post("/connect", response_model=schemas.OAuthInitiateResponse)
@@ -335,6 +395,7 @@ def list_connections(
 @router.post("/{connection_id}/sync", response_model=schemas.SyncResponse)
 async def manual_sync(
     connection_id: int,
+    request: Request,
     sync_params: Optional[schemas.SyncParams] = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
@@ -387,22 +448,32 @@ async def manual_sync(
     from_date = sync_params.from_date if sync_params else None
     to_date = sync_params.to_date if sync_params else None
 
+    # Extract PSU headers required by some ASPSPs (e.g. Bank Norwegian)
+    psu_ip = request.client.host if request.client else None
+    psu_ua = request.headers.get('user-agent')
+
     result = await service.sync_transactions(
         bank_connection=connection,
         user=current_user,
         from_date=from_date,
         to_date=to_date,
-        sync_type=models.BankSyncType.MANUAL
+        sync_type=models.BankSyncType.MANUAL,
+        psu_ip_address=psu_ip,
+        psu_user_agent=psu_ua
     )
 
     # Build response
-    message = None
-    if result['errors']:
-        message = f"{len(result['errors'])} errors occurred"
+    message = result.get('message')
+    if not message and result['errors']:
+        if isinstance(result['errors'], list):
+            # Include the first error message for context
+            message = result['errors'][0] if len(result['errors']) == 1 else f"{len(result['errors'])} errors occurred: {result['errors'][0]}"
+        else:
+            message = str(result['errors'])
 
     return schemas.SyncResponse(
         status=result['status'],
-        transactions_fetched=result['transactions_fetched'],
+        transactions_fetched=result.get('transactions_fetched', 0),
         imported=result['imported'],
         duplicates=result['duplicates'],
         message=message

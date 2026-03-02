@@ -18,6 +18,11 @@ import jwt
 from .base import BaseBankProvider
 
 
+class SessionExpiredError(Exception):
+    """Raised when an Enable Banking session has expired and re-authorization is needed."""
+    pass
+
+
 class EnableBankingProvider(BaseBankProvider):
     """
     Enable Banking API integration.
@@ -88,6 +93,41 @@ class EnableBankingProvider(BaseBankProvider):
         token = jwt.encode(payload, private_key, algorithm='RS256', headers=headers)
         return token
 
+    async def list_aspsps(self, country: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        List available ASPSPs (banks) from Enable Banking.
+
+        Args:
+            country: Optional ISO country code filter (e.g., 'NO', 'SE')
+
+        Returns:
+            List of ASPSP dicts with name, country, logo, psu_types
+        """
+        jwt_token = self._generate_jwt_token()
+
+        params = {}
+        if country:
+            params['country'] = country
+
+        async with httpx.AsyncClient(
+            timeout=30.0,
+            cert=self.client_cert
+        ) as client:
+            response = await client.get(
+                f"{self.config.api_base_url}/aspsps",
+                params=params,
+                headers={
+                    'Authorization': f'Bearer {jwt_token}',
+                    'Accept': 'application/json'
+                }
+            )
+
+            if response.status_code != 200:
+                raise Exception(f"Failed to list ASPSPs: {response.text}")
+
+            data = response.json()
+            return data.get('aspsps', [])
+
     async def get_authorization_url(
         self,
         state: str,
@@ -116,7 +156,7 @@ class EnableBankingProvider(BaseBankProvider):
         # Build request body according to Enable Banking spec
         request_body = {
             "access": {
-                "valid_until": (datetime.now(UTC) + timedelta(days=90)).isoformat().replace('+00:00', 'Z')
+                "valid_until": (datetime.now(UTC) + timedelta(days=90)).isoformat()
             },
             "state": state,
             "redirect_url": redirect_uri,
@@ -127,11 +167,12 @@ class EnableBankingProvider(BaseBankProvider):
         # If not specified, Enable Banking will show bank selection screen
         if bank_id:
             # Parse bank_id into country and name
-            # Format: "NO_NORWEGIAN" -> country: "NO", name: "Norwegian"
+            # Format: "NO_Bank Name" -> country: "NO", name: "Bank Name"
+            # The name must match exactly what Enable Banking returns from /aspsps
             if '_' in bank_id:
                 parts = bank_id.split('_', 1)
                 country = parts[0]
-                bank_name = parts[1].replace('_', ' ').title()
+                bank_name = parts[1]
             else:
                 country = "NO"
                 bank_name = bank_id
@@ -218,6 +259,9 @@ class EnableBankingProvider(BaseBankProvider):
             response.raise_for_status()
             data = response.json()
 
+            import logging
+            logger = logging.getLogger(__name__)
+
             # Debug: Check if data is actually a dict
             if not isinstance(data, dict):
                 raise ValueError(f"Expected dict from API, got {type(data).__name__}: {data}")
@@ -227,19 +271,25 @@ class EnableBankingProvider(BaseBankProvider):
             if not session_id:
                 raise ValueError(f"No session_id in response: {data}")
 
+            # Log the full session response for debugging
             access_info = data.get('access', {})
             valid_until = access_info.get('valid_until') if isinstance(access_info, dict) else None
+            logger.info(f"Session created: session_id={session_id[:8]}..., valid_until={valid_until}")
+            logger.info(f"Full access info from bank: {access_info}")
 
             # Calculate expires_in from valid_until
-            expires_in = 86400  # Default 24 hours
+            # Default to 90 days if parsing fails (Enable Banking sessions are long-lived)
+            expires_in = 90 * 24 * 3600  # 90 days default
             if valid_until:
-                from datetime import datetime
                 try:
                     valid_until_dt = datetime.fromisoformat(valid_until.replace('Z', '+00:00'))
                     now = datetime.now(UTC)
                     expires_in = int((valid_until_dt - now).total_seconds())
-                except:
-                    pass
+                    logger.info(f"Session valid for {expires_in} seconds ({expires_in // 86400} days)")
+                except Exception as e:
+                    logger.warning(f"Could not parse valid_until '{valid_until}': {e}, using 90-day default")
+            else:
+                logger.warning("No valid_until in session response, using 90-day default")
 
             # Normalize accounts to internal format
             normalized_accounts = self._normalize_accounts(data)
@@ -323,12 +373,17 @@ class EnableBankingProvider(BaseBankProvider):
 
     async def check_session_status(
         self,
-        session_id: str
+        session_id: str,
+        psu_ip_address: Optional[str] = None,
+        psu_user_agent: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Check if a session is still valid and get its current status.
 
         Returns session info including status and accounts.
+
+        Raises:
+            SessionExpiredError: If the session has expired (401 from API)
         """
         import logging
         logger = logging.getLogger(__name__)
@@ -340,52 +395,50 @@ class EnableBankingProvider(BaseBankProvider):
             'Authorization': f'Bearer {jwt_token}',
             'Accept': 'application/json'
         }
+        if psu_ip_address:
+            headers['PSU-IP-Address'] = psu_ip_address
+        if psu_user_agent:
+            headers['PSU-User-Agent'] = psu_user_agent
 
-        # Determine cert paths
-        cert_path = self.config_data.get('certificate_path', '')
-        private_key_path = self.config_data.get('private_key_path', '')
+        async with httpx.AsyncClient(
+            timeout=60.0,
+            cert=self.client_cert
+        ) as client:
+            # Get session status from Enable Banking
+            response = await client.get(
+                f"{self.config.api_base_url}/sessions/{session_id}",
+                headers=headers
+            )
 
-        if not cert_path or not private_key_path:
-            raise ValueError("Certificate and private key paths must be configured")
+            if not response.is_success:
+                error_body = response.text
+                logger.error(f"Session status check failed - Status: {response.status_code}, Body: {error_body}")
 
-        api_base_url = self.config.api_base_url
+                # Check for expired session specifically
+                try:
+                    error_data = response.json()
+                    error_code = error_data.get('error', '')
+                except:
+                    error_code = ''
 
-        try:
-            async with httpx.AsyncClient(
-                timeout=60.0,
-                cert=(cert_path, private_key_path)
-            ) as client:
-                # Get session status from Enable Banking
-                response = await client.get(
-                    f"{api_base_url}/sessions/{session_id}",
-                    headers=headers
-                )
+                if response.status_code == 401 or error_code == 'EXPIRED_SESSION':
+                    raise SessionExpiredError(f"Bank session has expired. Please re-authorize. (Response: {error_body})")
 
-                if not response.is_success:
-                    logger.error(f"Enable Banking API error - Status: {response.status_code}")
-                    logger.error(f"Response body: {response.text}")
-                    response.raise_for_status()
+                response.raise_for_status()
 
-                session_data = response.json()
-                logger.info(f"Session data received: {session_data}")
-                logger.info(f"Session data type: {type(session_data)}")
+            session_data = response.json()
 
-                if isinstance(session_data, dict):
-                    logger.info(f"Session data keys: {list(session_data.keys())}")
-                    # Check if there's an access field with valid_until
-                    access = session_data.get('access', {})
-                    if isinstance(access, dict):
-                        valid_until = access.get('valid_until')
-                        logger.info(f"Session valid_until: {valid_until}")
-                else:
-                    logger.warning(f"Session data is not a dict: {session_data}")
+            if isinstance(session_data, dict):
+                access = session_data.get('access', {})
+                if isinstance(access, dict):
+                    valid_until = access.get('valid_until')
+                    logger.info(f"Session valid_until: {valid_until}")
+                status = session_data.get('status')
+                logger.info(f"Session status: {status}")
+            else:
+                logger.warning(f"Session data is not a dict: {session_data}")
 
-                return session_data
-
-        except Exception as e:
-            logger.error(f"Failed to check session status: {str(e)}")
-            logger.exception(e)  # This will print the full traceback
-            raise
+            return session_data
 
     async def get_session_accounts(
         self,
@@ -458,7 +511,9 @@ class EnableBankingProvider(BaseBankProvider):
         account_id: str,
         from_date: Optional[date],
         to_date: date,
-        is_initial_sync: bool = False
+        is_initial_sync: bool = False,
+        psu_ip_address: Optional[str] = None,
+        psu_user_agent: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         Fetch transactions for an account with pagination support.
@@ -507,29 +562,20 @@ class EnableBankingProvider(BaseBankProvider):
         jwt_token = self._generate_jwt_token()
 
         # Build query parameters
+        # IMPORTANT: Only use date_from, NOT date_to.
+        # This matches the official Enable Banking Python example.
+        # Some ASPSPs (e.g. Bank Norwegian) return 400 when date_to is included.
         params = {}
 
-        if is_initial_sync:
-            # Initial sync: fetch from specified date
-            # Bank Norwegian may require both date_from and date_to
-            if from_date:
-                params['date_from'] = from_date.isoformat()
-                params['date_to'] = to_date.isoformat()
-                logger.info(f"Initial sync: fetching from {from_date} to {to_date}")
-            else:
-                # No date specified - fetch last 90 days (Enable Banking default)
-                from datetime import timedelta
-                default_from = to_date - timedelta(days=90)
-                params['date_from'] = default_from.isoformat()
-                params['date_to'] = to_date.isoformat()
-                logger.info(f"Initial sync: no date specified, using default (last 90 days from {default_from} to {to_date})")
-        else:
-            # Ongoing sync: use explicit date range
-            if not from_date:
-                raise ValueError("from_date is required for ongoing syncs")
+        if from_date:
             params['date_from'] = from_date.isoformat()
-            params['date_to'] = to_date.isoformat()
-            logger.info(f"Ongoing sync: {from_date} to {to_date}")
+            logger.info(f"Fetching transactions from {from_date} (to_date omitted per API spec)")
+        else:
+            # No date specified - fetch last 90 days
+            from datetime import timedelta
+            default_from = (to_date - timedelta(days=90)).isoformat()
+            params['date_from'] = default_from
+            logger.info(f"No from_date specified, using default: {default_from}")
 
         # Fetch all pages using continuation_key
         all_transactions = []
@@ -551,34 +597,44 @@ class EnableBankingProvider(BaseBankProvider):
                 else:
                     logger.info(f"Fetching page {page_num} (initial request)")
 
+                # Build headers - include PSU headers required by some ASPSPs (e.g. Bank Norwegian)
+                request_headers = {
+                    'Authorization': f'Bearer {jwt_token}',
+                    'Accept': 'application/json'
+                }
+                if psu_ip_address:
+                    request_headers['PSU-IP-Address'] = psu_ip_address
+                if psu_user_agent:
+                    request_headers['PSU-User-Agent'] = psu_user_agent
+
                 response = await client.get(
                     f"{self.config.api_base_url}/accounts/{account_id}/transactions",
                     params=current_params,
-                    headers={
-                        'Authorization': f'Bearer {jwt_token}',
-                        'Accept': 'application/json'
-                    }
+                    headers=request_headers
                 )
 
-                # Log response details before raising error
+                # Handle errors with detailed information
                 if not response.is_success:
+                    error_body = response.text
                     logger.error(f"Enable Banking API error - Status: {response.status_code}")
-                    logger.error(f"Response body: {response.text}")
+                    logger.error(f"Response body: {error_body}")
                     logger.error(f"Request params: {current_params}")
                     logger.error(f"Request URL: {response.url}")
 
-                    # Check for specific error codes
+                    # Parse error code and raise descriptive exception
+                    error_code = ''
                     try:
                         error_data = response.json()
                         error_code = error_data.get('error', '')
-                        if error_code == 'EXPIRED_SESSION':
-                            logger.error("Session has expired - user must re-authorize")
-                        elif error_code == 'ASPSP_ERROR':
-                            logger.error("ASPSP error - likely session expired or account invalid")
                     except:
                         pass
 
-                response.raise_for_status()
+                    if error_code == 'EXPIRED_SESSION':
+                        raise Exception(f"Bank session has expired. Please re-authorize the connection. (Response: {error_body})")
+                    elif error_code == 'ASPSP_ERROR':
+                        raise Exception(f"Bank returned an error (ASPSP_ERROR). This may require re-authorization. (Response: {error_body})")
+                    else:
+                        raise Exception(f"Enable Banking error {response.status_code}: {error_body}")
                 data = response.json()
 
                 # Normalize Enable Banking transaction format
@@ -678,7 +734,7 @@ class EnableBankingProvider(BaseBankProvider):
                 'account_name': account_name,
                 'iban': iban or bban,  # Use BBAN if IBAN is not available (Norwegian accounts)
                 'bban': bban,  # Bank account number for Norwegian accounts
-                'bic': account.get('account_servicer'),  # BIC/SWIFT if available
+                'bic': account.get('account_servicer', {}).get('bic_fi') if isinstance(account.get('account_servicer'), dict) else account.get('account_servicer'),  # BIC/SWIFT if available
                 'currency': account.get('currency', 'NOK'),
                 'account_type': product
             })

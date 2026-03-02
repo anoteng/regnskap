@@ -5,6 +5,10 @@ class PostingQueueManager {
     constructor() {
         this.transactions = [];
         this.accounts = [];
+        this.chainSuggestions = [];
+        this.currentPage = 0;
+        this.pageSize = 50;
+        this.totalCount = 0;
     }
 
     init() {
@@ -15,10 +19,24 @@ class PostingQueueManager {
         }
     }
 
-    async loadQueue() {
+    async loadQueue(page = 0) {
         try {
-            this.transactions = await api.getPostingQueue();
+            this.currentPage = page;
+            const skip = page * this.pageSize;
+            const response = await api.getPostingQueue(skip, this.pageSize);
+            this.transactions = response.transactions;
+            this.totalCount = response.total;
             this.accounts = await api.getAccounts();
+
+            // Fetch chain suggestions
+            try {
+                const chainResponse = await api.getChainSuggestions();
+                this.chainSuggestions = chainResponse.suggestions || [];
+            } catch (e) {
+                console.error('Could not fetch chain suggestions:', e);
+                this.chainSuggestions = [];
+            }
+
             this.renderQueue();
         } catch (error) {
             console.error('Error loading posting queue:', error);
@@ -29,7 +47,7 @@ class PostingQueueManager {
     renderQueue() {
         const container = document.getElementById('posting-queue-list');
 
-        if (this.transactions.length === 0) {
+        if (this.totalCount === 0) {
             container.innerHTML = `
                 <div class="card">
                     <p>Ingen transaksjoner i posteringskøen.</p>
@@ -39,7 +57,7 @@ class PostingQueueManager {
             return;
         }
 
-        // Count balanced transactions
+        // Count balanced transactions on current page
         const balancedCount = this.transactions.filter(t => {
             const totalDebit = t.journal_entries.reduce((sum, e) => sum + parseFloat(e.debit), 0);
             const totalCredit = t.journal_entries.reduce((sum, e) => sum + parseFloat(e.credit), 0);
@@ -48,15 +66,42 @@ class PostingQueueManager {
 
         const unbalancedCount = this.transactions.length - balancedCount;
 
+        // Calculate pagination
+        const totalPages = Math.ceil(this.totalCount / this.pageSize);
+        const startItem = this.currentPage * this.pageSize + 1;
+        const endItem = Math.min((this.currentPage + 1) * this.pageSize, this.totalCount);
+
+        const chainBannerHtml = this.renderChainSuggestionsBanner();
+
         const html = `
+            ${chainBannerHtml}
             <div class="card">
-                <p>
-                    <strong>${this.transactions.length}</strong> transaksjon(er) venter på postering
-                    ${unbalancedCount > 0 ? `<br><small style="color: var(--danger-color);">⚠ ${unbalancedCount} transaksjon(er) må redigeres før postering</small>` : ''}
-                </p>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <div>
+                        <strong>${this.totalCount}</strong> transaksjon(er) totalt i kø
+                        ${unbalancedCount > 0 ? `<br><small style="color: var(--danger-color);">⚠ ${unbalancedCount} transaksjon(er) på denne siden må redigeres</small>` : ''}
+                    </div>
+                    ${totalPages > 1 ? `
+                        <div style="display: flex; gap: 0.5rem; align-items: center;">
+                            <button class="btn btn-sm"
+                                    ${this.currentPage === 0 ? 'disabled' : ''}
+                                    onclick="postingQueueManager.loadQueue(${this.currentPage - 1})">
+                                ← Forrige
+                            </button>
+                            <span>Side ${this.currentPage + 1} av ${totalPages} (${startItem}-${endItem})</span>
+                            <button class="btn btn-sm"
+                                    ${this.currentPage >= totalPages - 1 ? 'disabled' : ''}
+                                    onclick="postingQueueManager.loadQueue(${this.currentPage + 1})">
+                                Neste →
+                            </button>
+                        </div>
+                    ` : ''}
+                </div>
+                <div id="chain-action-bar" style="display: none; background: #f0f9ff; padding: 0.75rem 1rem; border-radius: 4px; margin-bottom: 1rem; align-items: center; gap: 0.5rem;"></div>
                 <table class="table">
                     <thead>
                         <tr>
+                            <th style="width: 30px;"></th>
                             <th style="width: 30px;"></th>
                             <th>Dato</th>
                             <th>Beskrivelse</th>
@@ -83,6 +128,7 @@ class PostingQueueManager {
         const balanced = Math.abs(totalDebit - totalCredit) < 0.01;
         const hasEnoughEntries = transaction.journal_entries.length >= 2;
         const canPost = balanced && hasEnoughEntries;
+        const isChainable = transaction.status === 'DRAFT' && transaction.journal_entries.length === 1;
 
         return `
             <tr class="transaction-row ${!canPost ? 'transaction-unbalanced' : ''}">
@@ -91,6 +137,14 @@ class PostingQueueManager {
                             id="toggle-btn-${transaction.id}" style="padding: 0.25rem 0.5rem;">
                         ▶
                     </button>
+                </td>
+                <td style="text-align: center;">
+                    ${isChainable ? `
+                        <input type="checkbox" class="chain-checkbox"
+                               data-id="${transaction.id}"
+                               onchange="postingQueueManager.updateChainSelection()"
+                               title="Velg for kjeding">
+                    ` : ''}
                 </td>
                 <td>${transaction.transaction_date}</td>
                 <td>
@@ -115,7 +169,7 @@ class PostingQueueManager {
             </tr>
             <tr id="details-${transaction.id}" class="transaction-details" style="display: none;">
                 <td></td>
-                <td colspan="7">
+                <td colspan="8">
                     <div style="padding: 1rem; background: var(--bg-secondary); border-radius: 4px;">
                         <h4 style="margin-top: 0;">Posteringer</h4>
                         <table class="table" style="margin-bottom: 0;">
@@ -914,6 +968,124 @@ class PostingQueueManager {
         });
 
         this.updateBalance();
+    }
+
+    // --- Transaction Chaining ---
+
+    renderChainSuggestionsBanner() {
+        if (!this.chainSuggestions || this.chainSuggestions.length === 0) {
+            return '';
+        }
+
+        const suggestionsHtml = this.chainSuggestions.map(s => {
+            const confidenceBadge = s.confidence === 'HIGH'
+                ? '<span class="badge" style="background: #d1fae5; color: #065f46; font-size: 0.75rem;">Sikker match</span>'
+                : '<span class="badge" style="background: #fef3c7; color: #92400e; font-size: 0.75rem;">Sannsynlig match</span>';
+
+            const dateInfo = s.primary_date === s.secondary_date
+                ? s.primary_date
+                : `${s.primary_date} / ${s.secondary_date}`;
+
+            return `
+                <div style="background: white; padding: 0.75rem; border-radius: 4px; margin: 0.5rem 0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+                    <div style="flex: 1; min-width: 200px;">
+                        ${confidenceBadge}
+                        <strong>${dateInfo}</strong> - ${parseFloat(s.amount).toFixed(2)} kr
+                        <br>
+                        <small style="color: #374151;">${s.primary_account_name} &harr; ${s.secondary_account_name}</small>
+                        <br>
+                        <small style="color: #6b7280;">"${s.primary_description}" / "${s.secondary_description}"</small>
+                    </div>
+                    <div style="display: flex; gap: 0.25rem;">
+                        <button class="btn btn-sm btn-primary" onclick="postingQueueManager.chainTransactions(${s.primary_transaction_id}, ${s.secondary_transaction_id}, false)">
+                            Kjed
+                        </button>
+                        <button class="btn btn-sm" style="background: #059669; color: white;" onclick="postingQueueManager.chainTransactions(${s.primary_transaction_id}, ${s.secondary_transaction_id}, true)">
+                            Kjed + poster
+                        </button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        return `
+            <div class="card" style="border-left: 4px solid #3b82f6; margin-bottom: 1rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                    <div>
+                        <strong>Mulige kontooverforinger funnet</strong>
+                        <p style="margin: 0.25rem 0 0 0; color: #6b7280; font-size: 0.875rem;">
+                            ${this.chainSuggestions.length} transaksjonspar kan slås sammen til balanserte transaksjoner.
+                        </p>
+                    </div>
+                    ${this.chainSuggestions.length > 1 ? `
+                        <button class="btn btn-sm" style="background: #059669; color: white;" onclick="postingQueueManager.chainAllSuggestions()">
+                            Kjed alle (${this.chainSuggestions.length})
+                        </button>
+                    ` : ''}
+                </div>
+                ${suggestionsHtml}
+            </div>
+        `;
+    }
+
+    updateChainSelection() {
+        const checked = document.querySelectorAll('.chain-checkbox:checked');
+        const chainBar = document.getElementById('chain-action-bar');
+
+        if (!chainBar) return;
+
+        if (checked.length === 2) {
+            const id1 = parseInt(checked[0].dataset.id);
+            const id2 = parseInt(checked[1].dataset.id);
+            chainBar.style.display = 'flex';
+            chainBar.innerHTML = `
+                <span>2 transaksjoner valgt for kjeding</span>
+                <button class="btn btn-sm btn-primary" onclick="postingQueueManager.chainTransactions(${id1}, ${id2}, false)">
+                    Kjed transaksjoner
+                </button>
+                <button class="btn btn-sm" style="background: #059669; color: white;" onclick="postingQueueManager.chainTransactions(${id1}, ${id2}, true)">
+                    Kjed + poster
+                </button>
+            `;
+        } else {
+            chainBar.style.display = 'none';
+        }
+    }
+
+    async chainTransactions(primaryId, secondaryId, autoPost = false) {
+        try {
+            await api.chainTransactions(primaryId, secondaryId, autoPost);
+            showSuccess(autoPost
+                ? 'Transaksjoner kjedet og postert'
+                : 'Transaksjoner kjedet sammen');
+            await this.loadQueue(this.currentPage);
+        } catch (error) {
+            showError('Kunne ikke kjede transaksjoner: ' + error.message);
+        }
+    }
+
+    async chainAllSuggestions() {
+        if (!confirm(`Kjed og poster alle ${this.chainSuggestions.length} foreslåtte par?`)) return;
+
+        let chained = 0;
+        let failed = 0;
+
+        for (const suggestion of this.chainSuggestions) {
+            try {
+                await api.chainTransactions(
+                    suggestion.primary_transaction_id,
+                    suggestion.secondary_transaction_id,
+                    true
+                );
+                chained++;
+            } catch (error) {
+                console.error('Chain failed:', error);
+                failed++;
+            }
+        }
+
+        showSuccess(`${chained} par kjedet og postert${failed > 0 ? `, ${failed} feilet` : ''}`);
+        await this.loadQueue(this.currentPage);
     }
 }
 

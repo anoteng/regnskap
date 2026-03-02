@@ -190,7 +190,7 @@ class BankConnectionsManager {
         `;
     }
 
-    showConnectBankModal() {
+    async showConnectBankModal() {
         if (this.bankAccounts.length === 0) {
             showError('Du må først opprette en bankkonto i systemet før du kan koble til bank-API');
             return;
@@ -205,7 +205,7 @@ class BankConnectionsManager {
             <h2>Koble til bank</h2>
 
             <div class="form-group">
-                <label for="connect-bank-account">Velg bankkonto</label>
+                <label for="connect-bank-account">Velg bankkonto i regnskapet</label>
                 <select id="connect-bank-account" class="form-control">
                     <option value="">-- Velg konto --</option>
                     ${this.bankAccounts.map(ba => `
@@ -215,19 +215,26 @@ class BankConnectionsManager {
             </div>
 
             <div class="form-group">
-                <label for="connect-provider">Velg bank-provider</label>
+                <label for="connect-provider">Bank-provider</label>
                 <select id="connect-provider" class="form-control">
-                    <option value="">-- Velg provider --</option>
-                    ${this.providers.map(p => `
-                        <option value="${p.id}">${p.display_name} ${p.environment === 'SANDBOX' ? '(Test)' : ''}</option>
+                    ${this.providers.map((p, i) => `
+                        <option value="${p.id}" ${i === 0 ? 'selected' : ''}>${p.display_name} ${p.environment === 'SANDBOX' ? '(Test)' : ''}</option>
                     `).join('')}
                 </select>
             </div>
 
             <div class="form-group">
-                <label for="connect-external-bank-id">Bank-ID (valgfritt)</label>
-                <input type="text" id="connect-external-bank-id" placeholder="f.eks. NO_BANK_NORWEGIAN">
-                <small>For Enable Banking: Land_BankKode (f.eks. NO_BANK_NORWEGIAN, NO_DNB)</small>
+                <label for="connect-country">Land</label>
+                <select id="connect-country" class="form-control" onchange="bankConnectionsManager.onCountryChanged()">
+                    <option value="">Laster land...</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="connect-bank">Bank</label>
+                <select id="connect-bank" class="form-control" disabled>
+                    <option value="">-- Velg land først --</option>
+                </select>
             </div>
 
             <div class="form-group">
@@ -235,7 +242,7 @@ class BankConnectionsManager {
                 <input type="date" id="connect-initial-sync-date" class="form-control"
                        value="2026-01-01"
                        max="${new Date().toISOString().split('T')[0]}">
-                <small>Begrenser historikken som hentes ved første synkronisering. Anbefalt for kredittkort med mange transaksjoner.</small>
+                <small>Begrenser historikken som hentes ved første synkronisering.</small>
             </div>
 
             <div style="margin-top: 1.5rem; padding: 1rem; background: #f0f9ff; border-radius: 4px;">
@@ -246,7 +253,7 @@ class BankConnectionsManager {
             </div>
 
             <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
-                <button class="btn btn-primary" onclick="bankConnectionsManager.initiateConnection()">
+                <button class="btn btn-primary" id="connect-submit-btn" onclick="bankConnectionsManager.initiateConnection()">
                     Koble til
                 </button>
                 <button class="btn btn-secondary" onclick="closeModal()">Avbryt</button>
@@ -254,27 +261,104 @@ class BankConnectionsManager {
         `;
 
         showModal('Koble til bank', content);
+
+        // Load ASPSPs
+        await this.loadAspsps();
+    }
+
+    async loadAspsps() {
+        const countrySelect = document.getElementById('connect-country');
+        const bankSelect = document.getElementById('connect-bank');
+
+        try {
+            countrySelect.innerHTML = '<option value="">Laster...</option>';
+            const data = await api.getAspsps();
+            this.allAspsps = data.aspsps || [];
+
+            const countryNames = {
+                'NO': 'Norge', 'SE': 'Sverige', 'DK': 'Danmark', 'FI': 'Finland',
+                'DE': 'Tyskland', 'GB': 'Storbritannia', 'FR': 'Frankrike',
+                'NL': 'Nederland', 'ES': 'Spania', 'IT': 'Italia',
+                'AT': 'Østerrike', 'BE': 'Belgia', 'PT': 'Portugal',
+                'PL': 'Polen', 'IE': 'Irland', 'EE': 'Estland',
+                'LV': 'Latvia', 'LT': 'Litauen', 'CZ': 'Tsjekkia',
+                'SK': 'Slovakia', 'HU': 'Ungarn', 'RO': 'Romania',
+                'BG': 'Bulgaria', 'HR': 'Kroatia', 'SI': 'Slovenia',
+                'LU': 'Luxembourg', 'MT': 'Malta', 'CY': 'Kypros',
+                'GR': 'Hellas', 'IS': 'Island', 'CH': 'Sveits'
+            };
+
+            const countries = data.countries || [];
+            countrySelect.innerHTML = '<option value="">-- Velg land --</option>' +
+                countries.map(c =>
+                    `<option value="${c}" ${c === 'NO' ? 'selected' : ''}>${countryNames[c] || c} (${c})</option>`
+                ).join('');
+
+            // Auto-select Norway if available
+            if (countries.includes('NO')) {
+                countrySelect.value = 'NO';
+                this.onCountryChanged();
+            }
+
+        } catch (error) {
+            console.error('Error loading ASPSPs:', error);
+            countrySelect.innerHTML = '<option value="">Kunne ikke laste land</option>';
+            bankSelect.innerHTML = '<option value="">Feil ved lasting</option>';
+        }
+    }
+
+    onCountryChanged() {
+        const country = document.getElementById('connect-country').value;
+        const bankSelect = document.getElementById('connect-bank');
+
+        if (!country || !this.allAspsps) {
+            bankSelect.innerHTML = '<option value="">-- Velg land først --</option>';
+            bankSelect.disabled = true;
+            return;
+        }
+
+        const banksInCountry = this.allAspsps.filter(a => a.country === country);
+        banksInCountry.sort((a, b) => a.name.localeCompare(b.name));
+
+        bankSelect.innerHTML = '<option value="">-- Velg bank --</option>' +
+            banksInCountry.map(b =>
+                `<option value="${b.country}_${b.name}">${b.name}${b.beta ? ' (beta)' : ''}</option>`
+            ).join('');
+        bankSelect.disabled = false;
     }
 
     async initiateConnection() {
         const bankAccountId = document.getElementById('connect-bank-account').value;
         const providerId = document.getElementById('connect-provider').value;
-        const externalBankId = document.getElementById('connect-external-bank-id').value;
+        const bankValue = document.getElementById('connect-bank').value;
         const initialSyncDate = document.getElementById('connect-initial-sync-date').value;
 
-        if (!bankAccountId || !providerId) {
-            showError('Velg både bankkonto og provider');
+        if (!bankAccountId) {
+            showError('Velg en bankkonto');
+            return;
+        }
+
+        if (!providerId) {
+            showError('Velg en provider');
+            return;
+        }
+
+        if (!bankValue) {
+            showError('Velg en bank');
             return;
         }
 
         try {
+            const submitBtn = document.getElementById('connect-submit-btn');
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Kobler til...';
+
             const requestBody = {
                 bank_account_id: parseInt(bankAccountId),
                 provider_id: parseInt(providerId),
-                external_bank_id: externalBankId || null
+                external_bank_id: bankValue
             };
 
-            // Add initial sync date if specified
             if (initialSyncDate) {
                 requestBody.initial_sync_from_date = initialSyncDate;
             }
@@ -284,12 +368,17 @@ class BankConnectionsManager {
                 body: JSON.stringify(requestBody)
             });
 
-            // Redirect to authorization URL
             window.location.href = response.authorization_url;
 
         } catch (error) {
             console.error('Connection error:', error);
             showError('Kunne ikke starte tilkobling: ' + error.message);
+
+            const submitBtn = document.getElementById('connect-submit-btn');
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Koble til';
+            }
         }
     }
 

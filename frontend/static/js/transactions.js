@@ -6,13 +6,19 @@ class TransactionsManager {
         this.accounts = [];
         this.categories = [];
         this.bankAccounts = [];
+        this._listenersAttached = false;
     }
 
     async init() {
         await this.loadAccounts();
         await this.loadCategories();
         await this.loadBankAccounts();
-        this.setupEventListeners();
+        this.populateAccountFilter();
+        this.populateMonthFilter();
+        if (!this._listenersAttached) {
+            this.setupEventListeners();
+            this._listenersAttached = true;
+        }
         await this.loadTransactions();
     }
 
@@ -28,12 +34,88 @@ class TransactionsManager {
         this.bankAccounts = await api.getBankAccounts();
     }
 
+    populateAccountFilter() {
+        const select = document.getElementById('filter-account');
+        if (!select) return;
+
+        // Find which account IDs are linked to bank accounts
+        const bankAccountIds = new Set(this.bankAccounts.map(ba => ba.account_id));
+
+        // Split into bank-linked and other accounts
+        const bankLinked = this.accounts.filter(a => bankAccountIds.has(a.id));
+        const others = this.accounts.filter(a => !bankAccountIds.has(a.id));
+
+        // Sort each group by account number
+        bankLinked.sort((a, b) => a.account_number.localeCompare(b.account_number));
+        others.sort((a, b) => a.account_number.localeCompare(b.account_number));
+
+        let html = '<option value="">Alle kontoer</option>';
+        if (bankLinked.length > 0) {
+            html += '<optgroup label="Bankkontoer">';
+            for (const a of bankLinked) {
+                html += `<option value="${a.id}">${a.account_number} ${a.account_name}</option>`;
+            }
+            html += '</optgroup>';
+        }
+        html += '<optgroup label="Alle kontoer">';
+        for (const a of others) {
+            html += `<option value="${a.id}">${a.account_number} ${a.account_name}</option>`;
+        }
+        html += '</optgroup>';
+
+        select.innerHTML = html;
+    }
+
+    populateMonthFilter() {
+        const select = document.getElementById('filter-month');
+        if (!select) return;
+
+        const monthNames = ['Januar', 'Februar', 'Mars', 'April', 'Mai', 'Juni',
+                           'Juli', 'August', 'September', 'Oktober', 'November', 'Desember'];
+        const now = new Date();
+
+        let html = '<option value="">Velg periode...</option>';
+
+        // Last 12 months including current
+        for (let i = 0; i < 12; i++) {
+            const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+            const year = d.getFullYear();
+            const month = d.getMonth(); // 0-indexed
+            const lastDay = new Date(year, month + 1, 0).getDate();
+            const startDate = `${year}-${String(month + 1).padStart(2, '0')}-01`;
+            const endDate = `${year}-${String(month + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+            const label = `${monthNames[month]} ${year}`;
+            html += `<option value="${startDate}|${endDate}">${label}</option>`;
+        }
+
+        select.innerHTML = html;
+    }
+
     setupEventListeners() {
         document.getElementById('new-transaction-btn').addEventListener('click', () => {
             this.showNewTransactionModal();
         });
 
         document.getElementById('filter-btn').addEventListener('click', () => {
+            this.loadTransactions();
+        });
+
+        document.getElementById('filter-account')?.addEventListener('change', () => {
+            // Reset month filter when account changes
+            const monthSelect = document.getElementById('filter-month');
+            if (monthSelect) monthSelect.value = '';
+            this.loadTransactions();
+        });
+
+        document.getElementById('filter-month')?.addEventListener('change', (e) => {
+            if (e.target.value) {
+                const [start, end] = e.target.value.split('|');
+                document.getElementById('filter-start-date').value = start;
+                document.getElementById('filter-end-date').value = end;
+            } else {
+                document.getElementById('filter-start-date').value = '';
+                document.getElementById('filter-end-date').value = '';
+            }
             this.loadTransactions();
         });
 
@@ -45,10 +127,12 @@ class TransactionsManager {
     async loadTransactions() {
         const startDate = document.getElementById('filter-start-date').value;
         const endDate = document.getElementById('filter-end-date').value;
+        const accountId = document.getElementById('filter-account')?.value;
 
         const filters = {};
         if (startDate) filters.start_date = startDate;
         if (endDate) filters.end_date = endDate;
+        if (accountId) filters.account_id = accountId;
 
         const transactions = await api.getTransactions(filters);
         this.renderTransactions(transactions);

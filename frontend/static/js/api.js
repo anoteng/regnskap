@@ -4,6 +4,12 @@ class API {
     constructor() {
         this.token = localStorage.getItem('token');
         this.currentLedgerId = localStorage.getItem('currentLedgerId');
+        this.tokenRefreshInterval = null;
+
+        // Start token refresh if we have a token
+        if (this.token) {
+            this.startTokenRefresh();
+        }
     }
 
     get baseURL() {
@@ -13,11 +19,63 @@ class API {
     setToken(token) {
         this.token = token;
         localStorage.setItem('token', token);
+
+        // Start token refresh when token is set
+        this.startTokenRefresh();
     }
 
     clearToken() {
         this.token = null;
         localStorage.removeItem('token');
+
+        // Stop token refresh when logged out
+        this.stopTokenRefresh();
+    }
+
+    startTokenRefresh() {
+        // Stop any existing interval
+        this.stopTokenRefresh();
+
+        // Refresh token every 4 hours (token expires after 8 hours)
+        this.tokenRefreshInterval = setInterval(() => {
+            this.refreshToken().catch(err => {
+                console.error('Token refresh failed:', err);
+                // If refresh fails, user will be logged out on next API call
+            });
+        }, 4 * 60 * 60 * 1000); // 4 hours in milliseconds
+    }
+
+    stopTokenRefresh() {
+        if (this.tokenRefreshInterval) {
+            clearInterval(this.tokenRefreshInterval);
+            this.tokenRefreshInterval = null;
+        }
+    }
+
+    async refreshToken() {
+        if (!this.token) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`${API_BASE}/auth/refresh`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${this.token}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                this.setToken(data.access_token);
+                console.log('Token refreshed successfully');
+            } else {
+                console.error('Token refresh failed:', response.status);
+            }
+        } catch (error) {
+            console.error('Token refresh error:', error);
+        }
     }
 
     setCurrentLedger(ledgerId) {
@@ -189,8 +247,25 @@ class API {
         return this.delete(`/transactions/${id}`);
     }
 
-    async getPostingQueue(skip = 0, limit = 100) {
+    async getPostingQueue(skip = 0, limit = 50) {
         return this.get(`/transactions/queue?skip=${skip}&limit=${limit}`);
+    }
+
+    async getAspsps(country = null) {
+        const params = country ? `?country=${country}` : '';
+        return this.get(`/bank-connections/aspsps${params}`);
+    }
+
+    async getChainSuggestions() {
+        return this.get('/transactions/chain-suggestions');
+    }
+
+    async chainTransactions(primaryId, secondaryId, autoPost = false) {
+        return this.post('/transactions/chain', {
+            primary_transaction_id: primaryId,
+            secondary_transaction_id: secondaryId,
+            auto_post: autoPost
+        });
     }
 
     async postTransaction(id) {
@@ -308,6 +383,12 @@ class API {
 
     async deleteBudget(id) {
         return this.delete(`/budgets/${id}`)
+    }
+
+    async getBudgetDrilldown(budgetId, accountId, month = null) {
+        let params = `?account_id=${accountId}`;
+        if (month) params += `&month=${month}`;
+        return this.get(`/budgets/${budgetId}/drilldown${params}`);
     }
 
     async getBalanceSheet(asOfDate = null) {

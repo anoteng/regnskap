@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from backend.app.routes import auth, accounts, bank_accounts, transactions, categories, budgets, reports, csv_mappings, ledgers, receipts, passkey, admin, ai, bank_admin, bank_connections
+from backend.app.routes import auth, accounts, bank_accounts, transactions, categories, budgets, reports, csv_mappings, ledgers, receipts, passkey, admin, ai, bank_admin, bank_connections, chart_templates
 
 app = FastAPI(
     title="Regnskap API",
@@ -21,6 +21,7 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api")
 app.include_router(passkey.router, prefix="/api")
 app.include_router(ledgers.router, prefix="/api")
+app.include_router(chart_templates.router, prefix="/api")
 app.include_router(accounts.router, prefix="/api")
 app.include_router(bank_accounts.router, prefix="/api")
 app.include_router(transactions.router, prefix="/api")

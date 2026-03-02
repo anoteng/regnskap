@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from backend.database import get_db
-from ..models import Account, User, Ledger, BankAccount, JournalEntry, LedgerAccountSettings
+from ..models import Account, User, Ledger, BankAccount, JournalEntry, BudgetLine
 from ..schemas import Account as AccountSchema, AccountCreate
 from ..auth import get_current_active_user, get_current_ledger
 
@@ -15,26 +15,24 @@ def get_accounts(
     skip: int = 0,
     limit: int = 1000,
     account_type: str = None,
-    show_hidden: bool = False,
+    show_inactive: bool = False,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
     current_ledger: Ledger = Depends(get_current_ledger)
 ):
-    query = db.query(Account).filter(Account.is_active == True)
+    """Get all accounts for the current ledger."""
+    query = db.query(Account).filter(Account.ledger_id == current_ledger.id)
+
+    # Filter by account type if specified
     if account_type:
         query = query.filter(Account.account_type == account_type.upper())
 
-    # Filter out hidden accounts for this ledger unless explicitly requested
-    if not show_hidden:
-        # Get hidden account IDs for this ledger
-        hidden_settings = db.query(LedgerAccountSettings).filter(
-            LedgerAccountSettings.ledger_id == current_ledger.id,
-            LedgerAccountSettings.is_hidden == True
-        ).all()
-        hidden_ids = [s.account_id for s in hidden_settings]
+    # Filter out inactive accounts unless explicitly requested
+    if not show_inactive:
+        query = query.filter(Account.is_active == True)
 
-        if hidden_ids:
-            query = query.filter(~Account.id.in_(hidden_ids))
+    # Sort by account number
+    query = query.order_by(Account.account_number)
 
     accounts = query.offset(skip).limit(limit).all()
     return accounts
@@ -44,19 +42,29 @@ def get_accounts(
 def create_account(
     account: AccountCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    current_ledger: Ledger = Depends(get_current_ledger)
 ):
-    existing = db.query(Account).filter(Account.account_number == account.account_number).first()
+    """Create a new account in the current ledger."""
+    # Check if account number already exists in this ledger
+    existing = db.query(Account).filter(
+        Account.ledger_id == current_ledger.id,
+        Account.account_number == account.account_number
+    ).first()
+
     if existing:
-        raise HTTPException(status_code=400, detail="Account number already exists")
+        raise HTTPException(
+            status_code=400,
+            detail="Account number already exists in this ledger"
+        )
 
     db_account = Account(
+        ledger_id=current_ledger.id,
         account_number=account.account_number,
         account_name=account.account_name,
         account_type=account.account_type,
         parent_account_id=account.parent_account_id,
         description=account.description,
-        is_system=False,
         is_active=True
     )
     db.add(db_account)
@@ -69,11 +77,18 @@ def create_account(
 def get_account(
     account_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    current_ledger: Ledger = Depends(get_current_ledger)
 ):
-    account = db.query(Account).filter(Account.id == account_id).first()
+    """Get a specific account."""
+    account = db.query(Account).filter(
+        Account.id == account_id,
+        Account.ledger_id == current_ledger.id
+    ).first()
+
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
+
     return account
 
 
@@ -82,24 +97,30 @@ def update_account(
     account_id: int,
     account_update: AccountCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    current_ledger: Ledger = Depends(get_current_ledger)
 ):
-    account = db.query(Account).filter(Account.id == account_id).first()
+    """Update an account."""
+    account = db.query(Account).filter(
+        Account.id == account_id,
+        Account.ledger_id == current_ledger.id
+    ).first()
+
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
-
-    # Don't allow editing system accounts
-    if account.is_system:
-        raise HTTPException(status_code=403, detail="Cannot edit system accounts")
 
     # Check if new account number is already in use (if changed)
     if account_update.account_number != account.account_number:
         existing = db.query(Account).filter(
+            Account.ledger_id == current_ledger.id,
             Account.account_number == account_update.account_number,
             Account.id != account_id
         ).first()
         if existing:
-            raise HTTPException(status_code=400, detail="Account number already exists")
+            raise HTTPException(
+                status_code=400,
+                detail="Account number already exists in this ledger"
+            )
 
     account.account_number = account_update.account_number
     account.account_name = account_update.account_name
@@ -116,15 +137,17 @@ def update_account(
 def delete_account(
     account_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    current_ledger: Ledger = Depends(get_current_ledger)
 ):
-    account = db.query(Account).filter(Account.id == account_id).first()
+    """Delete (soft delete) an account."""
+    account = db.query(Account).filter(
+        Account.id == account_id,
+        Account.ledger_id == current_ledger.id
+    ).first()
+
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
-
-    # Don't allow deleting system accounts
-    if account.is_system:
-        raise HTTPException(status_code=403, detail="Cannot delete system accounts")
 
     # Check if account is in use by bank accounts
     bank_account_count = db.query(BankAccount).filter(
@@ -134,7 +157,7 @@ def delete_account(
     if bank_account_count > 0:
         raise HTTPException(
             status_code=400,
-            detail=f"Cannot delete account. It is used by {bank_account_count} bank account(s)"
+            detail=f"Kan ikke slette kontoen. Den brukes av {bank_account_count} bankkonto(er)"
         )
 
     # Check if account has journal entries
@@ -144,7 +167,17 @@ def delete_account(
     if journal_entry_count > 0:
         raise HTTPException(
             status_code=400,
-            detail=f"Cannot delete account. It has {journal_entry_count} journal entries"
+            detail=f"Kan ikke slette kontoen. Den har {journal_entry_count} posteringer"
+        )
+
+    # Check if account is used in budgets
+    budget_line_count = db.query(BudgetLine).filter(
+        BudgetLine.account_id == account_id
+    ).count()
+    if budget_line_count > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Kan ikke slette kontoen. Den brukes i {budget_line_count} budsjettlinje(r)"
         )
 
     # Soft delete
@@ -154,48 +187,29 @@ def delete_account(
     return {"message": "Account deleted successfully"}
 
 
-@router.post("/{account_id}/toggle-visibility")
-def toggle_account_visibility(
+@router.post("/{account_id}/toggle-active")
+def toggle_account_active(
     account_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
     current_ledger: Ledger = Depends(get_current_ledger)
 ):
-    """Toggle visibility of an account for the current ledger"""
-    account = db.query(Account).filter(Account.id == account_id).first()
+    """Toggle active status of an account."""
+    account = db.query(Account).filter(
+        Account.id == account_id,
+        Account.ledger_id == current_ledger.id
+    ).first()
+
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
 
-    # Can only hide/show system accounts
-    if not account.is_system:
-        raise HTTPException(
-            status_code=400,
-            detail="Can only toggle visibility for system accounts. Use delete for custom accounts."
-        )
-
-    # Check if setting exists
-    setting = db.query(LedgerAccountSettings).filter(
-        LedgerAccountSettings.ledger_id == current_ledger.id,
-        LedgerAccountSettings.account_id == account_id
-    ).first()
-
-    if setting:
-        # Toggle existing setting
-        setting.is_hidden = not setting.is_hidden
-        new_state = "hidden" if setting.is_hidden else "visible"
-    else:
-        # Create new setting (default to hidden)
-        setting = LedgerAccountSettings(
-            ledger_id=current_ledger.id,
-            account_id=account_id,
-            is_hidden=True
-        )
-        db.add(setting)
-        new_state = "hidden"
+    # Toggle active status
+    account.is_active = not account.is_active
+    new_state = "active" if account.is_active else "inactive"
 
     db.commit()
 
     return {
         "message": f"Account is now {new_state}",
-        "is_hidden": setting.is_hidden
+        "is_active": account.is_active
     }

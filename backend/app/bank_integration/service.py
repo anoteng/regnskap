@@ -25,7 +25,7 @@ from backend.app.models import (
 )
 
 from .providers.base import BaseBankProvider
-from .providers.enable_banking import EnableBankingProvider
+from .providers.enable_banking import EnableBankingProvider, SessionExpiredError
 from .encryption import TokenEncryption
 from .deduplication import TransactionDeduplicator
 
@@ -299,6 +299,10 @@ class BankIntegrationService:
                 account_info = account
                 break
 
+        # Sanitize BIC - may be stored as a dict from Enable Banking API
+        if account_info and isinstance(account_info.get('bic'), dict):
+            account_info['bic'] = account_info['bic'].get('bic_fi')
+
         if not account_info:
             raise ValueError(f"Selected account {selected_account_id} not found in available accounts")
 
@@ -374,6 +378,50 @@ class BankIntegrationService:
         # State will expire naturally after 30 minutes
         # oauth_state.used_at = datetime.utcnow()
 
+        # CRITICAL: Update ALL sibling connections from the same bank with the new session.
+        # When the user re-authorizes with an ASPSP (bank), the bank may revoke the old session.
+        # Any other connections using that old session would then fail with EXPIRED_SESSION.
+        # To prevent this, propagate the new session tokens to all connections from the same bank.
+        import logging
+        logger = logging.getLogger(__name__)
+
+        sibling_connections = self.db.query(BankConnection).filter(
+            BankConnection.ledger_id == oauth_state.ledger_id,
+            BankConnection.provider_id == oauth_state.provider_id,
+            BankConnection.external_bank_id == oauth_state.external_bank_id,
+            BankConnection.id != bank_connection.id,
+            BankConnection.status != BankConnectionStatus.DISCONNECTED
+        ).all()
+
+        if sibling_connections:
+            logger.info(f"Updating {len(sibling_connections)} sibling connections with new session tokens")
+
+            for sibling in sibling_connections:
+                # Update session tokens (same session covers all accounts at this bank)
+                sibling.access_token = self.encryption.encrypt(access_token)
+                sibling.refresh_token = self.encryption.encrypt(refresh_token) if refresh_token else None
+                sibling.token_expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+
+                # Try to match sibling's IBAN/BBAN with an account in the new session
+                # to update the volatile account UID
+                if sibling.external_account_iban:
+                    for acc in accounts:
+                        acc_iban = acc.get('iban') or acc.get('bban')
+                        if acc_iban and acc_iban == sibling.external_account_iban:
+                            old_uid = sibling.external_account_id
+                            new_uid = acc['account_id']
+                            if new_uid != old_uid:
+                                logger.info(f"Sibling connection {sibling.id}: updating UID from {old_uid} to {new_uid}")
+                                sibling.external_account_id = new_uid
+                                sibling.external_account_name = acc.get('account_name', sibling.external_account_name)
+                            break
+
+                # Reset error status if it was in ERROR
+                if sibling.status == BankConnectionStatus.ERROR:
+                    sibling.status = BankConnectionStatus.ACTIVE
+                    sibling.connection_error = None
+                    logger.info(f"Sibling connection {sibling.id}: reset from ERROR to ACTIVE")
+
         self.db.commit()
         self.db.refresh(bank_connection)
 
@@ -385,7 +433,9 @@ class BankIntegrationService:
         user: User,
         from_date: Optional[date] = None,
         to_date: Optional[date] = None,
-        sync_type: BankSyncType = BankSyncType.MANUAL
+        sync_type: BankSyncType = BankSyncType.MANUAL,
+        psu_ip_address: Optional[str] = None,
+        psu_user_agent: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Sync transactions from bank.
@@ -437,90 +487,96 @@ class BankIntegrationService:
             # Get provider
             provider = self._get_provider(bank_connection.provider_id)
 
-            # Decrypt access token
+            # Decrypt access token (session_id for Enable Banking)
             access_token = self.encryption.decrypt(bank_connection.access_token)
 
-            # Check if token expired and refresh if needed
-            if bank_connection.token_expires_at and bank_connection.token_expires_at < datetime.utcnow():
-                if not bank_connection.refresh_token:
-                    raise ValueError("Access token expired and no refresh token available")
-
-                # Refresh token
-                refresh_token = self.encryption.decrypt(bank_connection.refresh_token)
-                token_response = await provider.refresh_access_token(refresh_token)
-
-                # Update stored tokens
-                access_token = token_response['access_token']
-                bank_connection.access_token = self.encryption.encrypt(access_token)
-                bank_connection.token_expires_at = datetime.utcnow() + timedelta(
-                    seconds=token_response.get('expires_in', 3600)
-                )
-                self.db.commit()
-
-            # Proactively check session status and update account IDs
-            # (Enable Banking account IDs change per session)
             import logging
             logger = logging.getLogger(__name__)
+
+            # Check if token/session expired
+            # For Enable Banking: sessions are long-lived (up to 90 days), no refresh tokens.
+            # We check token_expires_at as a hint, but the real check is the session status API call.
+            if bank_connection.token_expires_at and bank_connection.token_expires_at < datetime.utcnow():
+                if bank_connection.refresh_token:
+                    # Provider supports refresh tokens (not Enable Banking)
+                    refresh_token = self.encryption.decrypt(bank_connection.refresh_token)
+                    token_response = await provider.refresh_access_token(refresh_token)
+                    access_token = token_response['access_token']
+                    bank_connection.access_token = self.encryption.encrypt(access_token)
+                    bank_connection.token_expires_at = datetime.utcnow() + timedelta(
+                        seconds=token_response.get('expires_in', 3600)
+                    )
+                    self.db.commit()
+                else:
+                    # No refresh token (Enable Banking uses long-lived sessions)
+                    # Don't fail here - the session might still be valid.
+                    # The session status check below will verify.
+                    logger.warning(
+                        f"token_expires_at ({bank_connection.token_expires_at}) has passed, "
+                        f"but no refresh token available. Will check session status directly."
+                    )
+
+            # Check session status and update account IDs
+            # (Enable Banking account IDs change per session)
             try:
                 if hasattr(provider, 'check_session_status'):
                     logger.info("Checking session status...")
-                    session_info = await provider.check_session_status(access_token)
+                    session_info = await provider.check_session_status(
+                        access_token,
+                        psu_ip_address=psu_ip_address,
+                        psu_user_agent=psu_user_agent
+                    )
 
-                    # Debug: log the actual response
-                    logger.info(f"Session info type: {type(session_info)}")
                     if isinstance(session_info, dict):
-                        logger.info(f"Session info keys: {list(session_info.keys())}")
                         session_status = session_info.get('status')
                         logger.info(f"Session status: {session_status}")
 
-                        # Check if session is expired or closed
-                        if session_status in ['expired', 'closed', 'revoked']:
-                            error_msg = f"Bank connection session is {session_status}. User must re-authorize."
+                        # Check if session is expired or closed (case-insensitive)
+                        if session_status and session_status.lower() in ['expired', 'closed', 'revoked', 'expr']:
+                            error_msg = f"Bank session is {session_status}. Please re-authorize the connection."
                             logger.error(error_msg)
-                            bank_connection.status = 'ERROR'
-                            sync_log.sync_status = 'FAILED'
+                            bank_connection.status = BankConnectionStatus.ERROR
+                            bank_connection.connection_error = error_msg
+                            sync_log.sync_status = BankSyncStatus.FAILED
                             sync_log.error_message = error_msg
                             self.db.commit()
-                            raise ValueError(error_msg)
+                            raise SessionExpiredError(error_msg)
 
                         # Update account IDs if they've changed
                         accounts = session_info.get('accounts', [])
-                    else:
-                        logger.warning(f"Session info is not a dict: {session_info}")
-                        accounts = []
-                    if accounts:
-                        bank_account = self.db.query(BankAccount).get(bank_connection.bank_account_id)
-                        if bank_account and bank_connection.external_account_iban:
-                            target_iban = bank_connection.external_account_iban
+                        if accounts:
+                            bank_account = self.db.query(BankAccount).get(bank_connection.bank_account_id)
+                            if bank_account and bank_connection.external_account_iban:
+                                target_iban = bank_connection.external_account_iban
 
-                            for acc in accounts:
-                                # account_id can be either a string or a dict with 'iban' key
-                                account_id_field = acc.get('account_id')
-                                acc_iban = None
+                                for acc in accounts:
+                                    if not isinstance(acc, dict):
+                                        continue
 
-                                if isinstance(account_id_field, dict):
-                                    acc_iban = account_id_field.get('iban')
-                                    new_id = account_id_field  # Keep as dict if that's what we got
-                                elif isinstance(account_id_field, str):
-                                    # account_id is a string, check if account has separate iban field
-                                    acc_iban = acc.get('iban')
-                                    new_id = account_id_field
+                                    # uid is the UUID for API calls; account_id is the identification object
+                                    acc_uid = acc.get('uid')
+                                    account_id_field = acc.get('account_id')
+                                    acc_iban = None
 
-                                if acc_iban == target_iban:
-                                    old_id = bank_connection.external_account_id
+                                    if isinstance(account_id_field, dict):
+                                        acc_iban = account_id_field.get('iban')
+                                        if not acc_iban and isinstance(account_id_field.get('other'), dict):
+                                            acc_iban = account_id_field['other'].get('identification')
 
-                                    if new_id and new_id != old_id:
-                                        logger.info(f"Proactively updating account ID from {old_id} to {new_id}")
-                                        bank_connection.external_account_id = new_id
-                                        self.db.commit()
-                                    else:
-                                        logger.info(f"Account ID still valid: {new_id}")
-                                    break
-            except ValueError:
-                # Re-raise ValueError (session expired)
+                                    if acc_iban and acc_iban == target_iban:
+                                        old_id = bank_connection.external_account_id
+                                        if acc_uid and isinstance(acc_uid, str) and acc_uid != old_id:
+                                            logger.info(f"Updating account UID from {old_id} to {acc_uid}")
+                                            bank_connection.external_account_id = acc_uid
+                                            self.db.commit()
+                                        break
+
+            except SessionExpiredError:
+                # Session expired - propagate to caller
                 raise
             except Exception as e:
-                # Don't fail sync if account ID refresh fails, we'll retry on ASPSP_ERROR
+                # Don't fail sync if session check fails for non-expiry reasons
+                # (network timeout, temporary API issue, etc.)
                 logger.warning(f"Could not check session status: {str(e)}")
 
             # Determine date range and strategy
@@ -530,15 +586,15 @@ class BankIntegrationService:
 
             if not from_date:
                 if bank_connection.last_successful_sync_at:
-                    # Ongoing sync: use last sync time, but cap at 89 days ago
-                    # (to stay within the 90-day availability window)
+                    # Ongoing sync: overlap by 1 day to catch late-posting transactions
+                    # (booking date vs value date differences, especially for credit cards)
+                    # Cap at 89 days ago to stay within the 90-day availability window
                     from_date = max(
-                        bank_connection.last_successful_sync_at.date(),
+                        bank_connection.last_successful_sync_at.date() - timedelta(days=1),
                         date.today() - timedelta(days=89)
                     )
                 else:
-                    # Initial sync: Use strategy=longest to get maximum available history
-                    # If initial_sync_from_date is set, use that as a hint to limit history
+                    # Initial sync: use initial_sync_from_date if set
                     from_date = bank_connection.initial_sync_from_date
 
             if not to_date:
@@ -561,7 +617,9 @@ class BankIntegrationService:
                     account_id=bank_connection.external_account_id,
                     from_date=from_date,
                     to_date=to_date,
-                    is_initial_sync=is_initial_sync
+                    is_initial_sync=is_initial_sync,
+                    psu_ip_address=psu_ip_address,
+                    psu_user_agent=psu_user_agent
                 )
 
                 logger.info(f"Successfully fetched {len(raw_transactions)} transactions")
