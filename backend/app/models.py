@@ -389,7 +389,7 @@ class Receipt(Base):
 class SubscriptionTier(str, enum.Enum):
     FREE = "FREE"
     BASIC = "BASIC"
-    AI = "AI"
+    PREMIUM = "PREMIUM"
 
 
 class SubscriptionStatus(str, enum.Enum):
@@ -407,6 +407,7 @@ class SubscriptionPlan(Base):
     tier = Column(SQLEnum(SubscriptionTier), nullable=False, unique=True)
     description = Column(Text)
     price_monthly = Column(DECIMAL(10, 2), nullable=False, default=0)
+    price_yearly = Column(DECIMAL(10, 2), nullable=True)
     features = Column(Text)  # JSON string of features
     max_documents = Column(Integer, nullable=True)  # NULL = unlimited
     max_monthly_uploads = Column(Integer, nullable=True)  # NULL = unlimited

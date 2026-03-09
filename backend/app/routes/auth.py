@@ -7,7 +7,7 @@ import secrets
 from backend.database import get_db
 from backend.config import get_settings
 from backend.email import send_password_reset_email
-from ..models import User, PasswordResetToken, WebAuthnCredential
+from ..models import User, PasswordResetToken, WebAuthnCredential, UserSubscription, SubscriptionStatus
 from ..schemas import Token, UserCreate, User as UserSchema, PasswordResetRequest, PasswordResetComplete, PasswordResetResponse
 from ..auth import authenticate_user, create_access_token, get_password_hash, get_current_active_user
 
@@ -147,3 +147,28 @@ def complete_password_reset(request: PasswordResetComplete, db: Session = Depend
 async def get_me(current_user: User = Depends(get_current_active_user)):
     """Get current authenticated user information"""
     return current_user
+
+
+@router.get("/me/subscription")
+async def get_my_subscription(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Get current user's subscription info"""
+    subscription = db.query(UserSubscription).filter(
+        UserSubscription.user_id == current_user.id,
+        UserSubscription.status == SubscriptionStatus.ACTIVE
+    ).first()
+
+    if not subscription:
+        return {"tier": "FREE", "plan_name": "Gratis", "has_subscription": False}
+
+    plan = subscription.plan
+    return {
+        "tier": plan.tier.value,
+        "plan_name": plan.name,
+        "has_subscription": True,
+        "price_monthly": float(plan.price_monthly),
+        "price_yearly": float(plan.price_yearly) if plan.price_yearly else None,
+        "features": plan.features,
+    }

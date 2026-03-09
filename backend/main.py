@@ -2,10 +2,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from backend.app.routes import auth, accounts, bank_accounts, transactions, categories, budgets, reports, csv_mappings, ledgers, receipts, passkey, admin, bank_admin, bank_connections, chart_templates
+from backend.app.routes import auth, accounts, bank_accounts, transactions, categories, budgets, reports, csv_mappings, ledgers, receipts, passkey, admin, bank_admin, bank_connections, chart_templates, exports
 
 app = FastAPI(
-    title="Regnskap API",
+    title="Privatregnskap.eu API",
     description="Personal accounting application with double-entry bookkeeping",
     version="1.0.0"
 )
@@ -33,6 +33,7 @@ app.include_router(receipts.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
 app.include_router(bank_admin.router, prefix="/api")
 app.include_router(bank_connections.router, prefix="/api")
+app.include_router(exports.router, prefix="/api")
 
 
 @app.get("/api/health")

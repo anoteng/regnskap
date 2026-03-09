@@ -64,7 +64,7 @@ def get_rp_id() -> str:
 
 def get_rp_name() -> str:
     """Get Relying Party name"""
-    return getattr(settings, 'rp_name', 'Regnskap')
+    return getattr(settings, 'rp_name', 'Privatregnskap.eu')
 
 
 def get_origin() -> str:

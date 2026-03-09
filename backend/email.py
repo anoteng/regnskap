@@ -15,7 +15,7 @@ def send_password_reset_email(to_email: str, reset_token: str, user_name: str):
 
     # Create email
     msg = MIMEMultipart('alternative')
-    msg['Subject'] = 'Tilbakestill passord - Regnskap'
+    msg['Subject'] = 'Tilbakestill passord - Privatregnskap.eu'
     msg['From'] = settings.smtp_from
     msg['To'] = to_email
 
@@ -23,7 +23,7 @@ def send_password_reset_email(to_email: str, reset_token: str, user_name: str):
     text = f"""
 Hei {user_name},
 
-Du har bedt om å tilbakestille passordet ditt for Regnskap.
+Du har bedt om å tilbakestille passordet ditt for Privatregnskap.eu.
 
 Klikk på lenken nedenfor for å tilbakestille passordet:
 {reset_link}
@@ -33,7 +33,7 @@ Lenken er gyldig i 1 time.
 Hvis du ikke ba om dette, kan du ignorere denne e-posten.
 
 Hilsen
-Regnskap
+Privatregnskap.eu
 """
 
     # HTML version
@@ -42,7 +42,7 @@ Regnskap
   <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
     <h2>Tilbakestill passord</h2>
     <p>Hei {user_name},</p>
-    <p>Du har bedt om å tilbakestille passordet ditt for Regnskap.</p>
+    <p>Du har bedt om å tilbakestille passordet ditt for Privatregnskap.eu.</p>
     <p>Klikk på knappen nedenfor for å tilbakestille passordet:</p>
     <p style="margin: 30px 0;">
       <a href="{reset_link}"
@@ -58,7 +58,7 @@ Regnskap
       Hvis du ikke ba om dette, kan du ignorere denne e-posten.
     </p>
     <hr style="margin-top: 30px; border: none; border-top: 1px solid #ddd;">
-    <p style="color: #999; font-size: 0.8em;">Hilsen Regnskap</p>
+    <p style="color: #999; font-size: 0.8em;">Hilsen Privatregnskap.eu</p>
   </body>
 </html>
 """

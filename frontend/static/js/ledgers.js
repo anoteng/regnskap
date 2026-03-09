@@ -80,48 +80,7 @@ class LedgerManager {
     }
 
     showOnboarding() {
-        // Create onboarding modal
-        const modal = document.createElement('div');
-        modal.className = 'modal';
-        modal.style.display = 'block';
-        modal.innerHTML = `
-            <div class="modal-content">
-                <h2>Velkommen til Regnskap</h2>
-                <p>Opprett ditt første regnskap for å komme i gang.</p>
-                <form id="onboarding-form">
-                    <div class="form-group">
-                        <label for="ledger-name">Navn på regnskap</label>
-                        <input type="text" id="ledger-name" name="name" required
-                               placeholder="Mitt regnskap">
-                    </div>
-                    <div class="form-actions">
-                        <button type="submit" class="btn btn-primary">Opprett regnskap</button>
-                    </div>
-                </form>
-            </div>
-        `;
-
-        document.body.appendChild(modal);
-
-        // Handle form submission
-        const form = modal.querySelector('#onboarding-form');
-        form.addEventListener('submit', async (e) => {
-            e.preventDefault();
-
-            const name = form.querySelector('#ledger-name').value;
-
-            try {
-                const ledger = await api.createLedger(name);
-                api.setCurrentLedger(ledger.id);
-
-                // Remove modal and reload
-                modal.remove();
-                window.location.reload();
-            } catch (error) {
-                console.error('Failed to create ledger:', error);
-                alert('Kunne ikke opprette regnskap: ' + error.message);
-            }
-        });
+        this._showLedgerWizard(true);
     }
 
     showLedgerSettings() {
@@ -346,6 +305,48 @@ class LedgerManager {
             }
         }
 
+        // Export Excel
+        const exportExcelBtn = document.getElementById('export-excel-btn');
+        if (exportExcelBtn) {
+            exportExcelBtn.onclick = async () => {
+                const statusEl = document.getElementById('export-status');
+                try {
+                    exportExcelBtn.disabled = true;
+                    exportExcelBtn.textContent = 'Laster ned...';
+                    if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = 'Genererer Excel-fil...'; }
+                    await api.downloadFile('/exports/excel');
+                    if (statusEl) { statusEl.textContent = 'Nedlasting fullført!'; setTimeout(() => { statusEl.style.display = 'none'; }, 3000); }
+                } catch (error) {
+                    alert('Kunne ikke eksportere: ' + error.message);
+                    if (statusEl) statusEl.style.display = 'none';
+                } finally {
+                    exportExcelBtn.disabled = false;
+                    exportExcelBtn.textContent = 'Last ned Excel';
+                }
+            };
+        }
+
+        // Export receipts ZIP
+        const exportReceiptsBtn = document.getElementById('export-receipts-btn');
+        if (exportReceiptsBtn) {
+            exportReceiptsBtn.onclick = async () => {
+                const statusEl = document.getElementById('export-status');
+                try {
+                    exportReceiptsBtn.disabled = true;
+                    exportReceiptsBtn.textContent = 'Laster ned...';
+                    if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = 'Pakker bilag...'; }
+                    await api.downloadFile('/exports/receipts');
+                    if (statusEl) { statusEl.textContent = 'Nedlasting fullført!'; setTimeout(() => { statusEl.style.display = 'none'; }, 3000); }
+                } catch (error) {
+                    alert('Kunne ikke eksportere bilag: ' + error.message);
+                    if (statusEl) statusEl.style.display = 'none';
+                } finally {
+                    exportReceiptsBtn.disabled = false;
+                    exportReceiptsBtn.textContent = 'Last ned bilag (ZIP)';
+                }
+            };
+        }
+
         // Delete ledger
         const deleteBtn = document.getElementById('delete-ledger-btn');
         if (deleteBtn) {
@@ -448,51 +449,211 @@ class LedgerManager {
     }
 
     showCreateLedgerModal() {
+        this._showLedgerWizard(false);
+    }
+
+    async _showLedgerWizard(isOnboarding) {
         const modal = document.createElement('div');
         modal.className = 'modal';
         modal.style.display = 'block';
-        modal.innerHTML = `
-            <div class="modal-content">
-                <span class="close">&times;</span>
-                <h2>Opprett nytt regnskap</h2>
-                <form id="create-ledger-form">
-                    <div class="form-group">
-                        <label for="new-ledger-name">Navn på regnskap</label>
-                        <input type="text" id="new-ledger-name" name="name" required
-                               placeholder="Familie regnskap">
+
+        // Template icons/defaults
+        const templateMeta = {
+            'personal_accounting': { icon: '👤', defaultName: 'Mitt regnskap' },
+            'family_accounting': { icon: '👨\u200D👩\u200D👧\u200D👦', defaultName: 'Familieregnskap' },
+            'business_accounting': { icon: '🏢', defaultName: 'Mitt firma' },
+        };
+
+        // Load templates
+        let templates = [];
+        try {
+            templates = await api.getChartTemplates();
+        } catch (e) {
+            console.error('Could not load templates:', e);
+        }
+
+        // State
+        let selectedTemplateId = null;
+        let bankAccountCount = 0;
+
+        const renderStep1 = () => {
+            modal.innerHTML = `
+                <div class="modal-content" style="max-width: 600px;">
+                    ${!isOnboarding ? '<span class="close">&times;</span>' : ''}
+                    <h2>${isOnboarding ? 'Velkommen til Privatregnskap.eu' : 'Opprett nytt regnskap'}</h2>
+                    <p>${isOnboarding ? 'Velg en kontoplan for å komme i gang.' : 'Velg kontoplan for det nye regnskapet.'}</p>
+
+                    <div id="template-cards" style="display: flex; flex-direction: column; gap: 0.75rem; margin: 1.5rem 0;">
+                        ${templates.map(t => {
+                            const meta = templateMeta[t.name] || { icon: '📋', defaultName: 'Nytt regnskap' };
+                            return `
+                                <div class="template-card" data-id="${t.id}" data-name="${t.name}"
+                                     style="border: 2px solid #e5e7eb; border-radius: 8px; padding: 1rem; cursor: pointer; transition: border-color 0.2s;">
+                                    <div style="display: flex; align-items: center; gap: 1rem;">
+                                        <span style="font-size: 2rem;">${meta.icon}</span>
+                                        <div>
+                                            <strong style="font-size: 1.1rem;">${t.display_name}</strong>
+                                            <p style="margin: 0.25rem 0 0; color: #6b7280; font-size: 0.9rem;">${t.description || ''}</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')}
                     </div>
-                    <div class="form-actions">
-                        <button type="button" class="btn btn-secondary" onclick="this.closest('.modal').remove()">
-                            Avbryt
+                </div>
+            `;
+
+            if (!isOnboarding) {
+                modal.querySelector('.close').onclick = () => modal.remove();
+            }
+
+            // Card selection
+            modal.querySelectorAll('.template-card').forEach(card => {
+                card.addEventListener('click', () => {
+                    selectedTemplateId = parseInt(card.dataset.id);
+                    const templateName = card.dataset.name;
+                    renderStep2(templateName);
+                });
+
+                card.addEventListener('mouseenter', () => {
+                    card.style.borderColor = '#3b82f6';
+                    card.style.background = '#f0f7ff';
+                });
+                card.addEventListener('mouseleave', () => {
+                    card.style.borderColor = '#e5e7eb';
+                    card.style.background = '';
+                });
+            });
+        };
+
+        const renderStep2 = (templateName) => {
+            const meta = templateMeta[templateName] || { icon: '📋', defaultName: 'Nytt regnskap' };
+            bankAccountCount = 0;
+
+            modal.innerHTML = `
+                <div class="modal-content" style="max-width: 600px;">
+                    ${!isOnboarding ? '<span class="close">&times;</span>' : ''}
+                    <h2>${meta.icon} ${isOnboarding ? 'Sett opp regnskapet' : 'Nytt regnskap'}</h2>
+
+                    <form id="wizard-form">
+                        <div class="form-group">
+                            <label>Navn på regnskap</label>
+                            <input type="text" id="wizard-name" required value="${meta.defaultName}">
+                        </div>
+
+                        <hr style="margin: 1.5rem 0;">
+
+                        <h3>Bankkontoer <small style="color: #6b7280; font-weight: normal;">(valgfritt)</small></h3>
+                        <p style="color: #6b7280; font-size: 0.9rem; margin-bottom: 1rem;">
+                            Du kan legge til bankkontoer nå eller senere fra Bankkontoer-menyen.
+                        </p>
+
+                        <div id="bank-accounts-list"></div>
+
+                        <button type="button" id="add-bank-btn" class="btn btn-secondary" style="margin-bottom: 1.5rem;">
+                            + Legg til bankkonto
                         </button>
-                        <button type="submit" class="btn btn-primary">Opprett</button>
+
+                        <div style="display: flex; gap: 1rem; justify-content: space-between;">
+                            <button type="button" id="wizard-back" class="btn btn-secondary">← Tilbake</button>
+                            <button type="submit" class="btn btn-primary">Opprett regnskap</button>
+                        </div>
+                    </form>
+                </div>
+            `;
+
+            if (!isOnboarding) {
+                modal.querySelector('.close').onclick = () => modal.remove();
+            }
+
+            modal.querySelector('#wizard-back').onclick = () => renderStep1();
+
+            modal.querySelector('#add-bank-btn').onclick = () => {
+                addBankAccountRow();
+            };
+
+            const addBankAccountRow = () => {
+                const idx = bankAccountCount++;
+                const container = modal.querySelector('#bank-accounts-list');
+                const row = document.createElement('div');
+                row.className = 'bank-account-row';
+                row.style.cssText = 'border: 1px solid #e5e7eb; border-radius: 6px; padding: 0.75rem; margin-bottom: 0.75rem; background: #f9fafb;';
+                row.innerHTML = `
+                    <div style="display: flex; gap: 0.5rem; align-items: end; flex-wrap: wrap;">
+                        <div class="form-group" style="flex: 2; min-width: 150px; margin-bottom: 0;">
+                            <label style="font-size: 0.85rem;">Navn</label>
+                            <input type="text" class="ba-name" placeholder="F.eks. DNB Brukskonto" required>
+                        </div>
+                        <div class="form-group" style="flex: 1; min-width: 120px; margin-bottom: 0;">
+                            <label style="font-size: 0.85rem;">Type</label>
+                            <select class="ba-type">
+                                <option value="CHECKING">Brukskonto</option>
+                                <option value="SAVINGS">Sparekonto</option>
+                                <option value="CREDIT_CARD">Kredittkort</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="flex: 1; min-width: 120px; margin-bottom: 0;">
+                            <label style="font-size: 0.85rem;">Kontonr (valgfritt)</label>
+                            <input type="text" class="ba-number" placeholder="1234.56.78901">
+                        </div>
+                        <button type="button" class="btn btn-sm btn-danger ba-remove" style="margin-bottom: 0.25rem;">✕</button>
                     </div>
-                </form>
-            </div>
-        `;
+                `;
+                container.appendChild(row);
+
+                row.querySelector('.ba-remove').onclick = () => row.remove();
+            };
+
+            // Form submission
+            modal.querySelector('#wizard-form').addEventListener('submit', async (e) => {
+                e.preventDefault();
+
+                const name = modal.querySelector('#wizard-name').value;
+
+                // Collect bank accounts
+                const bankAccounts = [];
+                modal.querySelectorAll('.bank-account-row').forEach(row => {
+                    const baName = row.querySelector('.ba-name').value;
+                    const baType = row.querySelector('.ba-type').value;
+                    const baNumber = row.querySelector('.ba-number').value;
+                    if (baName) {
+                        bankAccounts.push({
+                            name: baName,
+                            account_type: baType,
+                            account_number: baNumber || null
+                        });
+                    }
+                });
+
+                try {
+                    const submitBtn = modal.querySelector('button[type="submit"]');
+                    submitBtn.disabled = true;
+                    submitBtn.textContent = 'Oppretter...';
+
+                    const ledger = await api.createLedger(name, selectedTemplateId, bankAccounts);
+
+                    if (isOnboarding) {
+                        api.setCurrentLedger(ledger.id);
+                        modal.remove();
+                        window.location.reload();
+                    } else {
+                        modal.remove();
+                        await this.switchLedger(ledger.id);
+                    }
+                } catch (error) {
+                    console.error('Failed to create ledger:', error);
+                    alert('Kunne ikke opprette regnskap: ' + error.message);
+                    const submitBtn = modal.querySelector('button[type="submit"]');
+                    if (submitBtn) {
+                        submitBtn.disabled = false;
+                        submitBtn.textContent = 'Opprett regnskap';
+                    }
+                }
+            });
+        };
 
         document.body.appendChild(modal);
-
-        // Close button
-        modal.querySelector('.close').onclick = () => modal.remove();
-
-        // Form submission
-        const form = modal.querySelector('#create-ledger-form');
-        form.addEventListener('submit', async (e) => {
-            e.preventDefault();
-
-            const name = form.querySelector('#new-ledger-name').value;
-
-            try {
-                const ledger = await api.createLedger(name);
-                modal.remove();
-
-                // Switch to new ledger
-                await this.switchLedger(ledger.id);
-            } catch (error) {
-                alert('Kunne ikke opprette regnskap: ' + error.message);
-            }
-        });
+        renderStep1();
     }
 }
 

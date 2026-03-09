@@ -64,8 +64,7 @@ class AdminManager {
                             <th>Navn</th>
                             <th>Tier</th>
                             <th>Pris (kr/mnd)</th>
-                            <th>Maks bilag</th>
-                            <th>Maks opplastinger/mnd</th>
+                            <th>Pris (kr/år)</th>
                             <th>Status</th>
                             <th>Handlinger</th>
                         </tr>
@@ -85,16 +84,12 @@ class AdminManager {
             ? '<span class="status-badge status-posted">Aktiv</span>'
             : '<span class="status-badge status-draft">Inaktiv</span>';
 
-        const maxDocs = plan.max_documents ? plan.max_documents : 'Ubegrenset';
-        const maxUploads = plan.max_monthly_uploads ? plan.max_monthly_uploads : 'Ubegrenset';
-
         return `
             <tr>
                 <td>${plan.name}</td>
                 <td>${plan.tier}</td>
-                <td>${plan.price_monthly}</td>
-                <td>${maxDocs}</td>
-                <td>${maxUploads}</td>
+                <td>${plan.price_monthly} kr</td>
+                <td>${plan.price_yearly ? plan.price_yearly + ' kr' : '-'}</td>
                 <td>${statusBadge}</td>
                 <td>
                     <button class="btn btn-sm btn-primary" onclick="adminManager.showPlanModal(${plan.id})">
@@ -394,6 +389,12 @@ class AdminManager {
                 </div>
 
                 <div class="form-group">
+                    <label>Pris per år (kr)</label>
+                    <input type="number" id="edit-plan-price-yearly" min="0" step="0.01" value="${plan.price_yearly || ''}">
+                    <small>La stå tom hvis ingen årspris tilbys.</small>
+                </div>
+
+                <div class="form-group">
                     <label>Funksjoner (JSON-array)</label>
                     <textarea id="edit-plan-features" rows="4">${plan.features || '[]'}</textarea>
                     <small>Format: ["Funksjon 1", "Funksjon 2", ...]</small>
@@ -442,6 +443,7 @@ class AdminManager {
             const name = document.getElementById('edit-plan-name').value;
             const description = document.getElementById('edit-plan-description').value;
             const price_monthly = parseFloat(document.getElementById('edit-plan-price').value);
+            const price_yearly = document.getElementById('edit-plan-price-yearly').value;
             const features = document.getElementById('edit-plan-features').value;
             const max_documents = document.getElementById('edit-plan-max-documents').value;
             const max_monthly_uploads = document.getElementById('edit-plan-max-uploads').value;
@@ -461,6 +463,7 @@ class AdminManager {
                     name,
                     description,
                     price_monthly,
+                    price_yearly: price_yearly ? parseFloat(price_yearly) : null,
                     features,
                     max_documents: max_documents ? parseInt(max_documents) : null,
                     max_monthly_uploads: max_monthly_uploads ? parseInt(max_monthly_uploads) : null,

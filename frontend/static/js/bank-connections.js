@@ -6,95 +6,94 @@ class BankConnectionsManager {
         this.connections = [];
         this.providers = [];
         this.bankAccounts = [];
-        this.currentLedgerId = null;
-        this.redirecting = false;
+        this.initialized = false;
     }
 
     async init() {
         try {
-            // Check if token exists
-            const token = localStorage.getItem('token');
-            if (!token) {
-                console.log('No token found, redirecting to login');
-                this.redirectToLogin();
+            // Check subscription - bank integration requires Premium
+            const sub = await api.request('/auth/me/subscription');
+            if (!sub || sub.tier !== 'PREMIUM') {
+                this.showUpgradeInfo();
                 return;
             }
-
-            // Check authentication
-            const user = await api.request('/auth/me');
-            document.getElementById('user-name').textContent = user.full_name;
-
-            // Get current ledger
-            const ledgers = await api.request('/ledgers/');
-            if (ledgers.length === 0) {
-                showError('Ingen regnskap funnet');
-                return;
-            }
-            this.currentLedgerId = ledgers[0].id;
 
             // Load data
             await this.loadBankAccounts();
             await this.loadProviders();
             await this.loadConnections();
 
-            this.setupEventListeners();
+            if (!this.initialized) {
+                this.setupEventListeners();
+                this.initialized = true;
+            }
 
             // Check for OAuth callback status
             this.checkOAuthCallback();
         } catch (error) {
-            console.error('Init error:', error);
-            // Check if it's an auth error
-            if (error.status === 401 || error.message?.includes('401') || error.message?.includes('Unauthorized')) {
-                this.redirectToLogin();
-            } else {
-                showError(`Kunne ikke laste data: ${error.message}`);
-            }
+            console.error('Bank connections init error:', error);
+            showError(`Kunne ikke laste data: ${error.message}`);
         }
     }
 
-    redirectToLogin() {
-        if (this.redirecting) return; // Prevent multiple redirects
-        this.redirecting = true;
-        console.log('Redirecting to login...');
-        localStorage.removeItem('token'); // Clear invalid token
-        window.location.href = '/';
+    showUpgradeInfo() {
+        // Hide the connect button and subtitle
+        const connectBtn = document.getElementById('connect-bank-btn');
+        if (connectBtn) connectBtn.style.display = 'none';
+        const subtitle = document.querySelector('#bank-connections-view .subtitle');
+        if (subtitle) subtitle.style.display = 'none';
+        const syncProgress = document.getElementById('sync-progress');
+        if (syncProgress) syncProgress.style.display = 'none';
+        const helpBox = document.getElementById('connection-help');
+        if (helpBox) helpBox.style.display = 'none';
+
+        const container = document.getElementById('connections-list');
+        container.innerHTML = `
+            <div class="card" style="max-width: 600px; margin: 2rem auto; text-align: center; padding: 2rem;">
+                <h2 style="margin-bottom: 1rem;">Automatisk banksynkronisering</h2>
+                <p style="margin-bottom: 1.5rem; color: #666;">
+                    Med Premium-abonnementet kan du koble bankkontoen din direkte til regnskapet
+                    og f\u00e5 transaksjoner importert automatisk.
+                </p>
+
+                <div style="background: #f0f9ff; border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem; text-align: left;">
+                    <h3 style="margin-bottom: 0.75rem;">Premium inkluderer:</h3>
+                    <ul style="list-style: none; padding: 0; margin: 0;">
+                        <li style="padding: 0.4rem 0;">&#10003; Alt i Basic (vedlegg, CSV-import)</li>
+                        <li style="padding: 0.4rem 0;">&#10003; Automatisk banksynkronisering</li>
+                        <li style="padding: 0.4rem 0;">&#10003; St\u00f8tte for flere bankkontoer</li>
+                        <li style="padding: 0.4rem 0;">&#10003; Duplikatdeteksjon ved import</li>
+                    </ul>
+                </div>
+
+                <div style="background: #fffbeb; border: 1px solid #f59e0b; border-radius: 8px; padding: 1rem; margin-bottom: 1.5rem;">
+                    <p style="margin: 0; color: #92400e; font-size: 0.9rem;">
+                        Bankintegrasjon er under utvikling og er forel\u00f8pig ikke tilgjengelig for nye abonnenter.
+                        Vi jobber med \u00e5 f\u00e5 dette klart \u2013 f\u00f8lg med!
+                    </p>
+                </div>
+
+                <p style="color: #666; font-size: 0.875rem;">
+                    Kontakt administrator for mer informasjon.
+                </p>
+            </div>
+        `;
     }
 
     setupEventListeners() {
-        document.getElementById('connect-bank-btn').addEventListener('click', () => {
-            this.showConnectBankModal();
-        });
-
-        document.getElementById('logout-btn').addEventListener('click', async () => {
-            await api.request('/auth/logout/', { method: 'POST' });
-            window.location.href = '/';
-        });
-
-        // Mobile menu toggle
-        const menuToggle = document.getElementById('mobile-menu-toggle');
-        const navbarMenu = document.getElementById('navbar-menu');
-        if (menuToggle) {
-            menuToggle.addEventListener('click', () => {
-                navbarMenu.classList.toggle('active');
+        const connectBtn = document.getElementById('connect-bank-btn');
+        if (connectBtn) {
+            connectBtn.addEventListener('click', () => {
+                this.showConnectBankModal();
             });
         }
-
-        // Modal close
-        document.querySelector('.modal .close').addEventListener('click', closeModal);
-        window.addEventListener('click', (e) => {
-            const modal = document.getElementById('modal');
-            if (e.target === modal) {
-                closeModal();
-            }
-        });
     }
 
     async loadBankAccounts() {
         try {
-            this.bankAccounts = await api.request(`/bank-accounts/?ledger_id=${this.currentLedgerId}`);
+            this.bankAccounts = await api.getBankAccounts();
         } catch (error) {
             console.error('Error loading bank accounts:', error);
-            showError('Kunne ikke laste bankkontoer');
         }
     }
 
@@ -103,7 +102,6 @@ class BankConnectionsManager {
             this.providers = await api.request('/bank-connections/providers');
         } catch (error) {
             console.error('Error loading providers:', error);
-            showError('Kunne ikke laste bank-providers');
         }
     }
 
@@ -122,10 +120,7 @@ class BankConnectionsManager {
 
         if (this.connections.length === 0) {
             container.innerHTML = `
-                <div class="empty-state">
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path>
-                    </svg>
+                <div style="text-align: center; padding: 3rem; color: #666;">
                     <h3>Ingen bankkoblinger</h3>
                     <p>Koble til banken din for automatisk synkronisering av transaksjoner</p>
                 </div>
@@ -133,8 +128,7 @@ class BankConnectionsManager {
             return;
         }
 
-        const html = this.connections.map(conn => this.renderConnectionCard(conn)).join('');
-        container.innerHTML = html;
+        container.innerHTML = this.connections.map(conn => this.renderConnectionCard(conn)).join('');
     }
 
     renderConnectionCard(connection) {
@@ -151,7 +145,7 @@ class BankConnectionsManager {
         const statusText = {
             'ACTIVE': 'Aktiv',
             'ERROR': 'Feil',
-            'EXPIRED': 'Utløpt',
+            'EXPIRED': 'Utl\u00f8pt',
             'DISCONNECTED': 'Frakoblet'
         }[connection.status] || connection.status;
 
@@ -172,14 +166,14 @@ class BankConnectionsManager {
                     <div class="connection-actions">
                         ${connection.status !== 'DISCONNECTED' ? `
                             <button class="btn btn-sm btn-primary" onclick="bankConnectionsManager.syncConnection(${connection.id})">
-                                🔄 Synkroniser
+                                Synkroniser
                             </button>
-                            <button class="btn btn-sm btn-warning" onclick="bankConnectionsManager.reauthorizeConnection(${connection.id})" title="Fornye tilkobling (bruk hvis synkronisering feiler)">
-                                🔑 Re-autoriser
+                            <button class="btn btn-sm btn-warning" onclick="bankConnectionsManager.reauthorizeConnection(${connection.id})" title="Fornye tilkobling">
+                                Re-autoriser
                             </button>
                         ` : ''}
                         <button class="btn btn-sm btn-secondary" onclick="bankConnectionsManager.showConnectionDetails(${connection.id})">
-                            📊 Detaljer
+                            Detaljer
                         </button>
                         <button class="btn btn-sm btn-danger" onclick="bankConnectionsManager.disconnectBank(${connection.id})">
                             Koble fra
@@ -192,7 +186,7 @@ class BankConnectionsManager {
 
     async showConnectBankModal() {
         if (this.bankAccounts.length === 0) {
-            showError('Du må først opprette en bankkonto i systemet før du kan koble til bank-API');
+            showError('Du m\u00e5 f\u00f8rst opprette en bankkonto i systemet f\u00f8r du kan koble til bank-API');
             return;
         }
 
@@ -233,7 +227,7 @@ class BankConnectionsManager {
             <div class="form-group">
                 <label for="connect-bank">Bank</label>
                 <select id="connect-bank" class="form-control" disabled>
-                    <option value="">-- Velg land først --</option>
+                    <option value="">-- Velg land f\u00f8rst --</option>
                 </select>
             </div>
 
@@ -242,13 +236,13 @@ class BankConnectionsManager {
                 <input type="date" id="connect-initial-sync-date" class="form-control"
                        value="2026-01-01"
                        max="${new Date().toISOString().split('T')[0]}">
-                <small>Begrenser historikken som hentes ved første synkronisering.</small>
+                <small>Begrenser historikken som hentes ved f\u00f8rste synkronisering.</small>
             </div>
 
             <div style="margin-top: 1.5rem; padding: 1rem; background: #f0f9ff; border-radius: 4px;">
                 <p style="margin: 0; font-size: 0.9rem;">
-                    <strong>ℹ️ Merk:</strong> Du vil bli omdirigert til bankens påloggingsside for å autorisere tilgang.
-                    Vi lagrer aldri bankens påloggingsinformasjon.
+                    <strong>Merk:</strong> Du vil bli omdirigert til bankens p\u00e5loggingsside for \u00e5 autorisere tilgang.
+                    Vi lagrer aldri bankens p\u00e5loggingsinformasjon.
                 </p>
             </div>
 
@@ -279,7 +273,7 @@ class BankConnectionsManager {
                 'NO': 'Norge', 'SE': 'Sverige', 'DK': 'Danmark', 'FI': 'Finland',
                 'DE': 'Tyskland', 'GB': 'Storbritannia', 'FR': 'Frankrike',
                 'NL': 'Nederland', 'ES': 'Spania', 'IT': 'Italia',
-                'AT': 'Østerrike', 'BE': 'Belgia', 'PT': 'Portugal',
+                'AT': '\u00d8sterrike', 'BE': 'Belgia', 'PT': 'Portugal',
                 'PL': 'Polen', 'IE': 'Irland', 'EE': 'Estland',
                 'LV': 'Latvia', 'LT': 'Litauen', 'CZ': 'Tsjekkia',
                 'SK': 'Slovakia', 'HU': 'Ungarn', 'RO': 'Romania',
@@ -294,7 +288,6 @@ class BankConnectionsManager {
                     `<option value="${c}" ${c === 'NO' ? 'selected' : ''}>${countryNames[c] || c} (${c})</option>`
                 ).join('');
 
-            // Auto-select Norway if available
             if (countries.includes('NO')) {
                 countrySelect.value = 'NO';
                 this.onCountryChanged();
@@ -312,7 +305,7 @@ class BankConnectionsManager {
         const bankSelect = document.getElementById('connect-bank');
 
         if (!country || !this.allAspsps) {
-            bankSelect.innerHTML = '<option value="">-- Velg land først --</option>';
+            bankSelect.innerHTML = '<option value="">-- Velg land f\u00f8rst --</option>';
             bankSelect.disabled = true;
             return;
         }
@@ -333,20 +326,9 @@ class BankConnectionsManager {
         const bankValue = document.getElementById('connect-bank').value;
         const initialSyncDate = document.getElementById('connect-initial-sync-date').value;
 
-        if (!bankAccountId) {
-            showError('Velg en bankkonto');
-            return;
-        }
-
-        if (!providerId) {
-            showError('Velg en provider');
-            return;
-        }
-
-        if (!bankValue) {
-            showError('Velg en bank');
-            return;
-        }
+        if (!bankAccountId) { showError('Velg en bankkonto'); return; }
+        if (!providerId) { showError('Velg en provider'); return; }
+        if (!bankValue) { showError('Velg en bank'); return; }
 
         try {
             const submitBtn = document.getElementById('connect-submit-btn');
@@ -389,7 +371,7 @@ class BankConnectionsManager {
         const connectionId = params.get('connection_id');
 
         if (success === 'true' && connectionId) {
-            showSuccess('Bank koblet til! Starter første synkronisering...');
+            showSuccess('Bank koblet til! Starter f\u00f8rste synkronisering...');
             // Clear URL params
             window.history.replaceState({}, document.title, window.location.pathname);
             // Trigger initial sync
@@ -417,65 +399,50 @@ class BankConnectionsManager {
                 method: 'POST'
             });
 
-            statusText.textContent = 'Synkronisering fullført!';
+            statusText.textContent = 'Synkronisering fullf\u00f8rt!';
             resultDiv.innerHTML = `
                 <div style="color: #065f46;">
-                    ✅ Hentet ${result.transactions_fetched} transaksjoner<br>
-                    📥 Importert ${result.imported} nye<br>
-                    🔄 ${result.duplicates} duplikater
+                    Hentet ${result.transactions_fetched} transaksjoner<br>
+                    Importert ${result.imported} nye<br>
+                    ${result.duplicates} duplikater
                 </div>
             `;
             resultDiv.style.display = 'block';
 
-            // Reload connections to update last_sync_at
             await this.loadConnections();
 
-            // Hide after 5 seconds
             setTimeout(() => {
                 progressDiv.classList.remove('active');
             }, 5000);
 
             if (result.imported > 0) {
-                showSuccess(`${result.imported} nye transaksjoner lagt i posteringskøen`);
+                showSuccess(`${result.imported} nye transaksjoner lagt i posteringsk\u00f8en`);
             }
 
         } catch (error) {
             console.error('Sync error:', error);
             statusText.textContent = 'Synkronisering feilet';
-            resultDiv.innerHTML = `<div style="color: #991b1b;">❌ ${error.message}</div>`;
+            resultDiv.innerHTML = `<div style="color: #991b1b;">${error.message}</div>`;
             resultDiv.style.display = 'block';
         }
     }
 
     async reauthorizeConnection(connectionId) {
         const connection = this.connections.find(c => c.id === connectionId);
-        if (!connection) {
-            showError('Tilkobling ikke funnet');
-            return;
-        }
+        if (!connection) { showError('Tilkobling ikke funnet'); return; }
 
         const bankAccount = this.bankAccounts.find(ba => ba.id === connection.bank_account_id);
         const provider = this.providers.find(p => p.id === connection.provider_id);
 
-        const confirmed = confirm(
-            `Re-autorisere tilkobling?\n\n` +
-            `Bank: ${provider?.display_name || 'Ukjent'}\n` +
-            `Konto: ${bankAccount?.name || 'Ukjent'}\n\n` +
-            `Du vil bli omdirigert til bankens påloggingsside for å autorisere tilgang på nytt.`
-        );
-
-        if (!confirmed) return;
+        if (!confirm(
+            `Re-autorisere tilkobling?\n\nBank: ${provider?.display_name || 'Ukjent'}\nKonto: ${bankAccount?.name || 'Ukjent'}\n\nDu vil bli omdirigert til bankens p\u00e5loggingsside.`
+        )) return;
 
         try {
-            showSuccess('Starter re-autorisering...');
-
             const result = await api.request(`/bank-connections/${connectionId}/reauthorize`, {
                 method: 'POST'
             });
-
-            // Redirect to OAuth authorization URL
             window.location.href = result.authorization_url;
-
         } catch (error) {
             console.error('Reauthorization error:', error);
             showError(`Kunne ikke starte re-autorisering: ${error.message}`);
@@ -489,7 +456,7 @@ class BankConnectionsManager {
             const content = `
                 <h2>Synkroniseringshistorikk</h2>
 
-                ${logs.length === 0 ? '<p>Ingen synkroniseringer ennå.</p>' : `
+                ${logs.length === 0 ? '<p>Ingen synkroniseringer enn\u00e5.</p>' : `
                     <table class="table">
                         <thead>
                             <tr>
@@ -537,7 +504,7 @@ class BankConnectionsManager {
     }
 
     async disconnectBank(connectionId) {
-        if (!confirm('Er du sikker på at du vil koble fra denne banken? Du kan koble til igjen senere.')) {
+        if (!confirm('Er du sikker p\u00e5 at du vil koble fra denne banken? Du kan koble til igjen senere.')) {
             return;
         }
 
@@ -545,10 +512,8 @@ class BankConnectionsManager {
             await api.request(`/bank-connections/${connectionId}`, {
                 method: 'DELETE'
             });
-
             showSuccess('Bank frakoblet');
             await this.loadConnections();
-
         } catch (error) {
             console.error('Disconnect error:', error);
             showError('Kunne ikke koble fra bank: ' + error.message);
@@ -556,7 +521,6 @@ class BankConnectionsManager {
     }
 
     formatRelativeTime(dateString) {
-        // Ensure UTC parsing: add 'Z' if missing and replace space with 'T'
         let isoString = dateString.replace(' ', 'T');
         if (!isoString.endsWith('Z') && !isoString.includes('+')) {
             isoString += 'Z';
@@ -568,7 +532,7 @@ class BankConnectionsManager {
         const diffHours = Math.floor(diffMs / 3600000);
         const diffDays = Math.floor(diffMs / 86400000);
 
-        if (diffMins < 1) return 'Akkurat nå';
+        if (diffMins < 1) return 'Akkurat n\u00e5';
         if (diffMins < 60) return `${diffMins} min siden`;
         if (diffHours < 24) return `${diffHours} timer siden`;
         if (diffDays < 7) return `${diffDays} dager siden`;
@@ -578,9 +542,5 @@ class BankConnectionsManager {
 
 const bankConnectionsManager = new BankConnectionsManager();
 window.bankConnectionsManager = bankConnectionsManager;
-
-document.addEventListener('DOMContentLoaded', () => {
-    bankConnectionsManager.init();
-});
 
 export default bankConnectionsManager;

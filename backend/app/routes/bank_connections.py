@@ -223,12 +223,12 @@ async def oauth_callback(
     except ValueError as e:
         # Invalid state, expired, or already used
         return RedirectResponse(
-            url=f"{frontend_url}/bank-connections.html?error=invalid_state&message={str(e)}"
+            url=f"{frontend_url}/?view=bank-connections&error=invalid_state&message={str(e)}"
         )
     except Exception as e:
         # Other errors (token exchange failed, etc.)
         return RedirectResponse(
-            url=f"{frontend_url}/bank-connections.html?error=connection_failed&message={str(e)}"
+            url=f"{frontend_url}/?view=bank-connections&error=connection_failed&message={str(e)}"
         )
 
 

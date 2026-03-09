@@ -5,11 +5,85 @@ class ReceiptsManager {
     constructor() {
         this.receipts = [];
         this.currentFilter = 'PENDING';
+        this.subscription = null;
     }
 
-    init() {
-        this.setupEventListeners();
+    async init() {
+        await this.checkSubscription();
+
+        const view = document.getElementById('receipts-view');
+        const viewHeader = view.querySelector('.view-header > div');
+        const subtitle = view.querySelector('.subtitle');
+
+        if (this.subscription && this.subscription.tier === 'FREE') {
+            this.renderUpgradeInfo();
+            return;
+        }
+
+        // Restore visibility for paid users
+        if (viewHeader) viewHeader.style.display = '';
+        if (subtitle) subtitle.style.display = '';
+        const h1 = view.querySelector('h1');
+        if (h1) h1.textContent = 'Vedleggskø';
+
+        if (!this._listenersAttached) {
+            this.setupEventListeners();
+            this._listenersAttached = true;
+        }
         this.loadReceipts();
+    }
+
+    async checkSubscription() {
+        try {
+            this.subscription = await api.getMySubscription();
+        } catch (error) {
+            console.error('Error checking subscription:', error);
+            this.subscription = { tier: 'FREE', has_subscription: false };
+        }
+    }
+
+    renderUpgradeInfo() {
+        const container = document.getElementById('receipts-list');
+        const view = document.getElementById('receipts-view');
+        // Hide filters and subtitle for free users
+        const viewHeader = view.querySelector('.view-header > div');
+        if (viewHeader) viewHeader.style.display = 'none';
+        const subtitle = view.querySelector('.subtitle');
+        if (subtitle) subtitle.style.display = 'none';
+        // Update the page title
+        const h1 = view.querySelector('h1');
+        if (h1) h1.textContent = 'Vedlegg';
+
+        container.innerHTML = `
+            <div class="card" style="max-width: 600px; margin: 2rem auto; text-align: center; padding: 2rem;">
+                <h2 style="margin-bottom: 1rem;">Vedlegg og kvitteringer</h2>
+                <p style="margin-bottom: 1.5rem; color: var(--text-secondary);">
+                    Med Basic-abonnementet kan du laste opp og organisere kvitteringer og bilag,
+                    og koble dem direkte til transaksjoner i regnskapet ditt.
+                </p>
+
+                <div style="background: var(--bg-secondary); border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem; text-align: left;">
+                    <h3 style="margin-bottom: 0.75rem;">Basic inkluderer:</h3>
+                    <ul style="list-style: none; padding: 0; margin: 0;">
+                        <li style="padding: 0.4rem 0;">&#10003; Last opp kvitteringer fra mobil eller PC</li>
+                        <li style="padding: 0.4rem 0;">&#10003; Koble vedlegg til transaksjoner</li>
+                        <li style="padding: 0.4rem 0;">&#10003; CSV-import av banktransaksjoner</li>
+                        <li style="padding: 0.4rem 0;">&#10003; Ubegrenset antall opplastinger</li>
+                    </ul>
+                </div>
+
+                <div style="font-size: 1.5rem; font-weight: bold; margin-bottom: 0.5rem;">
+                    10 kr/mnd
+                </div>
+                <div style="color: var(--text-secondary); margin-bottom: 1.5rem;">
+                    eller 100 kr/&#229;r (spar 17%)
+                </div>
+
+                <p style="color: var(--text-secondary); font-size: 0.875rem;">
+                    Kontakt administrator for &#229; oppgradere.
+                </p>
+            </div>
+        `;
     }
 
     setupEventListeners() {

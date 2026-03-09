@@ -87,8 +87,15 @@ class LedgerBase(BaseModel):
     name: str
 
 
+class BankAccountSetup(BaseModel):
+    name: str
+    account_type: str  # CHECKING, SAVINGS, CREDIT_CARD
+    account_number: Optional[str] = None
+
+
 class LedgerCreate(LedgerBase):
     chart_template_id: Optional[int] = None
+    bank_accounts: Optional[List[BankAccountSetup]] = None
 
 
 class Ledger(LedgerBase):

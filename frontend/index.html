@@ -4,15 +4,118 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#2563eb">
-    <title>Regnskap - Personlig Bokføring</title>
+    <title>Privatregnskap.eu - Personlig Bokføring</title>
     <link rel="manifest" href="/manifest.json">
     <link rel="stylesheet" href="/static/css/styles.css?v=4">
 </head>
 <body>
     <div id="app">
-        <div id="auth-view" class="view">
+        <div id="landing-view" class="view" style="display: none;">
+            <nav class="landing-nav">
+                <div class="landing-nav-inner">
+                    <div class="navbar-brand">Privatregnskap.eu</div>
+                    <div>
+                        <button id="landing-login-btn" class="btn btn-secondary btn-sm">Logg inn</button>
+                        <button id="landing-register-btn" class="btn btn-primary btn-sm">Registrer deg</button>
+                    </div>
+                </div>
+            </nav>
+
+            <section class="landing-hero">
+                <h1>Privatregnskap.eu</h1>
+                <p class="landing-subtitle">Enkel og oversiktlig bokføring for privatpersoner og familier</p>
+                <p class="landing-description">
+                    Hold orden på økonomien med dobbelt bokføring, budsjett og rapporter.
+                    Gratis å bruke — oppgrader når du trenger mer.
+                </p>
+                <div class="landing-cta">
+                    <button id="hero-register-btn" class="btn btn-primary btn-large">Kom i gang gratis</button>
+                    <button id="hero-login-btn" class="btn btn-secondary btn-large">Logg inn</button>
+                </div>
+            </section>
+
+            <section class="landing-features">
+                <h2>Alt du trenger for privatøkonomien</h2>
+                <div class="features-grid">
+                    <div class="feature-card">
+                        <div class="feature-icon">📊</div>
+                        <h3>Dobbelt bokføring</h3>
+                        <p>Korrekt regnskap med debet og kredit. Automatisk balansekontroll.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">📋</div>
+                        <h3>Budsjett</h3>
+                        <p>Sett opp budsjett og følg med på forbruk mot plan.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">📈</div>
+                        <h3>Rapporter</h3>
+                        <p>Resultatregnskap, balanse og budsjettoppfølging med drilldown.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">📎</div>
+                        <h3>Vedlegg</h3>
+                        <p>Last opp kvitteringer fra mobil og koble dem til transaksjoner.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">🏦</div>
+                        <h3>Banksynkronisering</h3>
+                        <p>Importer transaksjoner automatisk fra banken din.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">👨‍👩‍👧‍👦</div>
+                        <h3>Delt regnskap</h3>
+                        <p>Del regnskapet med familie eller samboer.</p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="landing-pricing">
+                <h2>Enkel prising</h2>
+                <p class="landing-pricing-subtitle">Start gratis. Oppgrader kun hvis du trenger det.</p>
+                <div class="pricing-grid">
+                    <div class="pricing-card">
+                        <h3>Gratis</h3>
+                        <div class="pricing-price">0 kr</div>
+                        <ul class="pricing-features">
+                            <li>Ubegrenset regnskap</li>
+                            <li>Ubegrenset transaksjoner</li>
+                            <li>Budsjett og rapporter</li>
+                            <li>Delt tilgang</li>
+                        </ul>
+                    </div>
+                    <div class="pricing-card pricing-card-highlight">
+                        <h3>Basic</h3>
+                        <div class="pricing-price">10 kr<span>/mnd</span></div>
+                        <div class="pricing-yearly">eller 100 kr/år</div>
+                        <ul class="pricing-features">
+                            <li>Alt i Gratis</li>
+                            <li>Vedleggshåndtering</li>
+                            <li>CSV-import</li>
+                        </ul>
+                    </div>
+                    <div class="pricing-card">
+                        <h3>Premium</h3>
+                        <div class="pricing-price">49 kr<span>/mnd</span></div>
+                        <div class="pricing-yearly">eller 490 kr/år</div>
+                        <ul class="pricing-features">
+                            <li>Alt i Basic</li>
+                            <li>Automatisk banksynk</li>
+                            <li>Duplikatdeteksjon</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <footer class="landing-footer">
+                <a href="/terms.html">Vilkår for bruk</a>
+                <a href="/privacy.html">Personvern</a>
+            </footer>
+        </div>
+
+        <div id="auth-view" class="view" style="display: none;">
             <div class="auth-container">
-                <h1>Regnskap</h1>
+                <h1>Privatregnskap.eu</h1>
                 <p class="subtitle">Personlig regnskap med dobbelt bokføring</p>
 
                 <div id="login-form" class="auth-form">
@@ -82,25 +185,26 @@
                 <button class="mobile-menu-toggle" id="mobile-menu-toggle" aria-label="Meny">
                     ☰
                 </button>
-                <div class="navbar-brand">Regnskap</div>
+                <div class="navbar-brand">Privatregnskap.eu</div>
                 <ul class="navbar-menu" id="navbar-menu">
                     <li><a href="#" data-view="dashboard">Dashboard</a></li>
                     <li><a href="#" data-view="bank-accounts">Bankkontoer</a></li>
-                    <li><a href="/bank-connections.html">🏦 Bankkoblinger</a></li>
+                    <li><a href="#" data-view="bank-connections">Bankkoblinger</a></li>
                     <li><a href="#" data-view="transactions">Transaksjoner</a></li>
-                    <li><a href="#" data-view="posting-queue">📋 Posteringskø</a></li>
-                    <li><a href="#" data-view="receipts">📎 Vedlegg</a></li>
-                    <li><a href="#" data-view="accounts">Kontoer</a></li>
+                    <li><a href="#" data-view="posting-queue">Posteringskø</a></li>
+                    <li><a href="#" data-view="receipts">Vedlegg</a></li>
+                    <li><a href="#" data-view="accounts">Kontoplan</a></li>
                     <li><a href="#" data-view="budgets">Budsjett</a></li>
                     <li><a href="#" data-view="reports">Rapporter</a></li>
-                    <li><a href="#" data-view="ledger-settings">⚙️ Innstillinger</a></li>
-                    <li id="admin-menu-item" style="display: none;"><a href="#" data-view="admin">🔐 Admin</a></li>
+                    <li><a href="#" data-view="ledger-settings">Innstillinger</a></li>
+                    <li id="admin-menu-item" style="display: none;"><a href="#" data-view="admin">Admin</a></li>
                 </ul>
+                <div class="navbar-spacer"></div>
                 <div class="navbar-user">
                     <select id="ledger-selector" class="ledger-dropdown"></select>
-                    <button id="new-ledger-btn" class="btn btn-sm btn-secondary" onclick="ledgerManager.showCreateLedgerModal()" title="Opprett nytt regnskap">+ Nytt</button>
+                    <button id="new-ledger-btn" class="btn btn-sm btn-secondary" onclick="ledgerManager.showCreateLedgerModal()" title="Opprett nytt regnskap">+</button>
                     <span id="user-name"></span>
-                    <button id="logout-btn" class="btn btn-secondary">Logg ut</button>
+                    <button id="logout-btn" class="btn btn-sm btn-secondary">Logg ut</button>
                 </div>
             </nav>
 
@@ -192,6 +296,35 @@
                         <button id="new-bank-account-btn" class="btn btn-primary">Ny bankkonto</button>
                     </div>
                     <div id="bank-accounts-list"></div>
+                </div>
+
+                <div id="bank-connections-view" class="content-view" style="display: none;">
+                    <div class="view-header">
+                        <h1>Bankkoblinger</h1>
+                        <button id="connect-bank-btn" class="btn btn-primary">+ Koble til bank</button>
+                    </div>
+
+                    <p class="subtitle">Automatisk synkronisering av banktransaksjoner</p>
+
+                    <div id="sync-progress" class="sync-progress">
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <div class="spinner"></div>
+                            <span id="sync-status-text">Synkroniserer...</span>
+                        </div>
+                        <div id="sync-result" style="margin-top: 0.5rem; display: none;"></div>
+                    </div>
+
+                    <div id="connections-list"></div>
+
+                    <div id="connection-help" style="margin-top: 2rem; padding: 1rem; background: #f0f9ff; border-left: 4px solid #3b82f6; border-radius: 4px;">
+                        <h3 style="margin-top: 0;">Hvordan virker det?</h3>
+                        <ul style="margin-bottom: 0;">
+                            <li>Koble til banken din med sikker OAuth-autorisasjon</li>
+                            <li>Transaksjoner synkroniseres automatisk</li>
+                            <li>Nye transaksjoner havner i posteringskøen for gjennomgang</li>
+                            <li>Duplikater (f.eks. fra CSV-import) detekteres automatisk</li>
+                        </ul>
+                    </div>
                 </div>
 
                 <div id="accounts-view" class="content-view" style="display: none;">
@@ -297,6 +430,16 @@
                             </tbody>
                         </table>
                         <button id="invite-member-btn" class="btn btn-primary">Inviter medlem</button>
+                    </div>
+
+                    <div class="card">
+                        <h2>Eksporter data</h2>
+                        <p style="color: #6b7280; margin-bottom: 1rem;">Last ned regnskapsdataene dine.</p>
+                        <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+                            <button id="export-excel-btn" class="btn btn-primary">Last ned Excel</button>
+                            <button id="export-receipts-btn" class="btn btn-secondary">Last ned bilag (ZIP)</button>
+                        </div>
+                        <p id="export-status" style="margin-top: 0.75rem; color: #6b7280; display: none;"></p>
                     </div>
 
                     <div class="card">

@@ -6,6 +6,7 @@ import bankAccountsManager from './bank-accounts.js';
 import postingQueueManager from './posting-queue.js';
 import receiptsManager from './receipts.js';
 import reportsManager from './reports.js';
+import bankConnectionsManager from './bank-connections.js';
 import adminManager from './admin.js';
 import { formatCurrency, formatDate, getTodayDate, getFirstDayOfMonth, getLastDayOfMonth, showModal, closeModal, showError, showSuccess } from './utils.js';
 
@@ -33,24 +34,56 @@ class App {
 
             this.showMainView();
         } else {
-            this.showAuthView();
+            this.showLandingView();
         }
     }
 
+    showLandingView() {
+        document.getElementById('landing-view').style.display = 'block';
+        document.getElementById('auth-view').style.display = 'none';
+        document.getElementById('main-view').style.display = 'none';
+        this.setupLandingHandlers();
+    }
+
+    setupLandingHandlers() {
+        const showAuth = (showRegister) => {
+            document.getElementById('landing-view').style.display = 'none';
+            this.showAuthView();
+            if (showRegister) {
+                document.getElementById('login-form').style.display = 'none';
+                document.getElementById('register-form').style.display = 'block';
+            }
+        };
+
+        document.getElementById('landing-login-btn').onclick = () => showAuth(false);
+        document.getElementById('hero-login-btn').onclick = () => showAuth(false);
+        document.getElementById('landing-register-btn').onclick = () => showAuth(true);
+        document.getElementById('hero-register-btn').onclick = () => showAuth(true);
+    }
+
     showAuthView() {
+        document.getElementById('landing-view').style.display = 'none';
         document.getElementById('auth-view').style.display = 'block';
         document.getElementById('main-view').style.display = 'none';
         auth.setupAuthUI();
     }
 
     async showMainView() {
+        document.getElementById('landing-view').style.display = 'none';
         document.getElementById('auth-view').style.display = 'none';
         document.getElementById('main-view').style.display = 'block';
         this.setupNavigation();
         this.setupLogout();
         this.wrapTables();
         await this.checkAdminAccess();
-        this.loadDashboard();
+
+        // Check if returning from OAuth callback or deep-link
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('view') === 'bank-connections' || params.get('success') || params.get('error')) {
+            this.switchView('bank-connections');
+        } else {
+            this.loadDashboard();
+        }
     }
 
     async checkAdminAccess() {
@@ -128,15 +161,12 @@ class App {
         const mobileMenuToggle = document.getElementById('mobile-menu-toggle');
         const navbarMenu = document.getElementById('navbar-menu');
 
-        console.log('Mobile menu setup:', { mobileMenuToggle: !!mobileMenuToggle, navbarMenu: !!navbarMenu });
-
         if (mobileMenuToggle && navbarMenu) {
             mobileMenuToggle.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
 
                 navbarMenu.classList.toggle('active');
-                console.log('Menu toggled, active:', navbarMenu.classList.contains('active'));
 
                 // Update icon
                 if (navbarMenu.classList.contains('active')) {
@@ -175,6 +205,11 @@ class App {
         document.getElementById(`${viewName}-view`).style.display = 'block';
         this.currentView = viewName;
 
+        // Highlight active menu item
+        document.querySelectorAll('.navbar-menu a').forEach(a => a.classList.remove('active-view'));
+        const activeLink = document.querySelector(`.navbar-menu a[data-view="${viewName}"]`);
+        if (activeLink) activeLink.classList.add('active-view');
+
         switch (viewName) {
             case 'dashboard':
                 this.loadDashboard();
@@ -191,6 +226,9 @@ class App {
                 break;
             case 'receipts':
                 receiptsManager.init();
+                break;
+            case 'bank-connections':
+                bankConnectionsManager.init();
                 break;
             case 'accounts':
                 this.loadAccounts();

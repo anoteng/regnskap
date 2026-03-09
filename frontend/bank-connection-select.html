@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Velg konto - Regnskap</title>
+    <title>Velg konto - Privatregnskap.eu</title>
     <link rel="stylesheet" href="/static/css/styles.css">
     <style>
         .account-selection-container {
@@ -178,7 +178,7 @@
 
         <div id="error-container" style="display: none;">
             <div class="error-message" id="error-message"></div>
-            <button class="btn-cancel" onclick="window.location.href='/bank-connections.html'">
+            <button class="btn-cancel" onclick="window.location.href='/?view=bank-connections'">
                 Tilbake til bankkoblinger
             </button>
         </div>
@@ -372,7 +372,7 @@
                     window.location.reload();
                 } else {
                     // Redirect to bank connections page
-                    window.location.href = `/bank-connections.html?success=true&connection_id=${result.connection_id}`;
+                    window.location.href = `/?view=bank-connections&success=true&connection_id=${result.connection_id}`;
                 }
             } catch (error) {
                 console.error('Connection error:', error);
@@ -388,7 +388,7 @@
         }
 
         function cancelSelection() {
-            window.location.href = '/bank-connections.html';
+            window.location.href = '/?view=bank-connections';
         }
 
         function showError(message) {

@@ -10,7 +10,7 @@ class Settings(BaseSettings):
 
     # WebAuthn / Passkey settings
     rp_id: str = "localhost"
-    rp_name: str = "Regnskap"
+    rp_name: str = "Privatregnskap.eu"
 
     # SMTP settings for password reset emails
     smtp_host: str = "smtp.altibox.no"

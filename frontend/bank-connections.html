@@ -4,20 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#2563eb">
-    <title>Bankkoblinger - Regnskap</title>
+    <title>Bankkoblinger - Privatregnskap.eu</title>
     <link rel="stylesheet" href="/static/css/styles.css?v=4">
     <style>
-        /* Ensure navbar menu is visible on desktop */
-        @media (min-width: 769px) {
-            .navbar-menu {
-                display: flex !important;
-            }
-        }
-
-        .navbar-menu a.active {
-            background: rgba(255, 255, 255, 0.15);
-            border-bottom: 2px solid white;
-        }
 
         .connection-card {
             background: white;
@@ -143,21 +132,23 @@
                 ☰
             </button>
             <div class="navbar-brand">
-                <a href="/" style="text-decoration: none; color: inherit;">Regnskap</a>
+                <a href="/">Privatregnskap.eu</a>
             </div>
             <ul class="navbar-menu" id="navbar-menu">
                 <li><a href="/">Dashboard</a></li>
                 <li><a href="/#bank-accounts">Bankkontoer</a></li>
-                <li><a href="/bank-connections.html" class="active">🏦 Bankkoblinger</a></li>
+                <li><a href="/bank-connections.html" class="active-view">Bankkoblinger</a></li>
                 <li><a href="/#transactions">Transaksjoner</a></li>
-                <li><a href="/#posting-queue">📋 Posteringskø</a></li>
-                <li><a href="/#accounts">Kontoer</a></li>
+                <li><a href="/#posting-queue">Posteringskø</a></li>
+                <li><a href="/#receipts">Vedlegg</a></li>
+                <li><a href="/#accounts">Kontoplan</a></li>
                 <li><a href="/#budgets">Budsjett</a></li>
                 <li><a href="/#reports">Rapporter</a></li>
             </ul>
+            <div class="navbar-spacer"></div>
             <div class="navbar-user">
                 <span id="user-name"></span>
-                <button id="logout-btn" class="btn btn-secondary">Logg ut</button>
+                <button id="logout-btn" class="btn btn-sm btn-secondary">Logg ut</button>
             </div>
         </nav>
 

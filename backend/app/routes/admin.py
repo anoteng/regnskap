@@ -79,6 +79,7 @@ class SubscriptionPlanInfo(BaseModel):
     tier: str
     description: Optional[str]
     price_monthly: float
+    price_yearly: Optional[float]
     features: Optional[str]
     max_documents: Optional[int]
     max_monthly_uploads: Optional[int]
@@ -92,6 +93,7 @@ class UpdateSubscriptionPlanRequest(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     price_monthly: Optional[float] = None
+    price_yearly: Optional[float] = None
     features: Optional[str] = None
     max_documents: Optional[int] = None
     max_monthly_uploads: Optional[int] = None
@@ -310,6 +312,7 @@ def list_subscription_plans(
             tier=plan.tier.value,
             description=plan.description,
             price_monthly=float(plan.price_monthly),
+            price_yearly=float(plan.price_yearly) if plan.price_yearly else None,
             features=plan.features,
             max_documents=plan.max_documents,
             max_monthly_uploads=plan.max_monthly_uploads,
@@ -341,6 +344,8 @@ def update_subscription_plan(
         plan.description = data.description
     if data.price_monthly is not None:
         plan.price_monthly = data.price_monthly
+    if data.price_yearly is not None:
+        plan.price_yearly = data.price_yearly
     if data.features is not None:
         plan.features = data.features
     if data.max_documents is not None:

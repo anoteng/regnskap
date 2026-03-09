@@ -4,7 +4,7 @@ from typing import List
 
 from backend.database import get_db
 from ..models import (
-    User, Ledger, LedgerMember, LedgerRole, Account,
+    User, Ledger, LedgerMember, LedgerRole, Account, BankAccount,
     ChartOfAccountsTemplate, TemplateAccount
 )
 from ..schemas import (
@@ -81,6 +81,10 @@ async def create_ledger(
     if chart_template_id:
         _copy_accounts_from_template(db, db_ledger.id, chart_template_id)
 
+    # Create bank accounts if provided
+    if ledger.bank_accounts:
+        _create_bank_accounts(db, db_ledger.id, ledger.bank_accounts)
+
     # Add creator as owner
     membership = LedgerMember(
         ledger_id=db_ledger.id,
@@ -131,6 +135,50 @@ def _copy_accounts_from_template(db: Session, ledger_id: int, template_id: int):
             if parent_account:
                 child_account = account_map[template_account.account_number]
                 child_account.parent_account_id = parent_account.id
+
+    db.commit()
+
+
+# Account number mapping for bank account types
+_BANK_ACCOUNT_TYPE_MAP = {
+    'CHECKING': '1201',
+    'SAVINGS': '1202',
+    'CREDIT_CARD': '2501',
+}
+
+
+def _create_bank_accounts(db: Session, ledger_id: int, bank_accounts):
+    """Create bank accounts during ledger setup."""
+    from decimal import Decimal
+
+    for ba in bank_accounts:
+        # Find the matching accounting account
+        target_number = _BANK_ACCOUNT_TYPE_MAP.get(ba.account_type, '1200')
+        account = db.query(Account).filter(
+            Account.ledger_id == ledger_id,
+            Account.account_number == target_number
+        ).first()
+
+        # Fallback to generic bank deposit account
+        if not account:
+            account = db.query(Account).filter(
+                Account.ledger_id == ledger_id,
+                Account.account_number == '1200'
+            ).first()
+
+        if not account:
+            continue
+
+        bank_account = BankAccount(
+            ledger_id=ledger_id,
+            name=ba.name,
+            account_type=ba.account_type,
+            account_number=ba.account_number,
+            account_id=account.id,
+            balance=Decimal('0.00'),
+            is_active=True
+        )
+        db.add(bank_account)
 
     db.commit()
 

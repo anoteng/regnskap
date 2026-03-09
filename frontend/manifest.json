@@ -1,7 +1,7 @@
 {
-  "name": "Regnskap - Personlig Bokføring",
-  "short_name": "Regnskap",
-  "description": "Personlig regnskap med dobbelt bokføring og kvitteringshåndtering",
+  "name": "Privatregnskap.eu",
+  "short_name": "Privatregnskap",
+  "description": "Personlig regnskap med dobbelt bokføring, budsjett og kvitteringshåndtering",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#f8fafc",

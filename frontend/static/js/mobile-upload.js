@@ -459,9 +459,59 @@ class MobileApp {
         document.getElementById('upload-view').style.display = 'none';
     }
 
-    showUploadView() {
+    async showUploadView() {
         document.getElementById('login-view').style.display = 'none';
+
+        // Check subscription before showing upload
+        try {
+            const sub = await this.request('/auth/me/subscription');
+            if (sub && sub.tier === 'FREE') {
+                document.getElementById('upload-view').style.display = 'none';
+                this.showUpgradeInfo();
+                return;
+            }
+        } catch (e) {
+            console.error('Could not check subscription:', e);
+        }
+
         document.getElementById('upload-view').style.display = 'block';
+    }
+
+    showUpgradeInfo() {
+        // Show upgrade message instead of upload UI
+        let infoEl = document.getElementById('upgrade-info');
+        if (!infoEl) {
+            infoEl = document.createElement('div');
+            infoEl.id = 'upgrade-info';
+            document.querySelector('.mobile-main').appendChild(infoEl);
+        }
+        infoEl.style.display = 'block';
+        infoEl.innerHTML = `
+            <div class="card" style="text-align: center; padding: 2rem; margin: 1rem;">
+                <h2 style="margin-bottom: 1rem;">Vedlegg og kvitteringer</h2>
+                <p style="margin-bottom: 1.5rem; color: #666;">
+                    Med Basic-abonnementet kan du laste opp og organisere kvitteringer og bilag.
+                </p>
+                <div style="background: #f5f5f5; border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem; text-align: left;">
+                    <h3 style="margin-bottom: 0.75rem;">Basic inkluderer:</h3>
+                    <ul style="list-style: none; padding: 0; margin: 0;">
+                        <li style="padding: 0.4rem 0;">&#10003; Last opp kvitteringer fra mobil eller PC</li>
+                        <li style="padding: 0.4rem 0;">&#10003; Koble vedlegg til transaksjoner</li>
+                        <li style="padding: 0.4rem 0;">&#10003; CSV-import av banktransaksjoner</li>
+                        <li style="padding: 0.4rem 0;">&#10003; Ubegrenset antall opplastinger</li>
+                    </ul>
+                </div>
+                <div style="font-size: 1.5rem; font-weight: bold; margin-bottom: 0.5rem;">
+                    10 kr/mnd
+                </div>
+                <div style="color: #666; margin-bottom: 1.5rem;">
+                    eller 100 kr/\u00e5r (spar 17%)
+                </div>
+                <p style="color: #666; font-size: 0.875rem;">
+                    Kontakt administrator for \u00e5 oppgradere.
+                </p>
+            </div>
+        `;
     }
 
     async login() {

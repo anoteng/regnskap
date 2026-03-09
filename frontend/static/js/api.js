@@ -186,6 +186,40 @@ class API {
         });
     }
 
+    async getMySubscription() {
+        return this.get('/auth/me/subscription');
+    }
+
+    async downloadFile(endpoint) {
+        const response = await fetch(`${API_BASE}${endpoint}`, {
+            headers: {
+                'Authorization': `Bearer ${this.token}`,
+                'X-Ledger-ID': this.currentLedgerId
+            }
+        });
+
+        if (response.status === 401) {
+            this.clearToken();
+            window.location.reload();
+            throw new Error('Unauthorized');
+        }
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Eksport feilet');
+        }
+
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = response.headers.get('Content-Disposition')?.match(/filename="(.+)"/)?.[1] || 'eksport';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+    }
+
     async getAccounts(accountType = null, showHidden = false) {
         const params = new URLSearchParams();
         if (accountType) params.append('account_type', accountType);
@@ -405,8 +439,15 @@ class API {
         return this.get('/ledgers/');
     }
 
-    async createLedger(name) {
-        return this.post('/ledgers/', { name });
+    async getChartTemplates() {
+        return this.get('/chart-templates/');
+    }
+
+    async createLedger(name, chartTemplateId = null, bankAccounts = null) {
+        const body = { name };
+        if (chartTemplateId) body.chart_template_id = chartTemplateId;
+        if (bankAccounts && bankAccounts.length > 0) body.bank_accounts = bankAccounts;
+        return this.post('/ledgers/', body);
     }
 
     async getLedger(id) {

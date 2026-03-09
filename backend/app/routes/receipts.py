@@ -10,7 +10,7 @@ import uuid
 from pathlib import Path
 
 from backend.database import get_db
-from ..models import Receipt, User, Ledger, Transaction, ReceiptStatus, UserSubscription, SubscriptionPlan, UserMonthlyUsage, SubscriptionStatus
+from ..models import Receipt, User, Ledger, Transaction, ReceiptStatus, UserSubscription, SubscriptionPlan, SubscriptionTier, UserMonthlyUsage, SubscriptionStatus
 from ..schemas import Receipt as ReceiptSchema, ReceiptCreate
 from ..auth import get_current_active_user, get_current_ledger, get_user_from_query_token, get_ledger_from_query
 
@@ -32,11 +32,11 @@ def check_subscription_limits(user: User, ledger: Ledger, db: Session):
         UserSubscription.status == SubscriptionStatus.ACTIVE
     ).first()
 
-    # If no subscription, block upload
-    if not subscription:
+    # If no subscription or free tier, block upload
+    if not subscription or subscription.plan.tier == SubscriptionTier.FREE:
         raise HTTPException(
             status_code=403,
-            detail="Du må ha et aktivt abonnement for å laste opp bilag. Kontakt administrator."
+            detail="Vedleggsfunksjonen krever Basic-abonnement eller høyere. Oppgrader for 10 kr/mnd."
         )
 
     # Get subscription plan
