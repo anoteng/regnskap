@@ -373,7 +373,6 @@ class Receipt(ReceiptBase):
     id: int
     ledger_id: int
     uploaded_by: int
-    image_path: str
     original_filename: Optional[str] = None
     file_size: Optional[int] = None
     mime_type: Optional[str] = None

@@ -1,4 +1,3 @@
-import os
 import re
 import zipfile
 from io import BytesIO
@@ -191,9 +190,9 @@ def export_receipts(
     output = BytesIO()
     with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as zf:
         for receipt in receipts:
-            if receipt.image_path and os.path.exists(receipt.image_path):
-                arcname = f"{receipt.id}_{receipt.original_filename or os.path.basename(receipt.image_path)}"
-                zf.write(receipt.image_path, arcname)
+            if receipt.file_data:
+                arcname = f"{receipt.id}_{receipt.original_filename or 'receipt'}"
+                zf.writestr(arcname, receipt.file_data)
 
     output.seek(0)
 

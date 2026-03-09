@@ -1,11 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List, Optional
 from datetime import date, datetime
 from decimal import Decimal
-import os
 import uuid
 from pathlib import Path
 
@@ -16,33 +15,25 @@ from ..auth import get_current_active_user, get_current_ledger, get_user_from_qu
 
 router = APIRouter(prefix="/receipts", tags=["receipts"])
 
-# Configure upload directory
-UPLOAD_DIR = Path("uploads/receipts")
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-
 ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.pdf', '.heic'}
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 
 
 def check_subscription_limits(user: User, ledger: Ledger, db: Session):
     """Check if user can upload based on subscription limits"""
-    # Get user's active subscription
     subscription = db.query(UserSubscription).filter(
         UserSubscription.user_id == user.id,
         UserSubscription.status == SubscriptionStatus.ACTIVE
     ).first()
 
-    # If no subscription or free tier, block upload
     if not subscription or subscription.plan.tier == SubscriptionTier.FREE:
         raise HTTPException(
             status_code=403,
             detail="Vedleggsfunksjonen krever Basic-abonnement eller høyere. Oppgrader for 10 kr/mnd."
         )
 
-    # Get subscription plan
     plan = subscription.plan
 
-    # Check document limit (total receipts for this ledger)
     if plan.max_documents is not None:
         document_count = db.query(func.count(Receipt.id)).filter(
             Receipt.ledger_id == ledger.id
@@ -54,17 +45,12 @@ def check_subscription_limits(user: User, ledger: Ledger, db: Session):
                 detail=f"Du har nådd maksgrensen på {plan.max_documents} bilag for {plan.name}-abonnementet. Oppgrader for å laste opp flere."
             )
 
-    # Check monthly upload limit
     if plan.max_monthly_uploads is not None:
         now = datetime.utcnow()
-        current_year = now.year
-        current_month = now.month
-
-        # Get or create monthly usage record
         usage = db.query(UserMonthlyUsage).filter(
             UserMonthlyUsage.user_id == user.id,
-            UserMonthlyUsage.year == current_year,
-            UserMonthlyUsage.month == current_month
+            UserMonthlyUsage.year == now.year,
+            UserMonthlyUsage.month == now.month
         ).first()
 
         if usage and usage.upload_count >= plan.max_monthly_uploads:
@@ -77,14 +63,11 @@ def check_subscription_limits(user: User, ledger: Ledger, db: Session):
 def increment_monthly_usage(user: User, db: Session):
     """Increment user's monthly upload count"""
     now = datetime.utcnow()
-    current_year = now.year
-    current_month = now.month
 
-    # Get or create monthly usage record
     usage = db.query(UserMonthlyUsage).filter(
         UserMonthlyUsage.user_id == user.id,
-        UserMonthlyUsage.year == current_year,
-        UserMonthlyUsage.month == current_month
+        UserMonthlyUsage.year == now.year,
+        UserMonthlyUsage.month == now.month
     ).first()
 
     if usage:
@@ -92,8 +75,8 @@ def increment_monthly_usage(user: User, db: Session):
     else:
         usage = UserMonthlyUsage(
             user_id=user.id,
-            year=current_year,
-            month=current_month,
+            year=now.year,
+            month=now.month,
             upload_count=1
         )
         db.add(usage)
@@ -112,11 +95,8 @@ async def upload_receipt(
     current_ledger: Ledger = Depends(get_current_ledger)
 ):
     """Upload a receipt image"""
-
-    # Check subscription limits before processing
     check_subscription_limits(current_user, current_ledger, db)
 
-    # Validate file extension
     file_ext = Path(file.filename).suffix.lower()
     if file_ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(
@@ -124,7 +104,6 @@ async def upload_receipt(
             detail=f"File type not allowed. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"
         )
 
-    # Read file and check size
     contents = await file.read()
     file_size = len(contents)
 
@@ -134,20 +113,10 @@ async def upload_receipt(
             detail=f"File too large. Maximum size: {MAX_FILE_SIZE / 1024 / 1024}MB"
         )
 
-    # Generate unique filename
-    unique_filename = f"{uuid.uuid4()}{file_ext}"
-    file_path = UPLOAD_DIR / str(current_ledger.id) / unique_filename
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Save file
-    with open(file_path, "wb") as f:
-        f.write(contents)
-
-    # Create receipt record
     receipt = Receipt(
         ledger_id=current_ledger.id,
         uploaded_by=current_user.id,
-        image_path=str(file_path),
+        file_data=contents,
         original_filename=file.filename,
         file_size=file_size,
         mime_type=file.content_type,
@@ -161,7 +130,6 @@ async def upload_receipt(
     db.commit()
     db.refresh(receipt)
 
-    # Increment monthly usage counter
     increment_monthly_usage(current_user, db)
 
     return receipt
@@ -225,10 +193,14 @@ def get_receipt_image(
     if not receipt:
         raise HTTPException(status_code=404, detail="Receipt not found")
 
-    if not os.path.exists(receipt.image_path):
-        raise HTTPException(status_code=404, detail="Image file not found")
+    if not receipt.file_data:
+        raise HTTPException(status_code=404, detail="Image data not found")
 
-    return FileResponse(receipt.image_path)
+    return Response(
+        content=receipt.file_data,
+        media_type=receipt.mime_type or "application/octet-stream",
+        headers={"Cache-Control": "private, max-age=3600"}
+    )
 
 
 @router.post("/{receipt_id}/match/{transaction_id}")
@@ -248,7 +220,6 @@ def match_receipt_to_transaction(
     if not receipt:
         raise HTTPException(status_code=404, detail="Receipt not found")
 
-    # Verify transaction exists and belongs to same ledger
     transaction = db.query(Transaction).filter(
         Transaction.id == transaction_id,
         Transaction.ledger_id == current_ledger.id
@@ -257,7 +228,6 @@ def match_receipt_to_transaction(
     if not transaction:
         raise HTTPException(status_code=404, detail="Transaction not found")
 
-    # Update receipt
     receipt.matched_transaction_id = transaction_id
     receipt.status = ReceiptStatus.MATCHED
     receipt.matched_at = datetime.now()
@@ -316,10 +286,6 @@ def delete_receipt(
     if not receipt:
         raise HTTPException(status_code=404, detail="Receipt not found")
 
-    # Delete file from disk
-    if os.path.exists(receipt.image_path):
-        os.remove(receipt.image_path)
-
     db.delete(receipt)
     db.commit()
 
@@ -370,12 +336,6 @@ async def rotate_receipt(
     if not receipt:
         raise HTTPException(status_code=404, detail="Receipt not found")
 
-    # Validate file extension
-    file_ext = Path(file.filename).suffix.lower() or '.jpg'
-    if file_ext not in ALLOWED_EXTENSIONS:
-        file_ext = '.jpg'
-
-    # Read file
     contents = await file.read()
     file_size = len(contents)
 
@@ -385,21 +345,7 @@ async def rotate_receipt(
             detail=f"File too large. Maximum size: {MAX_FILE_SIZE / 1024 / 1024}MB"
         )
 
-    # Delete old file
-    if os.path.exists(receipt.image_path):
-        os.remove(receipt.image_path)
-
-    # Generate new filename (keep same path)
-    unique_filename = f"{uuid.uuid4()}{file_ext}"
-    file_path = UPLOAD_DIR / str(current_ledger.id) / unique_filename
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Save new file
-    with open(file_path, "wb") as f:
-        f.write(contents)
-
-    # Update receipt record
-    receipt.image_path = str(file_path)
+    receipt.file_data = contents
     receipt.file_size = file_size
     receipt.mime_type = file.content_type or 'image/jpeg'
 

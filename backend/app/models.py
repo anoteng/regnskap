@@ -1,5 +1,5 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Date, DECIMAL, Text, ForeignKey, Enum as SQLEnum
-from sqlalchemy.orm import relationship
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Date, DECIMAL, Text, ForeignKey, Enum as SQLEnum, LargeBinary
+from sqlalchemy.orm import relationship, deferred
 from sqlalchemy.sql import func
 from datetime import datetime
 import enum
@@ -358,8 +358,8 @@ class Receipt(Base):
     ledger_id = Column(Integer, ForeignKey("ledgers.id"), nullable=False)
     uploaded_by = Column(Integer, ForeignKey("users.id"), nullable=False)
 
-    # File storage
-    image_path = Column(String(500), nullable=False)
+    # File storage (LONGBLOB in database)
+    file_data = deferred(Column(LargeBinary, nullable=True))
     original_filename = Column(String(255))
     file_size = Column(Integer)
     mime_type = Column(String(100))
