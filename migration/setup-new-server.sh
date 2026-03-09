@@ -3,24 +3,26 @@
 # Run as root on the new server
 # Usage: sudo bash setup-new-server.sh
 #
+# This script sets up a fresh installation with empty database + seed data.
+# Import a dump from the old server afterwards to migrate data.
+#
 # Prerequisites:
-#   - Debian 13 (or similar) installed
+#   - Debian 12/13 installed
 #   - User 'andreas' exists
-#   - Export directory transferred to /home/andreas/regnskap-export-YYYYMMDD/
+#   - Git repo cloned to /home/andreas/regnskap
 
 set -e
 
 DOMAIN="privatregnskap.eu"
-EXPORT_DIR=$(ls -d /home/andreas/regnskap-export-* 2>/dev/null | head -1)
+APP_DIR="/home/andreas/regnskap"
 
-if [ -z "$EXPORT_DIR" ]; then
-    echo "ERROR: No export directory found at /home/andreas/regnskap-export-*"
-    echo "Transfer export from old server first."
+if [ ! -d "$APP_DIR" ]; then
+    echo "ERROR: $APP_DIR not found"
+    echo "Clone the repo first: git clone <repo> $APP_DIR"
     exit 1
 fi
 
-echo "=== Regnskap - New Server Setup ==="
-echo "Using export: $EXPORT_DIR"
+echo "=== Privatregnskap.eu - Server Setup ==="
 echo "Domain: $DOMAIN"
 echo ""
 
@@ -41,22 +43,31 @@ apt install -y \
   python3-httpx python3-jwt
 
 # ============================================
-# 2. MARIADB SETUP
+# 2. GENERATE DATABASE PASSWORD
 # ============================================
 echo "[2/8] Setting up MariaDB..."
 
-# Create database and user
-mysql -u root <<'SQL'
+DB_PASS=$(openssl rand -base64 24 | tr -d '/+=')
+DB_PASS_URL=$(python3 -c "from urllib.parse import quote; print(quote('$DB_PASS', safe=''))")
+
+mysql -u root <<SQL
 CREATE DATABASE IF NOT EXISTS regnskap CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER IF NOT EXISTS 'regnskap'@'localhost' IDENTIFIED BY '4^jLTtsB&fI&uo*#j@M0';
+CREATE USER IF NOT EXISTS 'regnskap'@'localhost' IDENTIFIED BY '$DB_PASS';
 GRANT ALL PRIVILEGES ON regnskap.* TO 'regnskap'@'localhost';
 FLUSH PRIVILEGES;
 SQL
 
-# Import database
-echo "  Importing database..."
-mysql -u regnskap -p'4^jLTtsB&fI&uo*#j@M0' regnskap < "$EXPORT_DIR/regnskap.sql"
-echo "  Database imported"
+echo "  Database and user created"
+
+# Import schema
+echo "  Importing schema..."
+mysql -u regnskap -p"$DB_PASS" regnskap < "$APP_DIR/database/schema.sql"
+
+# Import seed data (templates, subscription plans, bank providers)
+echo "  Importing seed data..."
+mysql -u regnskap -p"$DB_PASS" regnskap < "$APP_DIR/database/seed.sql"
+
+echo "  Database ready"
 
 # ============================================
 # 3. MARIADB ENCRYPTION AT REST
@@ -86,34 +97,60 @@ systemctl restart mariadb
 echo "  MariaDB encryption enabled"
 
 # ============================================
-# 4. APPLICATION
+# 4. MARIADB REPLICATION (REPLICA CONFIG)
 # ============================================
-echo "[4/8] Deploying application..."
-tar xzf "$EXPORT_DIR/regnskap-app.tar.gz" -C /home/andreas/
-chown -R andreas:andreas /home/andreas/regnskap
+echo "[4/8] Configuring MariaDB for replication..."
+cat > /etc/mysql/mariadb.conf.d/80-replication.cnf <<'EOF'
+[mariadb]
+server-id = 1
+log_bin = /var/log/mysql/mariadb-bin
+binlog_format = ROW
+expire_logs_days = 14
+max_binlog_size = 100M
+EOF
 
-# Restore certificates with correct permissions
-cp -a "$EXPORT_DIR/certificates/"* /home/andreas/regnskap/certificates/
-chmod 600 /home/andreas/regnskap/certificates/private.key
-chown andreas:andreas /home/andreas/regnskap/certificates/*
+systemctl restart mariadb
+echo "  Binary logging enabled (ready for replica setup)"
 
 # ============================================
 # 5. PYTHON VENV
 # ============================================
 echo "[5/8] Setting up Python virtualenv..."
 su - andreas -c "
-  cd /home/andreas/regnskap
+  cd $APP_DIR
   python3 -m venv venv --system-site-packages
-  venv/bin/pip install 'python-jose[cryptography]' 'webauthn>=1.11.0'
+  venv/bin/pip install 'python-jose[cryptography]' 'webauthn>=1.11.0' openpyxl
 "
 
 # ============================================
-# 6. UPDATE .env
+# 6. GENERATE .env
 # ============================================
-echo "[6/8] Updating .env..."
-sed -i "s|FRONTEND_URL=.*|FRONTEND_URL=https://$DOMAIN|" /home/andreas/regnskap/.env
-sed -i "s|RP_ID=.*|RP_ID=$DOMAIN|" /home/andreas/regnskap/.env
-echo "  Updated FRONTEND_URL and RP_ID to $DOMAIN"
+echo "[6/8] Generating .env..."
+
+SECRET_KEY=$(openssl rand -base64 48 | tr -d '/+=')
+
+cat > "$APP_DIR/.env" <<EOF
+DATABASE_URL=mysql+pymysql://regnskap:${DB_PASS_URL}@localhost:3306/regnskap
+SECRET_KEY=${SECRET_KEY}
+ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+FRONTEND_URL=https://${DOMAIN}
+
+# WebAuthn / Passkey settings
+RP_ID=${DOMAIN}
+RP_NAME=Privatregnskap.eu
+
+# SMTP settings for password reset emails
+SMTP_HOST=
+SMTP_PORT=465
+SMTP_USER=
+SMTP_PASSWORD=
+SMTP_FROM=
+EOF
+
+chown andreas:andreas "$APP_DIR/.env"
+chmod 600 "$APP_DIR/.env"
+echo "  .env generated (fill in SMTP settings manually)"
 
 # ============================================
 # 7. SYSTEMD SERVICE
@@ -121,7 +158,7 @@ echo "  Updated FRONTEND_URL and RP_ID to $DOMAIN"
 echo "[7/8] Creating systemd service..."
 cat > /etc/systemd/system/regnskap.service <<'EOF'
 [Unit]
-Description=Regnskap FastAPI Application
+Description=Privatregnskap.eu FastAPI Application
 After=network.target mysql.service
 Requires=mysql.service
 
@@ -130,9 +167,8 @@ Type=simple
 User=andreas
 Group=andreas
 WorkingDirectory=/home/andreas/regnskap
-Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 EnvironmentFile=/home/andreas/regnskap/.env
-ExecStart=/home/andreas/regnskap/venv/bin/python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 8002
+ExecStart=/home/andreas/regnskap/venv/bin/python3 -m uvicorn backend.main:app --host 127.0.0.1 --port 8002
 Restart=on-failure
 RestartSec=5s
 StandardOutput=journal
@@ -152,7 +188,7 @@ systemctl enable regnskap
 # 8. NGINX + SSL
 # ============================================
 echo "[8/8] Configuring nginx..."
-cat > /etc/nginx/sites-available/$DOMAIN <<EOF
+cat > /etc/nginx/sites-available/$DOMAIN <<NGINX
 server {
     listen 80;
     listen [::]:80;
@@ -167,24 +203,6 @@ server {
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-    }
-
-    location /docs {
-        proxy_pass http://127.0.0.1:8002;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-
-    location /redoc {
-        proxy_pass http://127.0.0.1:8002;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
     }
 
     location / {
@@ -195,10 +213,10 @@ server {
         proxy_set_header X-Forwarded-Proto \$scheme;
     }
 
-    access_log /var/log/nginx/regnskap.access.log;
-    error_log /var/log/nginx/regnskap.error.log;
+    access_log /var/log/nginx/$DOMAIN.access.log;
+    error_log /var/log/nginx/$DOMAIN.error.log;
 }
-EOF
+NGINX
 
 ln -sf /etc/nginx/sites-available/$DOMAIN /etc/nginx/sites-enabled/
 rm -f /etc/nginx/sites-enabled/default
@@ -207,24 +225,30 @@ nginx -t && systemctl reload nginx
 echo ""
 echo "=== Setup complete ==="
 echo ""
-echo "REMAINING MANUAL STEPS:"
+echo "Database password: $DB_PASS"
+echo "(saved in $APP_DIR/.env)"
 echo ""
-echo "1. Point DNS for $DOMAIN to this server's IP"
+echo "NEXT STEPS:"
 echo ""
-echo "2. Get SSL certificate (after DNS is active):"
+echo "1. Copy Enable Banking certificates:"
+echo "   scp certificates/* andreas@$(hostname -I | awk '{print $1}'):$APP_DIR/certificates/"
+echo "   chmod 600 $APP_DIR/certificates/private.key"
+echo ""
+echo "2. Fill in SMTP settings in $APP_DIR/.env"
+echo ""
+echo "3. Point DNS for $DOMAIN to this server"
+echo ""
+echo "4. Get SSL certificate (after DNS is active):"
 echo "   sudo certbot --nginx -d $DOMAIN"
 echo ""
-echo "3. Start the application:"
+echo "5. Start the app:"
 echo "   sudo systemctl start regnskap"
 echo ""
-echo "4. Re-authorize Enable Banking connections:"
-echo "   - Go to https://$DOMAIN"
-echo "   - Navigate to Bankkoblinger"
-echo "   - Re-connect each bank account (new OAuth session needed)"
+echo "6. To import data from old server:"
+echo "   # On old server:"
+echo "   bash migration/export.sh"
+echo "   scp ~/regnskap-export-*/regnskap.sql andreas@NEW_IP:~/"
+echo "   # On new server:"
+echo "   mysql -u regnskap -p'$DB_PASS' regnskap < ~/regnskap.sql"
 echo ""
-echo "5. Re-register Passkeys (WebAuthn RP_ID changed):"
-echo "   - Users must log in with password first"
-echo "   - Then register new passkeys for the new domain"
-echo ""
-echo "6. Verify MariaDB encryption:"
-echo "   sudo mysql -e \"SHOW GLOBAL VARIABLES LIKE '%encrypt%';\""
+echo "7. Re-register passkeys (domain changed) and re-authorize bank connections"
