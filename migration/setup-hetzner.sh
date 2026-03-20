@@ -32,7 +32,8 @@ echo "[2/6] Setting up Python virtualenv..."
 if [ ! -d "$APP_DIR/venv" ]; then
     python3 -m venv venv --system-site-packages
 fi
-venv/bin/pip install --quiet 'python-jose[cryptography]' 'webauthn>=1.11.0' openpyxl
+venv/bin/pip uninstall -y multipart 2>/dev/null || true
+venv/bin/pip install --quiet 'python-jose[cryptography]' 'webauthn>=1.11.0' openpyxl python-multipart
 
 echo "  Installed missing packages"
 
