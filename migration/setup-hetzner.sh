@@ -47,7 +47,8 @@ DB_PASS_URL=$(python3 -c "from urllib.parse import quote; print(quote('$DB_PASS'
 echo "  Creating database and user..."
 sudo mysql <<SQL
 CREATE DATABASE IF NOT EXISTS regnskap CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER IF NOT EXISTS 'regnskap'@'localhost' IDENTIFIED BY '$DB_PASS';
+DROP USER IF EXISTS 'regnskap'@'localhost';
+CREATE USER 'regnskap'@'localhost' IDENTIFIED BY '$DB_PASS';
 GRANT ALL PRIVILEGES ON regnskap.* TO 'regnskap'@'localhost';
 FLUSH PRIVILEGES;
 SQL
