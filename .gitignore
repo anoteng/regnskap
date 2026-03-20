@@ -13,5 +13,6 @@ ENV/
 .DS_Store
 *.log
 uploads/
+certificates/
 .idea/
 .vscode/
