@@ -72,8 +72,10 @@ def get_origins() -> list:
     rp_id = get_rp_id()
     web_origin = 'http://localhost:8002' if rp_id == 'localhost' else f'https://{rp_id}'
     origins = [web_origin]
-    if settings.webauthn_android_origin:
-        origins.append(settings.webauthn_android_origin)
+    for origin in settings.webauthn_android_origins.split(','):
+        origin = origin.strip()
+        if origin:
+            origins.append(origin)
     return origins
 
 

@@ -11,7 +11,8 @@ class Settings(BaseSettings):
     # WebAuthn / Passkey settings
     rp_id: str = "localhost"
     rp_name: str = "Privatregnskap.eu"
-    webauthn_android_origin: str = ""
+    # Comma-separated list of allowed Android origins (release and/or debug)
+    webauthn_android_origins: str = ""
 
     # Email settings (Brevo API)
     brevo_api_key: str = ""
