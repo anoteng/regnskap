@@ -1,8 +1,5 @@
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import requests
 from backend.config import get_settings
-import ssl
 
 settings = get_settings()
 
@@ -10,16 +7,8 @@ settings = get_settings()
 def send_password_reset_email(to_email: str, reset_token: str, user_name: str):
     """Send password reset email with token link"""
 
-    # Create reset link
     reset_link = f"https://{settings.rp_id}/reset-password?token={reset_token}"
 
-    # Create email
-    msg = MIMEMultipart('alternative')
-    msg['Subject'] = 'Tilbakestill passord - Privatregnskap.eu'
-    msg['From'] = settings.smtp_from
-    msg['To'] = to_email
-
-    # Plain text version
     text = f"""
 Hei {user_name},
 
@@ -36,7 +25,6 @@ Hilsen
 Privatregnskap.eu
 """
 
-    # HTML version
     html = f"""
 <html>
   <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
@@ -63,14 +51,18 @@ Privatregnskap.eu
 </html>
 """
 
-    # Attach both versions
-    part1 = MIMEText(text, 'plain')
-    part2 = MIMEText(html, 'html')
-    msg.attach(part1)
-    msg.attach(part2)
-
-    # Send email
-    context = ssl.create_default_context()
-    with smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, context=context) as server:
-        server.login(settings.smtp_user, settings.smtp_password)
-        server.send_message(msg)
+    response = requests.post(
+        "https://api.brevo.com/v3/smtp/email",
+        headers={
+            "api-key": settings.brevo_api_key,
+            "Content-Type": "application/json",
+        },
+        json={
+            "sender": {"name": settings.email_from_name, "email": settings.email_from},
+            "to": [{"email": to_email}],
+            "subject": "Tilbakestill passord - Privatregnskap.eu",
+            "htmlContent": html,
+            "textContent": text,
+        },
+    )
+    response.raise_for_status()

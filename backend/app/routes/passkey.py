@@ -67,13 +67,14 @@ def get_rp_name() -> str:
     return getattr(settings, 'rp_name', 'Privatregnskap.eu')
 
 
-def get_origin() -> str:
-    """Get expected origin for WebAuthn"""
-    # For development
+def get_origins() -> list:
+    """Get expected origins for WebAuthn (web + Android)"""
     rp_id = get_rp_id()
-    if rp_id == 'localhost':
-        return 'http://localhost:8002'
-    return f'https://{rp_id}'
+    web_origin = 'http://localhost:8002' if rp_id == 'localhost' else f'https://{rp_id}'
+    origins = [web_origin]
+    if settings.webauthn_android_origin:
+        origins.append(settings.webauthn_android_origin)
+    return origins
 
 
 @router.post("/register/begin")
@@ -92,7 +93,7 @@ async def begin_registration(
     ).all()
 
     exclude_credentials = [
-        PublicKeyCredentialDescriptor(id=base64.b64decode(cred.credential_id))
+        PublicKeyCredentialDescriptor(id=base64.urlsafe_b64decode(cred.credential_id + '=='))
         for cred in existing_credentials
     ]
 
@@ -160,7 +161,7 @@ async def complete_registration(
         verification = verify_registration_response(
             credential=attestation,
             expected_challenge=expected_challenge,
-            expected_origin=get_origin(),
+            expected_origin=get_origins(),
             expected_rp_id=get_rp_id(),
         )
 
@@ -217,7 +218,7 @@ async def begin_login(
             ).all()
 
             allow_credentials = [
-                PublicKeyCredentialDescriptor(id=base64.b64decode(cred.credential_id))
+                PublicKeyCredentialDescriptor(id=base64.urlsafe_b64decode(cred.credential_id + '=='))
                 for cred in credentials
             ]
 
@@ -285,7 +286,7 @@ async def complete_login(
         verification = verify_authentication_response(
             credential=assertion,
             expected_challenge=expected_challenge,
-            expected_origin=get_origin(),
+            expected_origin=get_origins(),
             expected_rp_id=get_rp_id(),
             credential_public_key=public_key_bytes,
             credential_current_sign_count=credential.sign_count,

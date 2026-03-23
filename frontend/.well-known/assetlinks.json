@@ -1,0 +1,28 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls",
+      "delegate_permission/common.get_login_creds"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "eu.privatregnskap.app.debug",
+      "sha256_cert_fingerprints": [
+        "3D:C4:75:EC:C1:BB:42:45:E2:EF:B5:18:52:41:0F:05:BD:DA:9B:58:32:93:EF:99:B4:92:4F:FF:CA:B0:85:A6"
+      ]
+    }
+  },
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls",
+      "delegate_permission/common.get_login_creds"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "eu.privatregnskap.app",
+      "sha256_cert_fingerprints": [
+        "0E:D2:41:54:B9:75:43:97:5E:D6:8A:62:19:76:EE:D6:C7:9B:7D:BD:2B:5C:4F:20:43:66:58:D3:92:F0:19:74"
+      ]
+    }
+  }
+]

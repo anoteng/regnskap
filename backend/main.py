@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from backend.app.routes import auth, accounts, bank_accounts, transactions, categories, budgets, reports, csv_mappings, ledgers, receipts, passkey, admin, bank_admin, bank_connections, chart_templates, exports
 
 app = FastAPI(
@@ -55,6 +55,17 @@ def manifest():
 @app.get("/sw.js")
 def service_worker():
     return FileResponse("frontend/sw.js")
+
+
+@app.get("/app-download")
+def download_app():
+    response = FileResponse(
+        "android/dist/privatregnskap-0.2.0-debug.apk",
+        media_type="application/vnd.android.package-archive",
+        filename="privatregnskap-0.2.0-debug.apk"
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")

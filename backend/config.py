@@ -11,13 +11,12 @@ class Settings(BaseSettings):
     # WebAuthn / Passkey settings
     rp_id: str = "localhost"
     rp_name: str = "Privatregnskap.eu"
+    webauthn_android_origin: str = ""
 
-    # SMTP settings for password reset emails
-    smtp_host: str = "smtp.altibox.no"
-    smtp_port: int = 465
-    smtp_user: str = ""
-    smtp_password: str = ""
-    smtp_from: str = ""
+    # Email settings (Brevo API)
+    brevo_api_key: str = ""
+    email_from: str = ""
+    email_from_name: str = "Privatregnskap.eu"
 
     # Bank integration settings
     frontend_url: str = "http://localhost:8002"
