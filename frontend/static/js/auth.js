@@ -149,7 +149,45 @@ class Auth {
             this.logout();
             window.location.reload();
         });
+
+        const deleteAccountBtn = document.getElementById('delete-account-btn');
+        if (deleteAccountBtn) {
+            deleteAccountBtn.addEventListener('click', () => this.confirmDeleteAccount());
+        }
     }
-}
+
+    async confirmDeleteAccount() {
+        if (!this.currentUser) {
+            try { this.currentUser = await api.get('/auth/me'); } catch (e) {}
+        }
+        const userEmail = this.currentUser?.email || '';
+
+        const confirmed = confirm(
+            '⚠️ ADVARSEL: Dette kan ikke angres.\n\n' +
+            'Følgende slettes permanent:\n' +
+            '• Din brukerkonto\n' +
+            '• Alle regnskap du er eneste eier av\n' +
+            '• Alle transaksjoner, kontoer og vedlegg i disse regnskapene\n' +
+            '• Dine passkeys og innloggingsdata\n\n' +
+            'Regnskap du deler med andre berøres ikke.\n\n' +
+            'Vil du fortsette?'
+        );
+        if (!confirmed) return;
+
+        const typedEmail = prompt(`Skriv inn e-postadressen din for å bekrefte sletting:\n(${userEmail})`);
+        if (!typedEmail || typedEmail.trim().toLowerCase() !== userEmail.toLowerCase()) {
+            alert('E-postadressen stemmer ikke. Sletting avbrutt.');
+            return;
+        }
+
+        try {
+            await api.delete('/auth/me');
+            this.logout();
+            alert('Kontoen din er slettet.');
+            window.location.reload();
+        } catch (error) {
+            alert('Feil ved sletting: ' + error.message);
+        }
+    }
 
 export default new Auth();

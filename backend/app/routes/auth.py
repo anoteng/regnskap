@@ -7,7 +7,7 @@ import secrets
 from backend.database import get_db
 from backend.config import get_settings
 from backend.email import send_password_reset_email
-from ..models import User, PasswordResetToken, WebAuthnCredential, UserSubscription, SubscriptionStatus
+from ..models import User, PasswordResetToken, WebAuthnCredential, UserSubscription, SubscriptionStatus, Ledger, LedgerMember, LedgerRole
 from ..schemas import Token, UserCreate, User as UserSchema, PasswordResetRequest, PasswordResetComplete, PasswordResetResponse
 from ..auth import authenticate_user, create_access_token, get_password_hash, get_current_active_user
 
@@ -172,3 +172,44 @@ async def get_my_subscription(
         "price_yearly": float(plan.price_yearly) if plan.price_yearly else None,
         "features": plan.features,
     }
+
+
+@router.delete("/me")
+async def delete_my_account(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Permanently delete the current user's account.
+
+    For each ledger where the user is the sole owner, the ledger is soft-deleted.
+    For ledgers with other owners, the user is simply removed as a member.
+    The user account is then deactivated and anonymised.
+    """
+    memberships = db.query(LedgerMember).filter(
+        LedgerMember.user_id == current_user.id
+    ).all()
+
+    for membership in memberships:
+        if membership.role == LedgerRole.OWNER:
+            other_owners = db.query(LedgerMember).filter(
+                LedgerMember.ledger_id == membership.ledger_id,
+                LedgerMember.user_id != current_user.id,
+                LedgerMember.role == LedgerRole.OWNER
+            ).count()
+
+            if other_owners == 0:
+                # Sole owner — soft-delete the ledger
+                ledger = db.query(Ledger).filter(Ledger.id == membership.ledger_id).first()
+                if ledger:
+                    ledger.is_active = False
+
+        db.delete(membership)
+
+    # Anonymise and deactivate the account
+    current_user.is_active = False
+    current_user.full_name = "Slettet bruker"
+    current_user.email = f"deleted_{current_user.id}@deleted.invalid"
+
+    db.commit()
+    return {"message": "Konto slettet"}
