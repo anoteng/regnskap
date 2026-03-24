@@ -120,3 +120,16 @@ data class UpdateTransactionRequest(
     val reference: String?,
     @Json(name = "journal_entries") val journalEntries: List<JournalEntryUpdate>
 )
+
+@JsonClass(generateAdapter = true)
+data class PasskeyCredentialResponse(
+    val id: Int,
+    @Json(name = "credential_name") val credentialName: String?,
+    @Json(name = "created_at") val createdAt: String,
+    @Json(name = "last_used_at") val lastUsedAt: String?
+)
+
+@JsonClass(generateAdapter = true)
+data class PasskeyRegisterBeginRequest(
+    @Json(name = "credential_name") val credentialName: String?
+)
