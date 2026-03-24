@@ -522,6 +522,58 @@ private fun EditTransactionSheet(
                 }
             }
 
+            // Inline balance status — visible without scrolling past keyboard
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (balanced)
+                        MaterialTheme.colorScheme.secondaryContainer
+                    else
+                        MaterialTheme.colorScheme.errorContainer
+                )
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            "D: ${formatAmount(totalDebit)}  K: ${formatAmount(totalCredit)}",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (balanced) Icons.Default.CheckCircle else Icons.Default.Warning,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = if (balanced)
+                                MaterialTheme.colorScheme.onSecondaryContainer
+                            else
+                                MaterialTheme.colorScheme.onErrorContainer
+                        )
+                        Text(
+                            text = if (balanced) "Balansert"
+                            else "Diff: ${formatAmount(diff)}",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = if (balanced)
+                                MaterialTheme.colorScheme.onSecondaryContainer
+                            else
+                                MaterialTheme.colorScheme.onErrorContainer
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
             // Pre-fill balance difference for new entry
             val prefilledDebit = if (totalCredit > totalDebit + 0.01) "%.2f".format(totalCredit - totalDebit) else "0.00"
             val prefilledCredit = if (totalDebit > totalCredit + 0.01) "%.2f".format(totalDebit - totalCredit) else "0.00"
@@ -541,46 +593,6 @@ private fun EditTransactionSheet(
                 Icon(Icons.Default.Add, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
                 Text("Legg til postering")
-            }
-
-            Spacer(Modifier.height(12.dp))
-
-            // Balance display
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = if (balanced)
-                        MaterialTheme.colorScheme.secondaryContainer
-                    else
-                        MaterialTheme.colorScheme.errorContainer
-                )
-            ) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Debet:", style = MaterialTheme.typography.bodySmall)
-                        Text(formatAmount(totalDebit), style = MaterialTheme.typography.bodySmall)
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Kredit:", style = MaterialTheme.typography.bodySmall)
-                        Text(formatAmount(totalCredit), style = MaterialTheme.typography.bodySmall)
-                    }
-                    Text(
-                        text = if (balanced) "Balansert"
-                        else "Differanse: ${formatAmount(diff)}",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = if (balanced)
-                            MaterialTheme.colorScheme.onSecondaryContainer
-                        else
-                            MaterialTheme.colorScheme.onErrorContainer
-                    )
-                }
             }
 
             Spacer(Modifier.height(16.dp))
@@ -654,6 +666,15 @@ private fun EditTransactionSheet(
             Spacer(Modifier.height(16.dp))
 
             // Save / Cancel
+            if (!canSave) {
+                Text(
+                    text = if (!balanced) "Bilag er ikke balansert (diff: ${formatAmount(diff)})"
+                    else "Velg konto for alle posteringer",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
