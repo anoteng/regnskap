@@ -96,7 +96,10 @@ private fun nextEntryId() = newEntryCounter--
 
 // ─── Helper functions ──────────────────────────────────────────────────────────
 
-fun formatAmount(amount: Double): String = "%.2f kr".format(amount)
+fun formatAmount(amount: Double): String = String.format(java.util.Locale.US, "%.2f kr", amount)
+
+private fun parseAmount(s: String): Double = s.replace(',', '.').toDoubleOrNull() ?: 0.0
+private fun formatEntry(value: Double): String = String.format(java.util.Locale.US, "%.2f", value)
 
 @Composable
 private fun SourceBadge(source: String?) {
@@ -449,16 +452,16 @@ private fun EditTransactionSheet(
                 accountId = entry.accountId,
                 accountNumber = entry.account?.accountNumber ?: "",
                 accountName = entry.account?.accountName ?: "",
-                debit = if ((entry.debit ?: 0.0) > 0.001) "%.2f".format(entry.debit) else "0.00",
-                credit = if ((entry.credit ?: 0.0) > 0.001) "%.2f".format(entry.credit) else "0.00"
+                debit = if ((entry.debit ?: 0.0) > 0.001) formatEntry(entry.debit!!) else "0.00",
+                credit = if ((entry.credit ?: 0.0) > 0.001) formatEntry(entry.credit!!) else "0.00"
             )
         }.toTypedArray())
     }
 
     var showChainPicker by remember { mutableStateOf(false) }
 
-    val totalDebit = entries.sumOf { it.debit.toDoubleOrNull() ?: 0.0 }
-    val totalCredit = entries.sumOf { it.credit.toDoubleOrNull() ?: 0.0 }
+    val totalDebit = entries.sumOf { parseAmount(it.debit) }
+    val totalCredit = entries.sumOf { parseAmount(it.credit) }
     val diff = kotlin.math.abs(totalDebit - totalCredit)
     val balanced = diff < 0.01 && entries.size >= 2
     val allAccountsValid = entries.all { it.accountId != null }
@@ -575,8 +578,8 @@ private fun EditTransactionSheet(
             Spacer(Modifier.height(8.dp))
 
             // Pre-fill balance difference for new entry
-            val prefilledDebit = if (totalCredit > totalDebit + 0.01) "%.2f".format(totalCredit - totalDebit) else "0.00"
-            val prefilledCredit = if (totalDebit > totalCredit + 0.01) "%.2f".format(totalDebit - totalCredit) else "0.00"
+            val prefilledDebit = if (totalCredit > totalDebit + 0.01) formatEntry(totalCredit - totalDebit) else "0.00"
+            val prefilledCredit = if (totalDebit > totalCredit + 0.01) formatEntry(totalDebit - totalCredit) else "0.00"
 
             OutlinedButton(
                 onClick = {
@@ -695,8 +698,8 @@ private fun EditTransactionSheet(
                                         e.accountId?.let { accountId ->
                                             JournalEntryUpdate(
                                                 accountId = accountId,
-                                                debit = e.debit.toDoubleOrNull() ?: 0.0,
-                                                credit = e.credit.toDoubleOrNull() ?: 0.0
+                                                debit = parseAmount(e.debit),
+                                                credit = parseAmount(e.credit)
                                             )
                                         }
                                     }
