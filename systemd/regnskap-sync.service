@@ -6,7 +6,7 @@ After=network.target regnskap.service
 Type=oneshot
 User=andreas
 EnvironmentFile=/home/andreas/regnskap/.env
-ExecStart=/usr/bin/curl -sf \
+ExecStart=/usr/bin/curl -s --retry 3 --retry-delay 10 --retry-connrefused \
     -X POST http://127.0.0.1:8002/api/internal/sync-all \
     -H "X-Sync-Key: ${SYNC_API_KEY}" \
     -H "Content-Type: application/json"
