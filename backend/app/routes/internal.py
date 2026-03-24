@@ -61,6 +61,8 @@ async def sync_all_connections(
                 bank_connection=conn,
                 user=user,
                 sync_type=BankSyncType.AUTO,
+                psu_ip_address="127.0.0.1",
+                psu_user_agent="PrivatregnskapAutoSync/1.0",
             )
             results.append({'connection_id': conn.id, **result})
         except Exception as e:

@@ -68,7 +68,7 @@ fun MainScreen(onLogout: () -> Unit) {
                 DashboardScreen(innerPadding = padding)
             }
             composable(Tab.PostingQueue.route) {
-                PostingQueueScreen()
+                PostingQueueScreen(innerPadding = padding)
             }
             composable(Tab.Attachments.route) {
                 AttachmentsScreen()

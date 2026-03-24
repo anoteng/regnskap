@@ -10,6 +10,8 @@ import eu.privatregnskap.app.data.repository.TokenRepository
 import eu.privatregnskap.app.data.repository.TokenRepositoryImpl
 import eu.privatregnskap.app.data.repository.LedgerRepository
 import eu.privatregnskap.app.data.repository.LedgerRepositoryImpl
+import eu.privatregnskap.app.data.repository.PostingQueueRepository
+import eu.privatregnskap.app.data.repository.PostingQueueRepositoryImpl
 import eu.privatregnskap.app.data.repository.TransactionRepository
 import eu.privatregnskap.app.data.repository.TransactionRepositoryImpl
 import javax.inject.Singleton
@@ -33,4 +35,8 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindLedgerRepository(impl: LedgerRepositoryImpl): LedgerRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindPostingQueueRepository(impl: PostingQueueRepositoryImpl): PostingQueueRepository
 }
