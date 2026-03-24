@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     email_from: str = ""
     email_from_name: str = "Privatregnskap.eu"
 
+    # Internal API key for scheduled tasks (nightly bank sync)
+    sync_api_key: str = ""
+
     # Bank integration settings
     frontend_url: str = "http://localhost:8002"
 

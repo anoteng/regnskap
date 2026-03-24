@@ -1,0 +1,15 @@
+[Unit]
+Description=Privatregnskap nightly bank sync
+After=network.target regnskap.service
+
+[Service]
+Type=oneshot
+User=andreas
+EnvironmentFile=/home/andreas/regnskap/.env
+ExecStart=/usr/bin/curl -sf \
+    -X POST http://127.0.0.1:8002/api/internal/sync-all \
+    -H "X-Sync-Key: ${SYNC_API_KEY}" \
+    -H "Content-Type: application/json"
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=regnskap-sync
