@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     email_from: str = ""
     email_from_name: str = "Privatregnskap.eu"
 
+    # AI / OCR (Anthropic) — only used for Premium subscribers
+    anthropic_api_key: str = ""
+
     # Internal API key for scheduled tasks (nightly bank sync)
     sync_api_key: str = ""
 

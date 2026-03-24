@@ -351,6 +351,11 @@ class ImportLog(Base):
     import_date = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class AttachmentType(str, enum.Enum):
+    RECEIPT = "RECEIPT"
+    INVOICE = "INVOICE"
+
+
 class Receipt(Base):
     __tablename__ = "receipts"
 
@@ -365,7 +370,9 @@ class Receipt(Base):
     mime_type = Column(String(100))
 
     # Metadata
+    attachment_type = Column(SQLEnum(AttachmentType), nullable=False, default=AttachmentType.RECEIPT)
     receipt_date = Column(Date, nullable=True)
+    due_date = Column(Date, nullable=True)
     amount = Column(DECIMAL(10, 2), nullable=True)
     description = Column(Text, nullable=True)
 
@@ -378,6 +385,16 @@ class Receipt(Base):
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # AI extraction results (columns already exist in DB)
+    ai_extracted_date = Column(Date, nullable=True)
+    ai_extracted_amount = Column(DECIMAL(10, 2), nullable=True)
+    ai_extracted_vendor = Column(String(255), nullable=True)
+    ai_extracted_description = Column(Text, nullable=True)
+    ai_suggested_account = Column(String(10), nullable=True)
+    ai_confidence = Column(DECIMAL(3, 2), nullable=True)
+    ai_processed_at = Column(DateTime(timezone=True), nullable=True)
+    ai_processing_error = Column(Text, nullable=True)
 
     # Relationships
     ledger = relationship("Ledger")
@@ -456,6 +473,7 @@ class UserMonthlyUsage(Base):
     year = Column(Integer, nullable=False)
     month = Column(Integer, nullable=False)  # 1-12
     upload_count = Column(Integer, default=0)
+    ai_operations_count = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

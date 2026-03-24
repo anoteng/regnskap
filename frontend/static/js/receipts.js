@@ -55,28 +55,32 @@ class ReceiptsManager {
         if (h1) h1.textContent = 'Vedlegg';
 
         container.innerHTML = `
-            <div class="card" style="max-width: 600px; margin: 2rem auto; text-align: center; padding: 2rem;">
+            <div class="card" style="max-width: 640px; margin: 2rem auto; text-align: center; padding: 2rem;">
                 <h2 style="margin-bottom: 1rem;">Vedlegg og kvitteringer</h2>
                 <p style="margin-bottom: 1.5rem; color: var(--text-secondary);">
-                    Med Basic-abonnementet kan du laste opp og organisere kvitteringer og bilag,
-                    og koble dem direkte til transaksjoner i regnskapet ditt.
+                    Oppgrader for å laste opp og organisere kvitteringer og fakturaer.
                 </p>
 
-                <div style="background: var(--bg-secondary); border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem; text-align: left;">
-                    <h3 style="margin-bottom: 0.75rem;">Basic inkluderer:</h3>
-                    <ul style="list-style: none; padding: 0; margin: 0;">
-                        <li style="padding: 0.4rem 0;">&#10003; Last opp kvitteringer fra mobil eller PC</li>
-                        <li style="padding: 0.4rem 0;">&#10003; Koble vedlegg til transaksjoner</li>
-                        <li style="padding: 0.4rem 0;">&#10003; CSV-import av banktransaksjoner</li>
-                        <li style="padding: 0.4rem 0;">&#10003; Ubegrenset antall opplastinger</li>
-                    </ul>
-                </div>
-
-                <div style="font-size: 1.5rem; font-weight: bold; margin-bottom: 0.5rem;">
-                    10 kr/mnd
-                </div>
-                <div style="color: var(--text-secondary); margin-bottom: 1.5rem;">
-                    eller 100 kr/&#229;r (spar 17%)
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1.5rem;text-align:left;">
+                    <div style="background: var(--bg-secondary); border-radius: 8px; padding: 1.25rem;">
+                        <h3 style="margin-bottom: 0.75rem;">Basic</h3>
+                        <ul style="list-style: none; padding: 0; margin: 0 0 1rem;">
+                            <li style="padding: 0.3rem 0;">&#10003; Last opp kvitteringer og fakturaer</li>
+                            <li style="padding: 0.3rem 0;">&#10003; Koble vedlegg til transaksjoner</li>
+                            <li style="padding: 0.3rem 0;">&#10003; Manuell registrering av metadata</li>
+                        </ul>
+                        <div style="font-weight: bold;">10 kr/mnd</div>
+                    </div>
+                    <div style="background: var(--bg-secondary); border-radius: 8px; padding: 1.25rem; border: 2px solid var(--color-primary);">
+                        <h3 style="margin-bottom: 0.75rem;">Premium</h3>
+                        <ul style="list-style: none; padding: 0; margin: 0 0 1rem;">
+                            <li style="padding: 0.3rem 0;">&#10003; Alt i Basic</li>
+                            <li style="padding: 0.3rem 0;">&#10003; AI-gjenkjenning av beløp, dato og leverandør</li>
+                            <li style="padding: 0.3rem 0;">&#10003; Forslag til regnskapskonto</li>
+                            <li style="padding: 0.3rem 0;">&#10003; Fakturahåndtering med forfallsdato</li>
+                        </ul>
+                        <div style="font-weight: bold;">25 kr/mnd</div>
+                    </div>
                 </div>
 
                 <p style="color: var(--text-secondary); font-size: 0.875rem;">
@@ -128,28 +132,51 @@ class ReceiptsManager {
         container.innerHTML = html;
     }
 
+    get isPremium() {
+        return this.subscription && this.subscription.tier === 'PREMIUM';
+    }
+
     renderReceiptCard(receipt) {
         const imageUrl = api.getReceiptImage(receipt.id);
+        const isInvoice = receipt.attachment_type === 'INVOICE';
+        const typeLabel = isInvoice ? 'Faktura' : 'Kvittering';
+        const typeBadgeStyle = isInvoice
+            ? 'background:#dbeafe;color:#1e40af;'
+            : 'background:#dcfce7;color:#166534;';
+
+        const aiInfo = receipt.ai_extracted_vendor
+            ? `<div><small>Leverandør: ${receipt.ai_extracted_vendor}</small></div>`
+            : '';
+
+        const aiButton = this.isPremium && !receipt.ai_extracted_vendor
+            ? `<button class="btn btn-sm btn-secondary" onclick="receiptsManager.extractWithAI(${receipt.id})">
+                   AI-gjenkjenning
+               </button>`
+            : '';
 
         return `
             <div class="receipt-card ${receipt.status === 'MATCHED' ? 'receipt-matched' : ''}">
                 <div class="receipt-image-container">
-                    <img src="${imageUrl}" alt="Kvittering" class="receipt-image" onclick="receiptsManager.showFullImage(${receipt.id})">
+                    <img src="${imageUrl}" alt="${typeLabel}" class="receipt-image" onclick="receiptsManager.showFullImage(${receipt.id})">
                 </div>
                 <div class="receipt-info">
                     <div class="receipt-meta">
-                        <strong>${receipt.original_filename || 'Kvittering'}</strong>
+                        <strong>${receipt.original_filename || typeLabel}</strong>
+                        <span style="font-size:0.75rem;padding:2px 6px;border-radius:4px;${typeBadgeStyle}">${typeLabel}</span>
                         <small>${formatDate(receipt.created_at)}</small>
                     </div>
                     ${receipt.receipt_date ? `<div><small>Dato: ${formatDate(receipt.receipt_date)}</small></div>` : ''}
+                    ${isInvoice && receipt.due_date ? `<div><small style="color:#b45309;">Forfall: ${formatDate(receipt.due_date)}</small></div>` : ''}
                     ${receipt.amount ? `<div><small>Beløp: ${parseFloat(receipt.amount).toFixed(2)} kr</small></div>` : ''}
+                    ${aiInfo}
                     ${receipt.description ? `<div><small>${receipt.description}</small></div>` : ''}
 
                     ${receipt.status === 'MATCHED' ? `
                         <div class="receipt-status">
-                            ✓ Matchet til transaksjon #${receipt.matched_transaction_id}
+                            &#10003; Matchet til transaksjon #${receipt.matched_transaction_id}
                         </div>
                         <div class="receipt-actions">
+                            ${aiButton}
                             <button class="btn btn-sm btn-secondary" onclick="receiptsManager.unmatchReceipt(${receipt.id})">
                                 Fjern match
                             </button>
@@ -159,6 +186,7 @@ class ReceiptsManager {
                         </div>
                     ` : `
                         <div class="receipt-actions">
+                            ${aiButton}
                             <button class="btn btn-sm btn-primary" onclick="receiptsManager.showMatchModal(${receipt.id})">
                                 Koble til transaksjon
                             </button>
@@ -488,11 +516,24 @@ class ReceiptsManager {
         const receipt = this.receipts.find(r => r.id === id);
         if (!receipt) return;
 
+        const isInvoice = receipt.attachment_type === 'INVOICE';
+
         const content = `
             <form id="edit-receipt-form">
                 <div class="form-group">
+                    <label>Type</label>
+                    <select id="receipt-type">
+                        <option value="RECEIPT" ${!isInvoice ? 'selected' : ''}>Kvittering</option>
+                        <option value="INVOICE" ${isInvoice ? 'selected' : ''}>Faktura</option>
+                    </select>
+                </div>
+                <div class="form-group">
                     <label>Dato</label>
                     <input type="date" id="receipt-date" value="${receipt.receipt_date || ''}">
+                </div>
+                <div class="form-group" id="due-date-group" style="${isInvoice ? '' : 'display:none'}">
+                    <label>Forfallsdato</label>
+                    <input type="date" id="receipt-due-date" value="${receipt.due_date || ''}">
                 </div>
                 <div class="form-group">
                     <label>Beløp</label>
@@ -506,7 +547,12 @@ class ReceiptsManager {
             </form>
         `;
 
-        showModal('Rediger kvittering', content);
+        showModal('Rediger vedlegg', content);
+
+        document.getElementById('receipt-type').addEventListener('change', (e) => {
+            document.getElementById('due-date-group').style.display =
+                e.target.value === 'INVOICE' ? '' : 'none';
+        });
 
         document.getElementById('edit-receipt-form').addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -515,22 +561,39 @@ class ReceiptsManager {
     }
 
     async saveReceiptEdit(id) {
-        const date = document.getElementById('receipt-date').value;
+        const attachmentType = document.getElementById('receipt-type').value;
+        const receiptDate = document.getElementById('receipt-date').value;
+        const dueDate = document.getElementById('receipt-due-date').value;
         const amount = document.getElementById('receipt-amount').value;
         const description = document.getElementById('receipt-description').value;
 
         try {
             await api.updateReceipt(id, {
-                receipt_date: date || null,
+                attachment_type: attachmentType,
+                receipt_date: receiptDate || null,
+                due_date: attachmentType === 'INVOICE' ? (dueDate || null) : null,
                 amount: amount || null,
                 description: description || null
             });
 
             closeModal();
-            showSuccess('Kvittering oppdatert');
+            showSuccess('Vedlegg oppdatert');
             await this.loadReceipts();
         } catch (error) {
-            showError('Kunne ikke oppdatere kvittering: ' + error.message);
+            showError('Kunne ikke oppdatere vedlegg: ' + error.message);
+        }
+    }
+
+    async extractWithAI(id) {
+        try {
+            showSuccess('AI-gjenkjenning kjøres...');
+            const updated = await api.extractReceiptAI(id);
+            const idx = this.receipts.findIndex(r => r.id === id);
+            if (idx >= 0) this.receipts[idx] = updated;
+            this.renderReceipts();
+            showSuccess('AI-gjenkjenning fullført');
+        } catch (error) {
+            showError('AI-gjenkjenning feilet: ' + error.message);
         }
     }
 

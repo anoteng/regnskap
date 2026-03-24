@@ -491,8 +491,14 @@ class API {
         const formData = new FormData();
         formData.append('file', file);
 
+        if (receiptData.attachment_type) {
+            formData.append('attachment_type', receiptData.attachment_type);
+        }
         if (receiptData.receipt_date) {
             formData.append('receipt_date', receiptData.receipt_date);
+        }
+        if (receiptData.due_date) {
+            formData.append('due_date', receiptData.due_date);
         }
         if (receiptData.amount) {
             formData.append('amount', receiptData.amount);
@@ -547,6 +553,10 @@ class API {
 
     async deleteReceipt(id) {
         return this.delete(`/receipts/${id}`);
+    }
+
+    async extractReceiptAI(id) {
+        return this.post(`/receipts/${id}/extract`, {});
     }
 }
 

@@ -360,7 +360,9 @@ class IncomeStatement(BaseModel):
 
 
 class ReceiptBase(BaseModel):
+    attachment_type: str = "RECEIPT"
     receipt_date: Optional[date] = None
+    due_date: Optional[date] = None
     amount: Optional[Decimal] = None
     description: Optional[str] = None
 
@@ -382,6 +384,15 @@ class Receipt(ReceiptBase):
     matched_by: Optional[int] = None
     created_at: datetime
     updated_at: datetime
+    # AI extraction results
+    ai_extracted_date: Optional[date] = None
+    ai_extracted_amount: Optional[Decimal] = None
+    ai_extracted_vendor: Optional[str] = None
+    ai_extracted_description: Optional[str] = None
+    ai_suggested_account: Optional[str] = None
+    ai_confidence: Optional[Decimal] = None
+    ai_processed_at: Optional[datetime] = None
+    ai_processing_error: Optional[str] = None
 
     class Config:
         from_attributes = True

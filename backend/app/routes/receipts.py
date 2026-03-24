@@ -5,13 +5,15 @@ from sqlalchemy import func
 from typing import List, Optional
 from datetime import date, datetime
 from decimal import Decimal
-import uuid
+import base64
+import json
 from pathlib import Path
 
 from backend.database import get_db
-from ..models import Receipt, User, Ledger, Transaction, ReceiptStatus, UserSubscription, SubscriptionPlan, SubscriptionTier, UserMonthlyUsage, SubscriptionStatus
+from ..models import Receipt, User, Ledger, Transaction, ReceiptStatus, AttachmentType, UserSubscription, SubscriptionPlan, SubscriptionTier, UserMonthlyUsage, SubscriptionStatus
 from ..schemas import Receipt as ReceiptSchema, ReceiptCreate
 from ..auth import get_current_active_user, get_current_ledger, get_user_from_query_token, get_ledger_from_query
+from backend.config import get_settings
 
 router = APIRouter(prefix="/receipts", tags=["receipts"])
 
@@ -84,18 +86,61 @@ def increment_monthly_usage(user: User, db: Session):
     db.commit()
 
 
+def check_ai_access(user: User, db: Session):
+    """Check if user has Premium subscription required for AI features"""
+    subscription = db.query(UserSubscription).filter(
+        UserSubscription.user_id == user.id,
+        UserSubscription.status == SubscriptionStatus.ACTIVE
+    ).first()
+
+    if not subscription or subscription.plan.tier != SubscriptionTier.PREMIUM:
+        raise HTTPException(
+            status_code=403,
+            detail="AI-gjenkjenning krever Premium-abonnement."
+        )
+
+
+def increment_ai_usage(user: User, db: Session):
+    now = datetime.utcnow()
+    usage = db.query(UserMonthlyUsage).filter(
+        UserMonthlyUsage.user_id == user.id,
+        UserMonthlyUsage.year == now.year,
+        UserMonthlyUsage.month == now.month
+    ).first()
+
+    if usage:
+        usage.ai_operations_count = (usage.ai_operations_count or 0) + 1
+    else:
+        usage = UserMonthlyUsage(
+            user_id=user.id,
+            year=now.year,
+            month=now.month,
+            upload_count=0,
+            ai_operations_count=1
+        )
+        db.add(usage)
+    db.commit()
+
+
 @router.post("/upload", response_model=ReceiptSchema)
 async def upload_receipt(
     file: UploadFile = File(...),
+    attachment_type: str = Form("RECEIPT"),
     receipt_date: Optional[date] = Form(None),
+    due_date: Optional[date] = Form(None),
     amount: Optional[Decimal] = Form(None),
     description: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
     current_ledger: Ledger = Depends(get_current_ledger)
 ):
-    """Upload a receipt image"""
+    """Upload a receipt or invoice"""
     check_subscription_limits(current_user, current_ledger, db)
+
+    try:
+        att_type = AttachmentType(attachment_type.upper())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Ugyldig vedleggstype. Bruk RECEIPT eller INVOICE.")
 
     file_ext = Path(file.filename).suffix.lower()
     if file_ext not in ALLOWED_EXTENSIONS:
@@ -120,7 +165,9 @@ async def upload_receipt(
         original_filename=file.filename,
         file_size=file_size,
         mime_type=file.content_type,
+        attachment_type=att_type,
         receipt_date=receipt_date,
+        due_date=due_date,
         amount=amount,
         description=description,
         status=ReceiptStatus.PENDING
@@ -309,7 +356,13 @@ def update_receipt(
     if not receipt:
         raise HTTPException(status_code=404, detail="Receipt not found")
 
+    try:
+        receipt.attachment_type = AttachmentType(receipt_update.attachment_type.upper())
+    except ValueError:
+        pass
+
     receipt.receipt_date = receipt_update.receipt_date
+    receipt.due_date = receipt_update.due_date
     receipt.amount = receipt_update.amount
     receipt.description = receipt_update.description
 
@@ -317,6 +370,126 @@ def update_receipt(
     db.refresh(receipt)
 
     return receipt
+
+
+@router.post("/{receipt_id}/extract", response_model=ReceiptSchema)
+async def extract_receipt_ai(
+    receipt_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    current_ledger: Ledger = Depends(get_current_ledger),
+    settings=Depends(get_settings)
+):
+    """Extract metadata from receipt/invoice using AI (Premium only)"""
+    check_ai_access(current_user, db)
+
+    receipt = db.query(Receipt).filter(
+        Receipt.id == receipt_id,
+        Receipt.ledger_id == current_ledger.id
+    ).options(__import__('sqlalchemy.orm', fromlist=['undefer']).undefer(Receipt.file_data)).first()
+
+    if not receipt:
+        raise HTTPException(status_code=404, detail="Receipt not found")
+
+    if not receipt.file_data:
+        raise HTTPException(status_code=400, detail="Ingen bildefil funnet.")
+
+    if not settings.anthropic_api_key:
+        raise HTTPException(status_code=503, detail="AI-gjenkjenning er ikke konfigurert.")
+
+    # Only images are supported by Anthropic vision API
+    supported_types = {"image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp"}
+    mime = (receipt.mime_type or "").lower()
+    if mime not in supported_types:
+        raise HTTPException(
+            status_code=400,
+            detail="AI-gjenkjenning støttes kun for bilder (JPEG, PNG, WebP). PDF-filer må registreres manuelt."
+        )
+
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+
+        image_data = base64.standard_b64encode(receipt.file_data).decode("utf-8")
+
+        prompt = (
+            "Analyser dette vedlegget og ekstraher følgende informasjon som JSON:\n"
+            "- vendor: leverandørens navn (string eller null)\n"
+            "- date: dato for kvittering/faktura i ISO-format YYYY-MM-DD (string eller null)\n"
+            "- amount: totalbeløp inkl. mva som tall uten valutasymbol (number eller null)\n"
+            "- due_date: forfallsdato i ISO-format YYYY-MM-DD, kun hvis dette er en faktura (string eller null)\n"
+            "- is_invoice: true hvis dette er en faktura med forfallsdato, false hvis kvittering (boolean)\n"
+            "- suggested_account: foreslått 4-sifret kontonummer fra norsk kontoplan (string eller null)\n"
+            "- confidence: din sikkerhetsscore for ekstraksjonen, 0.0 til 1.0 (number)\n"
+            "Svar kun med JSON, ingen forklaringstekst."
+        )
+
+        message = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=300,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": mime,
+                            "data": image_data,
+                        },
+                    },
+                    {"type": "text", "text": prompt}
+                ],
+            }]
+        )
+
+        result = json.loads(message.content[0].text)
+
+        receipt.ai_extracted_vendor = result.get("vendor")
+        receipt.ai_extracted_description = result.get("vendor")  # vendor as description fallback
+        receipt.ai_suggested_account = result.get("suggested_account")
+        receipt.ai_confidence = result.get("confidence")
+        receipt.ai_processed_at = datetime.utcnow()
+        receipt.ai_processing_error = None
+
+        if result.get("amount") is not None:
+            receipt.ai_extracted_amount = Decimal(str(result["amount"]))
+            if not receipt.amount:
+                receipt.amount = receipt.ai_extracted_amount
+
+        if result.get("date"):
+            try:
+                receipt.ai_extracted_date = date.fromisoformat(result["date"])
+                if not receipt.receipt_date:
+                    receipt.receipt_date = receipt.ai_extracted_date
+            except ValueError:
+                pass
+
+        if result.get("due_date"):
+            try:
+                extracted_due = date.fromisoformat(result["due_date"])
+                if not receipt.due_date:
+                    receipt.due_date = extracted_due
+            except ValueError:
+                pass
+
+        if result.get("is_invoice") and not receipt.due_date:
+            receipt.attachment_type = AttachmentType.INVOICE
+
+        db.commit()
+        db.refresh(receipt)
+        increment_ai_usage(current_user, db)
+
+        return receipt
+
+    except json.JSONDecodeError:
+        receipt.ai_processing_error = "Kunne ikke tolke AI-svar som JSON"
+        db.commit()
+        raise HTTPException(status_code=500, detail="AI returnerte ugyldig data. Prøv igjen.")
+    except Exception as e:
+        receipt.ai_processing_error = str(e)
+        db.commit()
+        raise HTTPException(status_code=500, detail=f"AI-gjenkjenning feilet: {str(e)}")
 
 
 @router.post("/{receipt_id}/rotate")
