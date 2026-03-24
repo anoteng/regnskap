@@ -187,8 +187,8 @@ class BankAccount(BankAccountBase):
 
 class JournalEntryBase(BaseModel):
     account_id: int
-    debit: Decimal = Field(default=Decimal("0.00"), ge=0)
-    credit: Decimal = Field(default=Decimal("0.00"), ge=0)
+    debit: float = Field(default=0.0, ge=0)
+    credit: float = Field(default=0.0, ge=0)
     description: Optional[str] = None
 
 
