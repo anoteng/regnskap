@@ -21,7 +21,8 @@
       "namespace": "android_app",
       "package_name": "eu.privatregnskap.app",
       "sha256_cert_fingerprints": [
-        "71:F2:39:63:42:EA:38:40:4A:AF:60:1C:C4:AC:CE:FC:5A:C2:F5:67:06:7B:CD:26:8D:80:B6:E7:B7:F9:23:1B"
+        "71:F2:39:63:42:EA:38:40:4A:AF:60:1C:C4:AC:CE:FC:5A:C2:F5:67:06:7B:CD:26:8D:80:B6:E7:B7:F9:23:1B",
+        "0E:D2:41:54:B9:75:43:97:5E:D6:8A:62:19:76:EE:D6:C7:9B:7D:BD:2B:5C:4F:20:43:66:58:D3:92:F0:19:74"
       ]
     }
   }
