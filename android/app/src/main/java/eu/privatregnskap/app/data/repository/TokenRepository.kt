@@ -4,10 +4,14 @@ import android.content.Context
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import javax.inject.Inject
 import javax.inject.Singleton
 
 interface TokenRepository {
+    val isLoggedInFlow: Flow<Boolean>
     fun saveAccessToken(accessToken: String)
     fun getAccessToken(): String?
     fun clearTokens()
@@ -33,14 +37,19 @@ class TokenRepositoryImpl @Inject constructor(
         )
     }
 
+    private val _isLoggedInFlow = MutableStateFlow(isLoggedIn())
+    override val isLoggedInFlow: Flow<Boolean> = _isLoggedInFlow.asStateFlow()
+
     override fun saveAccessToken(accessToken: String) {
         prefs.edit().putString(KEY_ACCESS_TOKEN, accessToken).apply()
+        _isLoggedInFlow.value = true
     }
 
     override fun getAccessToken(): String? = prefs.getString(KEY_ACCESS_TOKEN, null)
 
     override fun clearTokens() {
         prefs.edit().remove(KEY_ACCESS_TOKEN).apply()
+        _isLoggedInFlow.value = false
     }
 
     override fun isLoggedIn(): Boolean = getAccessToken() != null

@@ -1,6 +1,7 @@
 package eu.privatregnskap.app.ui.navigation
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -25,6 +26,18 @@ fun PrivatregnskapNavGraph() {
     val isLoggedIn by authViewModel.isLoggedIn.collectAsStateWithLifecycle(initialValue = false)
 
     val startDestination = if (isLoggedIn) Screen.Main.route else Screen.Login.route
+
+    // Navigate to login whenever the session expires or user logs out
+    LaunchedEffect(isLoggedIn) {
+        if (!isLoggedIn) {
+            val currentRoute = rootNavController.currentDestination?.route
+            if (currentRoute != null && currentRoute != Screen.Login.route) {
+                rootNavController.navigate(Screen.Login.route) {
+                    popUpTo(0) { inclusive = true }
+                }
+            }
+        }
+    }
 
     NavHost(navController = rootNavController, startDestination = startDestination) {
         composable(Screen.Login.route) {

@@ -3,8 +3,6 @@ package eu.privatregnskap.app.data.repository
 import eu.privatregnskap.app.data.network.ApiService
 import eu.privatregnskap.app.data.network.dto.UserResponse
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
@@ -26,15 +24,13 @@ class AuthRepositoryImpl @Inject constructor(
     private val tokenRepository: TokenRepository
 ) : AuthRepository {
 
-    private val _isLoggedIn = MutableStateFlow(tokenRepository.isLoggedIn())
-    override val isLoggedIn: Flow<Boolean> = _isLoggedIn.asStateFlow()
+    override val isLoggedIn: Flow<Boolean> = tokenRepository.isLoggedInFlow
 
     override suspend fun login(email: String, password: String): Result<UserResponse> {
         return try {
             val token = apiService.login(email, password)
             tokenRepository.saveAccessToken(token.accessToken)
             val user = apiService.getMe()
-            _isLoggedIn.value = true
             Result.success(user)
         } catch (e: Exception) {
             tokenRepository.clearTokens()
@@ -66,7 +62,6 @@ class AuthRepositoryImpl @Inject constructor(
             val body = requestObj.toString().toRequestBody("application/json".toMediaType())
             val token = apiService.passkeyLoginComplete(body)
             tokenRepository.saveAccessToken(token.accessToken)
-            _isLoggedIn.value = true
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -86,6 +81,5 @@ class AuthRepositoryImpl @Inject constructor(
 
     override suspend fun logout() {
         tokenRepository.clearTokens()
-        _isLoggedIn.value = false
     }
 }
