@@ -33,12 +33,12 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -92,6 +92,7 @@ fun AttachmentsScreen(
     var showUploadSheet by remember { mutableStateOf(false) }
     var deletingId by remember { mutableStateOf<Int?>(null) }
     var matchingAttachmentId by remember { mutableStateOf<Int?>(null) }
+    var viewingAttachment by remember { mutableStateOf<AttachmentResponse?>(null) }
 
     LaunchedEffect(Unit) {
         viewModel.message.collect { snackbarHostState.showSnackbar(it) }
@@ -116,23 +117,20 @@ fun AttachmentsScreen(
             TopAppBar(
                 title = { Text("Vedlegg") },
                 actions = {
+                    if (!uiState.requiresSubscription) {
+                        IconButton(onClick = {
+                            showUploadSheet = true
+                            pickedUri = null
+                            cameraUri = null
+                        }) {
+                            Icon(Icons.Default.Add, contentDescription = "Last opp")
+                        }
+                    }
                     IconButton(onClick = { viewModel.loadAll(statusFilter) }) {
                         Icon(Icons.Default.Refresh, contentDescription = "Last på nytt")
                     }
                 }
             )
-        },
-        floatingActionButton = {
-            if (!uiState.requiresSubscription) {
-                FloatingActionButton(onClick = {
-                    // Show picker choice via bottom sheet instead of directly launching
-                    showUploadSheet = true
-                    pickedUri = null
-                    cameraUri = null
-                }) {
-                    Icon(Icons.Default.Add, contentDescription = "Last opp")
-                }
-            }
         },
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { scaffoldPadding ->
@@ -230,6 +228,7 @@ fun AttachmentsScreen(
                                 attachment = attachment,
                                 imageUrl = viewModel.imageUrl(attachment.id),
                                 isExtracting = uiState.extractingId == attachment.id,
+                                onTap = { viewingAttachment = attachment },
                                 onDelete = { deletingId = attachment.id },
                                 onExtractAI = { viewModel.extractAI(attachment.id) },
                                 onMatch = {
@@ -259,6 +258,24 @@ fun AttachmentsScreen(
             dismissButton = {
                 TextButton(onClick = { deletingId = null }) { Text("Avbryt") }
             }
+        )
+    }
+
+    // Receipt detail sheet
+    viewingAttachment?.let { att ->
+        ReceiptDetailSheet(
+            attachment = att,
+            imageUrl = viewModel.imageUrl(att.id),
+            isExtracting = uiState.extractingId == att.id,
+            onExtractAI = { viewModel.extractAI(att.id) },
+            onMatch = {
+                viewingAttachment = null
+                matchingAttachmentId = att.id
+                viewModel.loadTransactionsForMatching()
+            },
+            onUnmatch = { viewModel.unmatchAttachment(att.id) },
+            onDelete = { viewingAttachment = null; deletingId = att.id },
+            onDismiss = { viewingAttachment = null }
         )
     }
 
@@ -318,6 +335,7 @@ private fun AttachmentCard(
     attachment: AttachmentResponse,
     imageUrl: String,
     isExtracting: Boolean,
+    onTap: () -> Unit,
     onDelete: () -> Unit,
     onExtractAI: () -> Unit,
     onMatch: () -> Unit,
@@ -327,7 +345,8 @@ private fun AttachmentCard(
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        onClick = onTap
     ) {
         Row(
             modifier = Modifier
@@ -467,6 +486,152 @@ private fun TypeBadge(isInvoice: Boolean) {
             style = MaterialTheme.typography.labelSmall,
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
         )
+    }
+}
+
+// ─── Receipt detail sheet ─────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ReceiptDetailSheet(
+    attachment: AttachmentResponse,
+    imageUrl: String,
+    isExtracting: Boolean,
+    onExtractAI: () -> Unit,
+    onMatch: () -> Unit,
+    onUnmatch: () -> Unit,
+    onDelete: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val isInvoice = attachment.attachmentType == "INVOICE"
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(bottom = 32.dp)
+        ) {
+            // Full-width image
+            AsyncImage(
+                model = imageUrl,
+                contentDescription = "Vedlegg",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(300.dp),
+                contentScale = ContentScale.Fit
+            )
+
+            Column(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // Title row
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        attachment.originalFilename ?: if (isInvoice) "Faktura" else "Kvittering",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TypeBadge(isInvoice)
+                }
+
+                HorizontalDivider()
+
+                // Metadata rows
+                @Composable
+                fun DetailRow(label: String, value: String) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(label, style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(value, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+
+                val vendor = attachment.aiExtractedVendor
+                if (vendor != null) DetailRow("Leverandør", vendor)
+
+                val date = attachment.receiptDate ?: attachment.aiExtractedDate
+                if (date != null) DetailRow("Dato", date)
+
+                if (isInvoice && attachment.dueDate != null)
+                    DetailRow("Forfallsdato", attachment.dueDate)
+
+                val amount = attachment.amount ?: attachment.aiExtractedAmount
+                if (amount != null)
+                    DetailRow("Beløp", String.format(java.util.Locale.US, "%.2f kr", amount))
+
+                if (attachment.description != null)
+                    DetailRow("Beskrivelse", attachment.description)
+
+                if (attachment.aiSuggestedAccount != null)
+                    DetailRow("Foreslått konto", attachment.aiSuggestedAccount)
+
+                val conf = attachment.aiConfidence
+                if (conf != null)
+                    DetailRow("AI-sikkerhet", "${(conf * 100).toInt()}%")
+
+                if (attachment.status == "MATCHED" && attachment.matchedTransactionId != null)
+                    DetailRow("Matchet til", "Transaksjon #${attachment.matchedTransactionId}")
+
+                HorizontalDivider()
+
+                // Action buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (attachment.aiExtractedVendor == null) {
+                        OutlinedButton(
+                            onClick = onExtractAI,
+                            enabled = !isExtracting,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            if (isExtracting) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            } else {
+                                Text("AI-gjenkjenning")
+                            }
+                        }
+                    }
+                    if (attachment.status == "MATCHED") {
+                        OutlinedButton(onClick = onUnmatch, modifier = Modifier.weight(1f)) {
+                            Icon(Icons.Default.LinkOff, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Fjern kobling")
+                        }
+                    } else {
+                        OutlinedButton(onClick = onMatch, modifier = Modifier.weight(1f)) {
+                            Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Koble til transaksjon")
+                        }
+                    }
+                }
+
+                Button(
+                    onClick = onDelete,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Slett vedlegg")
+                }
+            }
+        }
     }
 }
 

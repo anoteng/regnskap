@@ -151,5 +151,6 @@ data class AttachmentResponse(
     @Json(name = "ai_extracted_amount") val aiExtractedAmount: Double?,
     @Json(name = "ai_extracted_date") val aiExtractedDate: String?,
     @Json(name = "ai_confidence") val aiConfidence: Double?,
+    @Json(name = "ai_suggested_account") val aiSuggestedAccount: String?,
     @Json(name = "created_at") val createdAt: String
 )
