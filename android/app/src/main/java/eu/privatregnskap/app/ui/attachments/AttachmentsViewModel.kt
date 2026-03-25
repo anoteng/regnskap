@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import eu.privatregnskap.app.BuildConfig
 import eu.privatregnskap.app.data.network.dto.AttachmentResponse
+import eu.privatregnskap.app.data.network.dto.MatchSuggestionResponse
 import eu.privatregnskap.app.data.network.dto.TransactionResponse
 import eu.privatregnskap.app.data.repository.AttachmentRepository
 import eu.privatregnskap.app.data.repository.LedgerRepository
@@ -42,6 +43,9 @@ class AttachmentsViewModel @Inject constructor(
 
     private val _transactions = MutableStateFlow<List<TransactionResponse>>(emptyList())
     val transactions: StateFlow<List<TransactionResponse>> = _transactions.asStateFlow()
+
+    private val _suggestedMatches = MutableStateFlow<List<MatchSuggestionResponse>>(emptyList())
+    val suggestedMatches: StateFlow<List<MatchSuggestionResponse>> = _suggestedMatches.asStateFlow()
 
     private val _message = MutableSharedFlow<String>()
     val message = _message.asSharedFlow()
@@ -94,6 +98,15 @@ class AttachmentsViewModel @Inject constructor(
         viewModelScope.launch {
             transactionRepository.getTransactions(currentLedgerId, limit = 100).onSuccess {
                 _transactions.value = it
+            }
+        }
+    }
+
+    fun loadSuggestedMatches(receiptId: Int) {
+        viewModelScope.launch {
+            _suggestedMatches.value = emptyList()
+            repository.suggestMatches(currentLedgerId, receiptId).onSuccess {
+                _suggestedMatches.value = it
             }
         }
     }

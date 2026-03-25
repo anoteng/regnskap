@@ -2,6 +2,7 @@ package eu.privatregnskap.app.data.repository
 
 import eu.privatregnskap.app.data.network.ApiService
 import eu.privatregnskap.app.data.network.dto.AttachmentResponse
+import eu.privatregnskap.app.data.network.dto.MatchSuggestionResponse
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -25,6 +26,7 @@ interface AttachmentRepository {
     suspend fun extractAI(ledgerId: Int?, id: Int): Result<AttachmentResponse>
     suspend fun matchAttachment(ledgerId: Int?, id: Int, transactionId: Int): Result<Unit>
     suspend fun unmatchAttachment(ledgerId: Int?, id: Int): Result<Unit>
+    suspend fun suggestMatches(ledgerId: Int?, id: Int): Result<List<MatchSuggestionResponse>>
 }
 
 @Singleton
@@ -71,4 +73,7 @@ class AttachmentRepositoryImpl @Inject constructor(
 
     override suspend fun unmatchAttachment(ledgerId: Int?, id: Int): Result<Unit> =
         runCatching { apiService.unmatchAttachment(ledgerId, id); Unit }
+
+    override suspend fun suggestMatches(ledgerId: Int?, id: Int): Result<List<MatchSuggestionResponse>> =
+        runCatching { apiService.getMatchSuggestions(ledgerId, id) }
 }

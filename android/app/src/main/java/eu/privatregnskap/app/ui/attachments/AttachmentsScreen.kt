@@ -73,6 +73,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import eu.privatregnskap.app.data.network.dto.AttachmentResponse
+import eu.privatregnskap.app.data.network.dto.MatchSuggestionResponse
 import eu.privatregnskap.app.data.network.dto.TransactionResponse
 import java.io.File
 
@@ -84,6 +85,7 @@ fun AttachmentsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val transactions by viewModel.transactions.collectAsStateWithLifecycle()
+    val suggestedMatches by viewModel.suggestedMatches.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
 
@@ -234,6 +236,7 @@ fun AttachmentsScreen(
                                 onMatch = {
                                     matchingAttachmentId = attachment.id
                                     viewModel.loadTransactionsForMatching()
+                                    viewModel.loadSuggestedMatches(attachment.id)
                                 },
                                 onUnmatch = { viewModel.unmatchAttachment(attachment.id) }
                             )
@@ -272,6 +275,7 @@ fun AttachmentsScreen(
                 viewingAttachment = null
                 matchingAttachmentId = att.id
                 viewModel.loadTransactionsForMatching()
+                viewModel.loadSuggestedMatches(att.id)
             },
             onUnmatch = { viewModel.unmatchAttachment(att.id) },
             onDelete = { viewingAttachment = null; deletingId = att.id },
@@ -283,6 +287,7 @@ fun AttachmentsScreen(
     matchingAttachmentId?.let { attId ->
         MatchPickerSheet(
             transactions = transactions,
+            suggestedMatches = suggestedMatches,
             onMatch = { txId -> viewModel.matchAttachment(attId, txId); matchingAttachmentId = null },
             onDismiss = { matchingAttachmentId = null }
         )
@@ -783,6 +788,7 @@ private fun UploadMetadataSheet(
 @Composable
 private fun MatchPickerSheet(
     transactions: List<TransactionResponse>,
+    suggestedMatches: List<MatchSuggestionResponse>,
     onMatch: (Int) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -791,6 +797,8 @@ private fun MatchPickerSheet(
         tx.description.contains(query, ignoreCase = true) ||
         tx.transactionDate.contains(query)
     }
+    // IDs already shown in suggestions — don't duplicate in the full list
+    val suggestedIds = suggestedMatches.map { it.transaction.id }.toSet()
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -823,28 +831,83 @@ private fun MatchPickerSheet(
 
             Spacer(Modifier.height(8.dp))
 
-            if (filtered.isEmpty()) {
-                Box(
-                    Modifier.fillMaxWidth().height(120.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("Ingen transaksjoner funnet",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            } else {
-                LazyColumn(modifier = Modifier.fillMaxWidth()) {
-                    items(filtered, key = { it.id }) { tx ->
+            LazyColumn(modifier = Modifier.fillMaxWidth()) {
+                // Suggestions section
+                if (suggestedMatches.isNotEmpty() && query.isBlank()) {
+                    item {
+                        Text(
+                            "Foreslåtte treff",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        )
+                    }
+                    items(suggestedMatches, key = { "sug_${it.transaction.id}" }) { suggestion ->
+                        val tx = suggestion.transaction
+                        val debit = tx.journalEntries.firstOrNull()?.debit
+                        val credit = tx.journalEntries.firstOrNull()?.credit
+                        val amountVal = debit ?: credit
+                        val amountStr = if (amountVal != null)
+                            String.format(java.util.Locale.US, "  %.2f kr", amountVal) else ""
                         ListItem(
                             headlineContent = {
-                                Text(tx.description ?: "Ingen beskrivelse",
-                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(tx.description, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             },
                             supportingContent = {
-                                val debit = tx.journalEntries.firstOrNull()?.debit
-                                val credit = tx.journalEntries.firstOrNull()?.credit
-                                val amountVal = debit ?: credit
-                                val amountStr = if (amountVal != null)
-                                    String.format(java.util.Locale.US, "  %.2f kr", amountVal) else ""
+                                Column {
+                                    Text("${tx.transactionDate}$amountStr",
+                                        style = MaterialTheme.typography.bodySmall)
+                                    if (suggestion.reasons.isNotEmpty()) {
+                                        Text(
+                                            suggestion.reasons.joinToString(" · "),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
+                            },
+                            trailingContent = {
+                                IconButton(onClick = { onMatch(tx.id) }) {
+                                    Icon(Icons.Default.Link, contentDescription = "Koble")
+                                }
+                            }
+                        )
+                        HorizontalDivider()
+                    }
+                    item {
+                        Text(
+                            "Alle transaksjoner",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 12.dp, bottom = 4.dp)
+                        )
+                    }
+                }
+
+                // Full list (excluding already-suggested items when not searching)
+                val listItems = if (query.isBlank()) filtered.filter { it.id !in suggestedIds } else filtered
+                if (listItems.isEmpty() && suggestedMatches.isEmpty()) {
+                    item {
+                        Box(
+                            Modifier.fillMaxWidth().height(120.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("Ingen transaksjoner funnet",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                } else {
+                    items(listItems, key = { it.id }) { tx ->
+                        val debit = tx.journalEntries.firstOrNull()?.debit
+                        val credit = tx.journalEntries.firstOrNull()?.credit
+                        val amountVal = debit ?: credit
+                        val amountStr = if (amountVal != null)
+                            String.format(java.util.Locale.US, "  %.2f kr", amountVal) else ""
+                        ListItem(
+                            headlineContent = {
+                                Text(tx.description, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            },
+                            supportingContent = {
                                 Text("${tx.transactionDate}$amountStr",
                                     style = MaterialTheme.typography.bodySmall)
                             },
