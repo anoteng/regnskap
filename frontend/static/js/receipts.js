@@ -375,33 +375,40 @@ class ReceiptsManager {
         const receipt = this.receipts.find(r => r.id === receiptId);
         if (!receipt) return;
 
+        // Default date window: purchase date → purchase date + 3 days
+        const purchaseDate = receipt.receipt_date || receipt.ai_extracted_date || '';
+        const endDate = purchaseDate ? this._addDays(purchaseDate, 3) : '';
+
         const content = `
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">
                 <div>
                     <h3>Kvittering</h3>
                     <img src="${api.getReceiptImage(receiptId)}" style="width: 100%; border-radius: 4px; margin-bottom: 1rem;">
-                    ${receipt.receipt_date ? `<p>Dato: ${formatDate(receipt.receipt_date)}</p>` : ''}
-                    ${receipt.amount ? `<p>Beløp: ${parseFloat(receipt.amount).toFixed(2)} kr</p>` : ''}
+                    ${purchaseDate ? `<p>Dato: ${formatDate(purchaseDate)}</p>` : ''}
+                    ${receipt.amount || receipt.ai_extracted_amount ? `<p>Beløp: ${parseFloat(receipt.amount || receipt.ai_extracted_amount).toFixed(2)} kr</p>` : ''}
+                    ${receipt.ai_extracted_vendor ? `<p>Leverandør: ${receipt.ai_extracted_vendor}</p>` : ''}
                     ${receipt.description ? `<p>${receipt.description}</p>` : ''}
                 </div>
                 <div>
                     <h3>Søk etter transaksjon</h3>
+                    <div id="match-suggestions" style="margin-bottom: 1rem;"></div>
                     <div class="form-group">
                         <label>Søk</label>
                         <input type="text" id="transaction-search" placeholder="Søk på beskrivelse, beløp eller dato...">
                     </div>
-                    <div class="form-group">
-                        <label>Dato fra</label>
-                        <input type="date" id="search-start-date" value="${receipt.receipt_date || ''}">
-                    </div>
-                    <div class="form-group">
-                        <label>Dato til</label>
-                        <input type="date" id="search-end-date" value="${receipt.receipt_date || ''}">
+                    <div class="form-group" style="display: flex; gap: 1rem;">
+                        <div style="flex: 1;">
+                            <label>Dato fra</label>
+                            <input type="date" id="search-start-date" value="${purchaseDate}">
+                        </div>
+                        <div style="flex: 1;">
+                            <label>Dato til</label>
+                            <input type="date" id="search-end-date" value="${endDate}">
+                        </div>
                     </div>
                     <button class="btn btn-secondary" onclick="receiptsManager.searchTransactions()">
                         Søk
                     </button>
-
                     <div id="transaction-results" style="margin-top: 1rem; max-height: 400px; overflow-y: auto;">
                         <p><small>Søk etter transaksjoner for å koble kvitteringen</small></p>
                     </div>
@@ -409,13 +416,63 @@ class ReceiptsManager {
             </div>
         `;
 
-        showModal('Koble kvittering til transaksjon', content);
-
+        showModal('Koble kvittering til transaksjon', content, '1100px');
         this.currentReceiptForMatching = receiptId;
 
-        // Auto-search if we have date
-        if (receipt.receipt_date) {
-            setTimeout(() => this.searchTransactions(), 100);
+        // Load AI suggestions and auto-search in parallel
+        if (purchaseDate) {
+            setTimeout(() => {
+                this.loadMatchSuggestions(receiptId);
+                this.searchTransactions();
+            }, 100);
+        }
+    }
+
+    _addDays(dateStr, days) {
+        const d = new Date(dateStr);
+        d.setDate(d.getDate() + days);
+        return d.toISOString().slice(0, 10);
+    }
+
+    async loadMatchSuggestions(receiptId) {
+        const container = document.getElementById('match-suggestions');
+        if (!container) return;
+        try {
+            const suggestions = await api.getMatchSuggestions(receiptId);
+            if (!suggestions || suggestions.length === 0) return;
+
+            const rows = suggestions.slice(0, 5).map(s => {
+                const tx = s.transaction;
+                const totalDebit = tx.journal_entries?.reduce((sum, e) => sum + parseFloat(e.debit), 0) || 0;
+                const totalCredit = tx.journal_entries?.reduce((sum, e) => sum + parseFloat(e.credit), 0) || 0;
+                const amount = totalCredit > 0 ? -totalCredit : totalDebit;
+                const reasons = s.reasons.join(', ');
+                return `
+                    <tr>
+                        <td>${formatDate(tx.transaction_date)}</td>
+                        <td>${tx.description}</td>
+                        <td>${amount.toFixed(2)} kr</td>
+                        <td style="color: #6b7280; font-size: 0.8em;">${reasons}</td>
+                        <td>
+                            <button class="btn btn-sm btn-primary" onclick="receiptsManager.matchToTransaction(${tx.id})">
+                                Velg
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+
+            container.innerHTML = `
+                <div style="background: #eff6ff; border-left: 3px solid #3b82f6; padding: 0.75rem; border-radius: 4px;">
+                    <strong style="display: block; margin-bottom: 0.5rem;">✨ Foreslåtte treff</strong>
+                    <table class="table" style="margin: 0;">
+                        <thead><tr><th>Dato</th><th>Beskrivelse</th><th>Beløp</th><th>Grunn</th><th></th></tr></thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>
+            `;
+        } catch (e) {
+            // Suggestions are best-effort — silent fail
         }
     }
 

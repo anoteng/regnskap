@@ -10,12 +10,14 @@ export function formatDate(date) {
     return new Intl.DateTimeFormat('nb-NO').format(new Date(date));
 }
 
-export function showModal(title, content) {
+export function showModal(title, content, maxWidth = null) {
     const modal = document.getElementById('modal');
     const modalBody = document.getElementById('modal-body');
+    const modalContent = modal.querySelector('.modal-content');
 
     modalBody.innerHTML = `<h2>${title}</h2>${content}`;
     modal.style.display = 'block';
+    modalContent.style.maxWidth = maxWidth || '';
 
     const closeBtn = modal.querySelector('.close');
     closeBtn.onclick = () => {
