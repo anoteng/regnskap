@@ -24,7 +24,7 @@ data class AttachmentsUiState(
     val attachments: List<AttachmentResponse> = emptyList(),
     val isLoading: Boolean = false,
     val isUploading: Boolean = false,
-    val isExtracting: Boolean = false,
+    val extractingId: Int? = null,
     val error: String? = null,
     val requiresSubscription: Boolean = false
 )
@@ -153,15 +153,15 @@ class AttachmentsViewModel @Inject constructor(
 
     fun extractAI(id: Int) {
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isExtracting = true)
+            _uiState.value = _uiState.value.copy(extractingId = id)
             repository.extractAI(currentLedgerId, id).fold(
                 onSuccess = { updated ->
                     val list = _uiState.value.attachments.map { if (it.id == id) updated else it }
-                    _uiState.value = _uiState.value.copy(attachments = list, isExtracting = false)
+                    _uiState.value = _uiState.value.copy(attachments = list, extractingId = null)
                     _message.emit("AI-gjenkjenning fullført")
                 },
                 onFailure = { e ->
-                    _uiState.value = _uiState.value.copy(isExtracting = false)
+                    _uiState.value = _uiState.value.copy(extractingId = null)
                     _message.emit(
                         if (e.message?.contains("403") == true)
                             "AI-gjenkjenning krever Premium-abonnement"

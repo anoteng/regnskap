@@ -3,6 +3,7 @@ package eu.privatregnskap.app.ui.attachments
 import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -102,10 +103,10 @@ fun AttachmentsScreen(
         if (success) cameraUri?.let { showUploadSheet = true }
     }
 
-    // File picker launcher
+    // Photo picker launcher (Android Photo Picker — no storage permission needed)
     var pickedUri by remember { mutableStateOf<Uri?>(null) }
     val fileLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetContent()
+        ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         uri?.let { pickedUri = it; showUploadSheet = true }
     }
@@ -228,7 +229,7 @@ fun AttachmentsScreen(
                             AttachmentCard(
                                 attachment = attachment,
                                 imageUrl = viewModel.imageUrl(attachment.id),
-                                isExtracting = uiState.isExtracting,
+                                isExtracting = uiState.extractingId == attachment.id,
                                 onDelete = { deletingId = attachment.id },
                                 onExtractAI = { viewModel.extractAI(attachment.id) },
                                 onMatch = {
@@ -284,7 +285,7 @@ fun AttachmentsScreen(
             },
             onFile = {
                 showUploadSheet = false
-                fileLauncher.launch("image/*")
+                fileLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
             },
             onDismiss = { showUploadSheet = false }
         )

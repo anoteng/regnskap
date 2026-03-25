@@ -454,7 +454,14 @@ async def extract_receipt_ai(
             }]
         )
 
-        result = json.loads(message.content[0].text)
+        raw = message.content[0].text.strip()
+        # Strip markdown code fences if present (```json ... ``` or ``` ... ```)
+        if raw.startswith("```"):
+            raw = raw.split("```", 2)[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+            raw = raw.rsplit("```", 1)[0].strip()
+        result = json.loads(raw)
 
         receipt.ai_extracted_vendor = result.get("vendor")
         receipt.ai_extracted_description = result.get("vendor")  # vendor as description fallback
