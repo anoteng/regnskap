@@ -133,3 +133,23 @@ data class PasskeyCredentialResponse(
 data class PasskeyRegisterBeginRequest(
     @Json(name = "credential_name") val credentialName: String?
 )
+
+@JsonClass(generateAdapter = true)
+data class AttachmentResponse(
+    val id: Int,
+    @Json(name = "attachment_type") val attachmentType: String,
+    @Json(name = "original_filename") val originalFilename: String?,
+    @Json(name = "file_size") val fileSize: Int?,
+    @Json(name = "mime_type") val mimeType: String?,
+    @Json(name = "receipt_date") val receiptDate: String?,
+    @Json(name = "due_date") val dueDate: String?,
+    val amount: Double?,
+    val description: String?,
+    val status: String,
+    @Json(name = "matched_transaction_id") val matchedTransactionId: Int?,
+    @Json(name = "ai_extracted_vendor") val aiExtractedVendor: String?,
+    @Json(name = "ai_extracted_amount") val aiExtractedAmount: Double?,
+    @Json(name = "ai_extracted_date") val aiExtractedDate: String?,
+    @Json(name = "ai_confidence") val aiConfidence: Double?,
+    @Json(name = "created_at") val createdAt: String
+)

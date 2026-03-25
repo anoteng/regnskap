@@ -21,8 +21,8 @@ android {
         applicationId = "eu.privatregnskap.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 10
-        versionName = "0.9.0"
+        versionCode = 11
+        versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -126,6 +126,9 @@ dependencies {
 
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)
+
+    // Coil (image loading)
+    implementation(libs.coil.compose)
 
     // Credentials (passkeys)
     implementation(libs.credentials)

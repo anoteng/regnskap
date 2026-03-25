@@ -1,6 +1,7 @@
 package eu.privatregnskap.app.data.network
 
 import eu.privatregnskap.app.data.network.dto.AccountResponse
+import eu.privatregnskap.app.data.network.dto.AttachmentResponse
 import eu.privatregnskap.app.data.network.dto.ChainRequest
 import eu.privatregnskap.app.data.network.dto.ChainSuggestionsResponse
 import eu.privatregnskap.app.data.network.dto.LedgerResponse
@@ -12,6 +13,7 @@ import eu.privatregnskap.app.data.network.dto.TokenResponse
 import eu.privatregnskap.app.data.network.dto.TransactionResponse
 import eu.privatregnskap.app.data.network.dto.UpdateTransactionRequest
 import eu.privatregnskap.app.data.network.dto.UserResponse
+import okhttp3.MultipartBody
 import okhttp3.RequestBody
 import okhttp3.ResponseBody
 import retrofit2.http.Body
@@ -20,9 +22,11 @@ import retrofit2.http.Field
 import retrofit2.http.FormUrlEncoded
 import retrofit2.http.GET
 import retrofit2.http.Header
+import retrofit2.http.Multipart
 import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.PUT
+import retrofit2.http.Part
 import retrofit2.http.Path
 import retrofit2.http.Query
 
@@ -124,6 +128,38 @@ interface ApiService {
     suspend fun getAccounts(
         @Header("X-Ledger-ID") ledgerId: Int? = null
     ): List<AccountResponse>
+
+    // ─── Attachments ──────────────────────────────────────────────────────────
+
+    @GET("receipts/")
+    suspend fun getAttachments(
+        @Header("X-Ledger-ID") ledgerId: Int? = null,
+        @Query("status") status: String? = null
+    ): List<AttachmentResponse>
+
+    @Multipart
+    @POST("receipts/upload")
+    suspend fun uploadAttachment(
+        @Header("X-Ledger-ID") ledgerId: Int? = null,
+        @Part file: MultipartBody.Part,
+        @Part("attachment_type") attachmentType: RequestBody,
+        @Part("receipt_date") receiptDate: RequestBody? = null,
+        @Part("due_date") dueDate: RequestBody? = null,
+        @Part("amount") amount: RequestBody? = null,
+        @Part("description") description: RequestBody? = null
+    ): AttachmentResponse
+
+    @DELETE("receipts/{id}")
+    suspend fun deleteAttachment(
+        @Header("X-Ledger-ID") ledgerId: Int? = null,
+        @Path("id") id: Int
+    ): ResponseBody
+
+    @POST("receipts/{id}/extract")
+    suspend fun extractAttachmentAI(
+        @Header("X-Ledger-ID") ledgerId: Int? = null,
+        @Path("id") id: Int
+    ): AttachmentResponse
 
     // ─── Chain suggestions ────────────────────────────────────────────────────
 
