@@ -28,16 +28,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.autofill.AutofillNode
-import androidx.compose.ui.autofill.AutofillType
 import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.focus.FocusDirection
-import androidx.compose.ui.layout.boundsInWindow
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalAutofill
-import androidx.compose.ui.platform.LocalAutofillTree
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentType
 import androidx.compose.ui.semantics.semantics
@@ -55,7 +48,6 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun LoginScreen(
     onLoginSuccess: () -> Unit,
@@ -71,22 +63,6 @@ fun LoginScreen(
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var passkeyError by remember { mutableStateOf<String?>(null) }
-
-    val autofill = LocalAutofill.current
-    val emailAutofillNode = remember {
-        AutofillNode(
-            autofillTypes = listOf(AutofillType.EmailAddress),
-            onFill = { email = it }
-        )
-    }
-    val passwordAutofillNode = remember {
-        AutofillNode(
-            autofillTypes = listOf(AutofillType.Password),
-            onFill = { password = it }
-        )
-    }
-    LocalAutofillTree.current += emailAutofillNode
-    LocalAutofillTree.current += passwordAutofillNode
 
     LaunchedEffect(loginState) {
         if (loginState is UiState.Success) {
@@ -145,7 +121,6 @@ fun LoginScreen(
             label = { Text("E-post") },
             modifier = Modifier
                 .fillMaxWidth()
-                .onGloballyPositioned { emailAutofillNode.boundingBox = it.boundsInWindow() }
                 .semantics { contentType = ContentType.Username },
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Email,
@@ -165,7 +140,6 @@ fun LoginScreen(
             label = { Text("Passord") },
             modifier = Modifier
                 .fillMaxWidth()
-                .onGloballyPositioned { passwordAutofillNode.boundingBox = it.boundsInWindow() }
                 .semantics { contentType = ContentType.Password },
             visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(

@@ -4,7 +4,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -25,7 +25,7 @@ import eu.privatregnskap.app.ui.profile.ProfileScreen
 
 private sealed class Tab(val route: String, val label: String, val icon: ImageVector) {
     object Dashboard : Tab("tab/dashboard", "Hjem", Icons.Default.Home)
-    object PostingQueue : Tab("tab/posting-queue", "Posteringskø", Icons.Default.List)
+    object PostingQueue : Tab("tab/posting-queue", "Posteringskø", Icons.AutoMirrored.Filled.List)
     object Attachments : Tab("tab/attachments", "Vedlegg", Icons.Default.AttachFile)
     object Profile : Tab("tab/profile", "Profil", Icons.Default.AccountCircle)
 }
