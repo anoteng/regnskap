@@ -134,7 +134,8 @@ interface ApiService {
     @GET("receipts/")
     suspend fun getAttachments(
         @Header("X-Ledger-ID") ledgerId: Int? = null,
-        @Query("status") status: String? = null
+        @Query("status") status: String? = null,
+        @Query("q") search: String? = null
     ): List<AttachmentResponse>
 
     @Multipart
@@ -160,6 +161,19 @@ interface ApiService {
         @Header("X-Ledger-ID") ledgerId: Int? = null,
         @Path("id") id: Int
     ): AttachmentResponse
+
+    @POST("receipts/{id}/match/{transactionId}")
+    suspend fun matchAttachment(
+        @Header("X-Ledger-ID") ledgerId: Int? = null,
+        @Path("id") id: Int,
+        @Path("transactionId") transactionId: Int
+    ): ResponseBody
+
+    @POST("receipts/{id}/unmatch")
+    suspend fun unmatchAttachment(
+        @Header("X-Ledger-ID") ledgerId: Int? = null,
+        @Path("id") id: Int
+    ): ResponseBody
 
     // ─── Chain suggestions ────────────────────────────────────────────────────
 

@@ -7,9 +7,11 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import eu.privatregnskap.app.BuildConfig
 import eu.privatregnskap.app.data.network.dto.AttachmentResponse
+import eu.privatregnskap.app.data.network.dto.TransactionResponse
 import eu.privatregnskap.app.data.repository.AttachmentRepository
 import eu.privatregnskap.app.data.repository.LedgerRepository
 import eu.privatregnskap.app.data.repository.TokenRepository
+import eu.privatregnskap.app.data.repository.TransactionRepository
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -30,6 +32,7 @@ data class AttachmentsUiState(
 @HiltViewModel
 class AttachmentsViewModel @Inject constructor(
     private val repository: AttachmentRepository,
+    private val transactionRepository: TransactionRepository,
     private val ledgerRepository: LedgerRepository,
     private val tokenRepository: TokenRepository
 ) : ViewModel() {
@@ -37,10 +40,15 @@ class AttachmentsViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(AttachmentsUiState())
     val uiState: StateFlow<AttachmentsUiState> = _uiState.asStateFlow()
 
+    private val _transactions = MutableStateFlow<List<TransactionResponse>>(emptyList())
+    val transactions: StateFlow<List<TransactionResponse>> = _transactions.asStateFlow()
+
     private val _message = MutableSharedFlow<String>()
     val message = _message.asSharedFlow()
 
     private var currentLedgerId: Int? = null
+    private var currentStatusFilter: String? = null
+    private var currentSearch: String? = null
 
     init {
         loadAll()
@@ -52,7 +60,9 @@ class AttachmentsViewModel @Inject constructor(
         return "${BuildConfig.BASE_URL}receipts/$id/image?token=$token&ledger=$ledger"
     }
 
-    fun loadAll(statusFilter: String? = null) {
+    fun loadAll(statusFilter: String? = currentStatusFilter, search: String? = currentSearch) {
+        currentStatusFilter = statusFilter
+        currentSearch = search
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
 
@@ -65,18 +75,26 @@ class AttachmentsViewModel @Inject constructor(
                 }
             }
 
-            repository.getAttachments(currentLedgerId, statusFilter).fold(
+            repository.getAttachments(currentLedgerId, statusFilter, search?.ifBlank { null }).fold(
                 onSuccess = { list ->
                     _uiState.value = AttachmentsUiState(attachments = list)
                 },
                 onFailure = { e ->
-                    if (e.message?.contains("403") == true || e.message?.contains("abonnement") == true) {
+                    if (e.message?.contains("403") == true) {
                         _uiState.value = AttachmentsUiState(requiresSubscription = true)
                     } else {
                         _uiState.value = AttachmentsUiState(error = e.message ?: "Ukjent feil")
                     }
                 }
             )
+        }
+    }
+
+    fun loadTransactionsForMatching() {
+        viewModelScope.launch {
+            transactionRepository.getTransactions(currentLedgerId, limit = 100).onSuccess {
+                _transactions.value = it
+            }
         }
     }
 
@@ -91,14 +109,12 @@ class AttachmentsViewModel @Inject constructor(
     ) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isUploading = true)
-
             try {
                 val contentResolver = context.contentResolver
                 val mimeType = contentResolver.getType(uri) ?: "image/jpeg"
                 val fileName = uri.lastPathSegment?.let {
                     if (it.contains('.')) it else "$it.jpg"
                 } ?: "attachment.jpg"
-
                 val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
                     ?: throw Exception("Kunne ikke lese fil")
 
@@ -129,10 +145,7 @@ class AttachmentsViewModel @Inject constructor(
     fun delete(id: Int) {
         viewModelScope.launch {
             repository.deleteAttachment(currentLedgerId, id).fold(
-                onSuccess = {
-                    _message.emit("Vedlegg slettet")
-                    loadAll()
-                },
+                onSuccess = { _message.emit("Vedlegg slettet"); loadAll() },
                 onFailure = { _message.emit("Kunne ikke slette: ${it.message}") }
             )
         }
@@ -155,6 +168,24 @@ class AttachmentsViewModel @Inject constructor(
                         else "AI-gjenkjenning feilet: ${e.message}"
                     )
                 }
+            )
+        }
+    }
+
+    fun matchAttachment(attachmentId: Int, transactionId: Int) {
+        viewModelScope.launch {
+            repository.matchAttachment(currentLedgerId, attachmentId, transactionId).fold(
+                onSuccess = { _message.emit("Vedlegg koblet til transaksjon"); loadAll() },
+                onFailure = { _message.emit("Kunne ikke koble: ${it.message}") }
+            )
+        }
+    }
+
+    fun unmatchAttachment(id: Int) {
+        viewModelScope.launch {
+            repository.unmatchAttachment(currentLedgerId, id).fold(
+                onSuccess = { _message.emit("Kobling fjernet"); loadAll() },
+                onFailure = { _message.emit("Kunne ikke fjerne kobling: ${it.message}") }
             )
         }
     }

@@ -23,9 +23,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -34,8 +38,10 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -66,6 +72,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import eu.privatregnskap.app.data.network.dto.AttachmentResponse
+import eu.privatregnskap.app.data.network.dto.TransactionResponse
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -75,12 +82,15 @@ fun AttachmentsScreen(
     viewModel: AttachmentsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val transactions by viewModel.transactions.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
 
     var statusFilter by remember { mutableStateOf<String?>(null) }
+    var searchQuery by remember { mutableStateOf("") }
     var showUploadSheet by remember { mutableStateOf(false) }
     var deletingId by remember { mutableStateOf<Int?>(null) }
+    var matchingAttachmentId by remember { mutableStateOf<Int?>(null) }
 
     LaunchedEffect(Unit) {
         viewModel.message.collect { snackbarHostState.showSnackbar(it) }
@@ -132,27 +142,46 @@ fun AttachmentsScreen(
                 .padding(scaffoldPadding)
                 .padding(bottom = innerPadding.calculateBottomPadding())
         ) {
-            // Filter chips
             if (!uiState.requiresSubscription) {
-                Row(
+                // Search bar
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it; viewModel.loadAll(statusFilter, it) },
+                    placeholder = { Text("Søk leverandør, filnavn, beskrivelse…") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { searchQuery = ""; viewModel.loadAll(statusFilter, null) }) {
+                                Icon(Icons.Default.Clear, contentDescription = "Tøm søk")
+                            }
+                        }
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp, vertical = 4.dp),
+                    singleLine = true
+                )
+
+                // Filter chips
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     FilterChip(
                         selected = statusFilter == null,
-                        onClick = { statusFilter = null; viewModel.loadAll(null) },
+                        onClick = { statusFilter = null; viewModel.loadAll(null, searchQuery.ifBlank { null }) },
                         label = { Text("Alle") }
                     )
                     FilterChip(
                         selected = statusFilter == "PENDING",
-                        onClick = { statusFilter = "PENDING"; viewModel.loadAll("PENDING") },
+                        onClick = { statusFilter = "PENDING"; viewModel.loadAll("PENDING", searchQuery.ifBlank { null }) },
                         label = { Text("Ubehandlede") }
                     )
                     FilterChip(
                         selected = statusFilter == "MATCHED",
-                        onClick = { statusFilter = "MATCHED"; viewModel.loadAll("MATCHED") },
+                        onClick = { statusFilter = "MATCHED"; viewModel.loadAll("MATCHED", searchQuery.ifBlank { null }) },
                         label = { Text("Matchede") }
                     )
                 }
@@ -201,7 +230,12 @@ fun AttachmentsScreen(
                                 imageUrl = viewModel.imageUrl(attachment.id),
                                 isExtracting = uiState.isExtracting,
                                 onDelete = { deletingId = attachment.id },
-                                onExtractAI = { viewModel.extractAI(attachment.id) }
+                                onExtractAI = { viewModel.extractAI(attachment.id) },
+                                onMatch = {
+                                    matchingAttachmentId = attachment.id
+                                    viewModel.loadTransactionsForMatching()
+                                },
+                                onUnmatch = { viewModel.unmatchAttachment(attachment.id) }
                             )
                         }
                     }
@@ -224,6 +258,15 @@ fun AttachmentsScreen(
             dismissButton = {
                 TextButton(onClick = { deletingId = null }) { Text("Avbryt") }
             }
+        )
+    }
+
+    // Match picker sheet
+    matchingAttachmentId?.let { attId ->
+        MatchPickerSheet(
+            transactions = transactions,
+            onMatch = { txId -> viewModel.matchAttachment(attId, txId); matchingAttachmentId = null },
+            onDismiss = { matchingAttachmentId = null }
         )
     }
 
@@ -275,7 +318,9 @@ private fun AttachmentCard(
     imageUrl: String,
     isExtracting: Boolean,
     onDelete: () -> Unit,
-    onExtractAI: () -> Unit
+    onExtractAI: () -> Unit,
+    onMatch: () -> Unit,
+    onUnmatch: () -> Unit
 ) {
     val isInvoice = attachment.attachmentType == "INVOICE"
 
@@ -373,6 +418,25 @@ private fun AttachmentCard(
                             } else {
                                 Text("AI", style = MaterialTheme.typography.labelSmall)
                             }
+                        }
+                    }
+                    if (attachment.status == "MATCHED") {
+                        IconButton(onClick = onUnmatch, modifier = Modifier.size(32.dp)) {
+                            Icon(
+                                Icons.Default.LinkOff,
+                                contentDescription = "Fjern kobling",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    } else {
+                        IconButton(onClick = onMatch, modifier = Modifier.size(32.dp)) {
+                            Icon(
+                                Icons.Default.Link,
+                                contentDescription = "Koble til transaksjon",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
                     }
                     IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
@@ -541,6 +605,91 @@ private fun UploadMetadataSheet(
                     modifier = Modifier.weight(1f)
                 ) {
                     Text("Last opp")
+                }
+            }
+        }
+    }
+}
+
+// ─── Match picker sheet ───────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MatchPickerSheet(
+    transactions: List<TransactionResponse>,
+    onMatch: (Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var query by remember { mutableStateOf("") }
+    val filtered = if (query.isBlank()) transactions else transactions.filter { tx ->
+        tx.description.contains(query, ignoreCase = true) ||
+        tx.transactionDate.contains(query)
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 32.dp)
+        ) {
+            Text("Velg transaksjon", style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.padding(bottom = 8.dp))
+
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                placeholder = { Text("Søk…") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (query.isNotEmpty()) {
+                        IconButton(onClick = { query = "" }) {
+                            Icon(Icons.Default.Clear, contentDescription = "Tøm")
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            if (filtered.isEmpty()) {
+                Box(
+                    Modifier.fillMaxWidth().height(120.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("Ingen transaksjoner funnet",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else {
+                LazyColumn(modifier = Modifier.fillMaxWidth()) {
+                    items(filtered, key = { it.id }) { tx ->
+                        ListItem(
+                            headlineContent = {
+                                Text(tx.description ?: "Ingen beskrivelse",
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            },
+                            supportingContent = {
+                                val debit = tx.journalEntries.firstOrNull()?.debit
+                                val credit = tx.journalEntries.firstOrNull()?.credit
+                                val amountVal = debit ?: credit
+                                val amountStr = if (amountVal != null)
+                                    String.format(java.util.Locale.US, "  %.2f kr", amountVal) else ""
+                                Text("${tx.transactionDate}$amountStr",
+                                    style = MaterialTheme.typography.bodySmall)
+                            },
+                            trailingContent = {
+                                IconButton(onClick = { onMatch(tx.id) }) {
+                                    Icon(Icons.Default.Link, contentDescription = "Koble")
+                                }
+                            }
+                        )
+                        HorizontalDivider()
+                    }
                 }
             }
         }

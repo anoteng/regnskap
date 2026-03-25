@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import Response
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, undefer
 from sqlalchemy import func
 from typing import List, Optional
 from datetime import date, datetime
@@ -185,13 +185,14 @@ async def upload_receipt(
 @router.get("/", response_model=List[ReceiptSchema])
 def get_receipts(
     status: Optional[str] = None,
+    q: Optional[str] = None,
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
     current_ledger: Ledger = Depends(get_current_ledger)
 ):
-    """Get all receipts in queue"""
+    """Get all receipts in queue, with optional text search"""
     query = db.query(Receipt).filter(Receipt.ledger_id == current_ledger.id)
 
     if status:
@@ -200,6 +201,16 @@ def get_receipts(
             query = query.filter(Receipt.status == receipt_status)
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid status value")
+
+    if q:
+        like = f"%{q}%"
+        from sqlalchemy import or_
+        query = query.filter(or_(
+            Receipt.original_filename.ilike(like),
+            Receipt.description.ilike(like),
+            Receipt.ai_extracted_vendor.ilike(like),
+            Receipt.ai_extracted_description.ilike(like),
+        ))
 
     receipts = query.order_by(Receipt.created_at.desc()).offset(skip).limit(limit).all()
     return receipts
@@ -386,7 +397,7 @@ async def extract_receipt_ai(
     receipt = db.query(Receipt).filter(
         Receipt.id == receipt_id,
         Receipt.ledger_id == current_ledger.id
-    ).options(__import__('sqlalchemy.orm', fromlist=['undefer']).undefer(Receipt.file_data)).first()
+    ).options(undefer(Receipt.file_data)).first()
 
     if not receipt:
         raise HTTPException(status_code=404, detail="Receipt not found")

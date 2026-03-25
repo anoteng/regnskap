@@ -9,7 +9,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 interface AttachmentRepository {
-    suspend fun getAttachments(ledgerId: Int?, status: String? = null): Result<List<AttachmentResponse>>
+    suspend fun getAttachments(ledgerId: Int?, status: String? = null, search: String? = null): Result<List<AttachmentResponse>>
     suspend fun uploadAttachment(
         ledgerId: Int?,
         fileBytes: ByteArray,
@@ -23,6 +23,8 @@ interface AttachmentRepository {
     ): Result<AttachmentResponse>
     suspend fun deleteAttachment(ledgerId: Int?, id: Int): Result<Unit>
     suspend fun extractAI(ledgerId: Int?, id: Int): Result<AttachmentResponse>
+    suspend fun matchAttachment(ledgerId: Int?, id: Int, transactionId: Int): Result<Unit>
+    suspend fun unmatchAttachment(ledgerId: Int?, id: Int): Result<Unit>
 }
 
 @Singleton
@@ -30,8 +32,8 @@ class AttachmentRepositoryImpl @Inject constructor(
     private val apiService: ApiService
 ) : AttachmentRepository {
 
-    override suspend fun getAttachments(ledgerId: Int?, status: String?): Result<List<AttachmentResponse>> =
-        runCatching { apiService.getAttachments(ledgerId, status) }
+    override suspend fun getAttachments(ledgerId: Int?, status: String?, search: String?): Result<List<AttachmentResponse>> =
+        runCatching { apiService.getAttachments(ledgerId, status, search) }
 
     override suspend fun uploadAttachment(
         ledgerId: Int?,
@@ -63,4 +65,10 @@ class AttachmentRepositoryImpl @Inject constructor(
 
     override suspend fun extractAI(ledgerId: Int?, id: Int): Result<AttachmentResponse> =
         runCatching { apiService.extractAttachmentAI(ledgerId, id) }
+
+    override suspend fun matchAttachment(ledgerId: Int?, id: Int, transactionId: Int): Result<Unit> =
+        runCatching { apiService.matchAttachment(ledgerId, id, transactionId); Unit }
+
+    override suspend fun unmatchAttachment(ledgerId: Int?, id: Int): Result<Unit> =
+        runCatching { apiService.unmatchAttachment(ledgerId, id); Unit }
 }
