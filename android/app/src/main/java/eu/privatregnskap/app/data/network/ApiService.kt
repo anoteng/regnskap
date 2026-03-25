@@ -5,6 +5,7 @@ import eu.privatregnskap.app.data.network.dto.AttachmentResponse
 import eu.privatregnskap.app.data.network.dto.ChainRequest
 import eu.privatregnskap.app.data.network.dto.ChainSuggestionsResponse
 import eu.privatregnskap.app.data.network.dto.LedgerResponse
+import eu.privatregnskap.app.data.network.dto.MatchSuggestionResponse
 import eu.privatregnskap.app.data.network.dto.PasskeyCredentialResponse
 import eu.privatregnskap.app.data.network.dto.PasskeyRegisterBeginRequest
 import eu.privatregnskap.app.data.network.dto.PasswordResetRequest
