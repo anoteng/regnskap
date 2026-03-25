@@ -3,7 +3,6 @@ package eu.privatregnskap.app.ui.attachments
 import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -81,6 +80,7 @@ import java.io.File
 @Composable
 fun AttachmentsScreen(
     innerPadding: PaddingValues = PaddingValues(),
+    initialUri: Uri? = null,
     viewModel: AttachmentsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -106,12 +106,20 @@ fun AttachmentsScreen(
         if (success) cameraUri?.let { showUploadSheet = true }
     }
 
-    // Photo picker launcher (Android Photo Picker — no storage permission needed)
+    // Document picker (images + PDFs, uses SAF — no storage permission needed)
     var pickedUri by remember { mutableStateOf<Uri?>(null) }
     val fileLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.PickVisualMedia()
+        ActivityResultContracts.OpenDocument()
     ) { uri ->
         uri?.let { pickedUri = it; showUploadSheet = true }
+    }
+
+    // Handle "Open with" / share intent from outside the app
+    LaunchedEffect(Unit) {
+        if (initialUri != null) {
+            pickedUri = initialUri
+            showUploadSheet = true
+        }
     }
 
     Scaffold(
@@ -307,7 +315,7 @@ fun AttachmentsScreen(
             },
             onFile = {
                 showUploadSheet = false
-                fileLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                fileLauncher.launch(arrayOf("image/*", "application/pdf"))
             },
             onDismiss = { showUploadSheet = false }
         )

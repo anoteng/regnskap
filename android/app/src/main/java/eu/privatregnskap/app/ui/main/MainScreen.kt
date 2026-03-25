@@ -1,5 +1,6 @@
 package eu.privatregnskap.app.ui.main
 
+import android.net.Uri
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.AttachFile
@@ -11,6 +12,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -33,10 +35,16 @@ private sealed class Tab(val route: String, val label: String, val icon: ImageVe
 private val tabs = listOf(Tab.Dashboard, Tab.PostingQueue, Tab.Attachments, Tab.Profile)
 
 @Composable
-fun MainScreen(onLogout: () -> Unit) {
+fun MainScreen(onLogout: () -> Unit, initialFileUri: Uri? = null) {
     val navController = rememberNavController()
     val currentEntry by navController.currentBackStackEntryAsState()
     val currentRoute = currentEntry?.destination?.route
+
+    LaunchedEffect(initialFileUri) {
+        if (initialFileUri != null) {
+            navController.navigate(Tab.Attachments.route) { launchSingleTop = true }
+        }
+    }
 
     Scaffold(
         bottomBar = {
@@ -71,7 +79,7 @@ fun MainScreen(onLogout: () -> Unit) {
                 PostingQueueScreen(innerPadding = padding)
             }
             composable(Tab.Attachments.route) {
-                AttachmentsScreen(innerPadding = padding)
+                AttachmentsScreen(innerPadding = padding, initialUri = initialFileUri)
             }
             composable(Tab.Profile.route) {
                 ProfileScreen(onLogout = onLogout)

@@ -1,5 +1,6 @@
 package eu.privatregnskap.app.ui.navigation
 
+import android.net.Uri
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -20,7 +21,7 @@ sealed class Screen(val route: String) {
 }
 
 @Composable
-fun PrivatregnskapNavGraph() {
+fun PrivatregnskapNavGraph(initialFileUri: Uri? = null) {
     val rootNavController = rememberNavController()
     val authViewModel: AuthViewModel = hiltViewModel()
     val isLoggedIn by authViewModel.isLoggedIn.collectAsStateWithLifecycle(initialValue = false)
@@ -61,6 +62,7 @@ fun PrivatregnskapNavGraph() {
 
         composable(Screen.Main.route) {
             MainScreen(
+                initialFileUri = initialFileUri,
                 onLogout = {
                     rootNavController.navigate(Screen.Login.route) {
                         popUpTo(Screen.Main.route) { inclusive = true }
