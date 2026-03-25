@@ -189,5 +189,6 @@ class Auth {
             alert('Feil ved sletting: ' + error.message);
         }
     }
+}
 
 export default new Auth();
