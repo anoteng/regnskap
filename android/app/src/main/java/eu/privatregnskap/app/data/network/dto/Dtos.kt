@@ -154,3 +154,10 @@ data class AttachmentResponse(
     @Json(name = "ai_suggested_account") val aiSuggestedAccount: String?,
     @Json(name = "created_at") val createdAt: String
 )
+
+@JsonClass(generateAdapter = true)
+data class MatchSuggestionResponse(
+    val transaction: TransactionResponse,
+    val score: Int,
+    val reasons: List<String>
+)

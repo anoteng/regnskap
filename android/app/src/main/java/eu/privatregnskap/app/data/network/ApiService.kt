@@ -175,6 +175,12 @@ interface ApiService {
         @Path("id") id: Int
     ): ResponseBody
 
+    @GET("receipts/{id}/suggest-match")
+    suspend fun getMatchSuggestions(
+        @Header("X-Ledger-ID") ledgerId: Int? = null,
+        @Path("id") id: Int
+    ): List<MatchSuggestionResponse>
+
     // ─── Chain suggestions ────────────────────────────────────────────────────
 
     @GET("transactions/chain-suggestions")
