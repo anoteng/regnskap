@@ -2,6 +2,7 @@ package eu.privatregnskap.app.ui.attachments
 
 import android.content.Context
 import android.net.Uri
+import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -13,12 +14,15 @@ import eu.privatregnskap.app.data.repository.AttachmentRepository
 import eu.privatregnskap.app.data.repository.LedgerRepository
 import eu.privatregnskap.app.data.repository.TokenRepository
 import eu.privatregnskap.app.data.repository.TransactionRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 import javax.inject.Inject
 
 data class AttachmentsUiState(
@@ -49,6 +53,10 @@ class AttachmentsViewModel @Inject constructor(
 
     private val _message = MutableSharedFlow<String>()
     val message = _message.asSharedFlow()
+
+    // Pair<FileProvider URI, mimeType> — collected by screen to fire ACTION_VIEW intent
+    private val _openFileEvent = MutableSharedFlow<Pair<Uri, String>>()
+    val openFileEvent = _openFileEvent.asSharedFlow()
 
     private var currentLedgerId: Int? = null
     private var currentStatusFilter: String? = null
@@ -107,6 +115,22 @@ class AttachmentsViewModel @Inject constructor(
             _suggestedMatches.value = emptyList()
             repository.suggestMatches(currentLedgerId, receiptId).onSuccess {
                 _suggestedMatches.value = it
+            }
+        }
+    }
+
+    fun openAttachmentExternal(attachment: AttachmentResponse, context: Context) {
+        viewModelScope.launch {
+            try {
+                val url = imageUrl(attachment.id)
+                val bytes = withContext(Dispatchers.IO) { java.net.URL(url).readBytes() }
+                val ext = if (attachment.mimeType == "application/pdf") "pdf" else "jpg"
+                val file = File(context.cacheDir, "attachment_${attachment.id}.$ext")
+                withContext(Dispatchers.IO) { file.writeBytes(bytes) }
+                val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+                _openFileEvent.emit(uri to (attachment.mimeType ?: "application/octet-stream"))
+            } catch (e: Exception) {
+                _message.emit("Kunne ikke åpne fil: ${e.message}")
             }
         }
     }

@@ -1,6 +1,7 @@
 package eu.privatregnskap.app.ui.attachments
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -99,6 +100,16 @@ fun AttachmentsScreen(
 
     LaunchedEffect(Unit) {
         viewModel.message.collect { snackbarHostState.showSnackbar(it) }
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.openFileEvent.collect { (uri, mimeType) ->
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, mimeType)
+                flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+            }
+            context.startActivity(intent)
+        }
     }
 
     // Camera launcher — needs a temp URI
@@ -288,6 +299,7 @@ fun AttachmentsScreen(
             },
             onUnmatch = { viewModel.unmatchAttachment(att.id) },
             onDelete = { viewingAttachment = null; deletingId = att.id },
+            onOpenExternal = { viewModel.openAttachmentExternal(att, context) },
             onDismiss = { viewingAttachment = null }
         )
     }
@@ -529,6 +541,7 @@ private fun ReceiptDetailSheet(
     onMatch: () -> Unit,
     onUnmatch: () -> Unit,
     onDelete: () -> Unit,
+    onOpenExternal: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val isInvoice = attachment.attachmentType == "INVOICE"
@@ -667,6 +680,17 @@ private fun ReceiptDetailSheet(
                             Spacer(Modifier.width(4.dp))
                             Text("Koble til transaksjon")
                         }
+                    }
+                }
+
+                if (attachment.mimeType == "application/pdf") {
+                    OutlinedButton(
+                        onClick = onOpenExternal,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Åpne PDF i ekstern app")
                     }
                 }
 
