@@ -148,16 +148,26 @@ class ReceiptsManager {
             ? `<div><small>Leverandør: ${receipt.ai_extracted_vendor}</small></div>`
             : '';
 
+        const isPdf = receipt.mime_type === 'application/pdf';
+
         const aiButton = this.isPremium && !receipt.ai_extracted_vendor
             ? `<button class="btn btn-sm btn-secondary" onclick="receiptsManager.extractWithAI(${receipt.id})">
                    AI-gjenkjenning
                </button>`
             : '';
 
+        const thumbnail = isPdf
+            ? `<div class="receipt-image receipt-pdf-thumb" onclick="receiptsManager.showFullImage(${receipt.id})"
+                    style="display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;background:#f3f4f6;color:#374151;">
+                   <span style="font-size:2rem;">📄</span>
+                   <span style="font-size:0.65rem;margin-top:4px;">PDF</span>
+               </div>`
+            : `<img src="${imageUrl}" alt="${typeLabel}" class="receipt-image" onclick="receiptsManager.showFullImage(${receipt.id})">`;
+
         return `
             <div class="receipt-card ${receipt.status === 'MATCHED' ? 'receipt-matched' : ''}">
                 <div class="receipt-image-container">
-                    <img src="${imageUrl}" alt="${typeLabel}" class="receipt-image" onclick="receiptsManager.showFullImage(${receipt.id})">
+                    ${thumbnail}
                 </div>
                 <div class="receipt-info">
                     <div class="receipt-meta">
@@ -208,6 +218,11 @@ class ReceiptsManager {
         if (!receipt) return;
 
         const imageUrl = api.getReceiptImage(id);
+
+        if (receipt.mime_type === 'application/pdf') {
+            window.open(imageUrl, '_blank');
+            return;
+        }
 
         // Create fullscreen overlay
         const overlay = document.createElement('div');
@@ -379,11 +394,16 @@ class ReceiptsManager {
         const purchaseDate = receipt.receipt_date || receipt.ai_extracted_date || '';
         const endDate = purchaseDate ? this._addDays(purchaseDate, 3) : '';
 
+        const isPdf = receipt.mime_type === 'application/pdf';
+        const previewHtml = isPdf
+            ? `<iframe src="${api.getReceiptImage(receiptId)}" style="width:100%;height:300px;border:1px solid #e5e7eb;border-radius:4px;margin-bottom:1rem;"></iframe>`
+            : `<img src="${api.getReceiptImage(receiptId)}" style="width: 100%; border-radius: 4px; margin-bottom: 1rem;">`;
+
         const content = `
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">
                 <div>
                     <h3>Kvittering</h3>
-                    <img src="${api.getReceiptImage(receiptId)}" style="width: 100%; border-radius: 4px; margin-bottom: 1rem;">
+                    ${previewHtml}
                     ${purchaseDate ? `<p>Dato: ${formatDate(purchaseDate)}</p>` : ''}
                     ${receipt.amount || receipt.ai_extracted_amount ? `<p>Beløp: ${parseFloat(receipt.amount || receipt.ai_extracted_amount).toFixed(2)} kr</p>` : ''}
                     ${receipt.ai_extracted_vendor ? `<p>Leverandør: ${receipt.ai_extracted_vendor}</p>` : ''}
