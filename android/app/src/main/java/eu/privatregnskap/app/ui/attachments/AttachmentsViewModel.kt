@@ -124,10 +124,19 @@ class AttachmentsViewModel @Inject constructor(
             _uiState.value = _uiState.value.copy(isUploading = true)
             try {
                 val contentResolver = context.contentResolver
-                val mimeType = contentResolver.getType(uri) ?: "image/jpeg"
-                val fileName = uri.lastPathSegment?.let {
-                    if (it.contains('.')) it else "$it.jpg"
-                } ?: "attachment.jpg"
+                val mimeType = contentResolver.getType(uri) ?: "application/octet-stream"
+
+                // SAF URIs have a numeric lastPathSegment — query the actual display name
+                val displayName = contentResolver.query(
+                    uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null
+                )?.use { cursor ->
+                    if (cursor.moveToFirst()) cursor.getString(0) else null
+                }
+                val fileName = when {
+                    !displayName.isNullOrBlank() -> displayName
+                    mimeType == "application/pdf" -> "document.pdf"
+                    else -> "attachment.jpg"
+                }
                 val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
                     ?: throw Exception("Kunne ikke lese fil")
 
