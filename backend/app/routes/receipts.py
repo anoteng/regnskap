@@ -3,15 +3,15 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session, undefer
 from sqlalchemy import func
 from typing import List, Optional
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 import base64
 import json
 from pathlib import Path
 
 from backend.database import get_db
-from ..models import Receipt, User, Ledger, Transaction, ReceiptStatus, AttachmentType, UserSubscription, SubscriptionPlan, SubscriptionTier, UserMonthlyUsage, SubscriptionStatus
-from ..schemas import Receipt as ReceiptSchema, ReceiptCreate
+from ..models import Receipt, User, Ledger, Transaction, JournalEntry, ReceiptStatus, AttachmentType, UserSubscription, SubscriptionPlan, SubscriptionTier, UserMonthlyUsage, SubscriptionStatus
+from ..schemas import Receipt as ReceiptSchema, ReceiptCreate, Transaction as TransactionSchema
 from ..auth import get_current_active_user, get_current_ledger, get_user_from_query_token, get_ledger_from_query
 from backend.config import get_settings
 
@@ -235,6 +235,94 @@ def get_receipt(
     return receipt
 
 
+@router.get("/{receipt_id}/suggest-match")
+def suggest_match(
+    receipt_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    current_ledger: Ledger = Depends(get_current_ledger)
+):
+    """Return scored transaction suggestions for matching a receipt.
+
+    Scores by:
+    - Amount proximity (0–60 pts)
+    - Vendor name found in transaction description (30 pts)
+    - Date proximity within purchase_date..purchase_date+3 window (3–10 pts)
+    """
+    receipt = db.query(Receipt).filter(
+        Receipt.id == receipt_id,
+        Receipt.ledger_id == current_ledger.id
+    ).first()
+    if not receipt:
+        raise HTTPException(status_code=404, detail="Receipt not found")
+
+    purchase_date = receipt.receipt_date or receipt.ai_extracted_date
+    amount = receipt.amount or receipt.ai_extracted_amount
+    vendor = (receipt.ai_extracted_vendor or "").lower().strip()
+
+    if not purchase_date:
+        return []
+
+    date_to = purchase_date + timedelta(days=3)
+
+    from sqlalchemy.orm import joinedload
+    transactions = (
+        db.query(Transaction)
+        .options(joinedload(Transaction.journal_entries))
+        .filter(
+            Transaction.ledger_id == current_ledger.id,
+            Transaction.transaction_date >= purchase_date,
+            Transaction.transaction_date <= date_to,
+        )
+        .all()
+    )
+
+    results = []
+    for tx in transactions:
+        score = 0
+        reasons = []
+
+        # Amount scoring
+        if amount:
+            total_debit = sum(float(e.debit or 0) for e in tx.journal_entries)
+            total_credit = sum(float(e.credit or 0) for e in tx.journal_entries)
+            tx_amount = max(total_debit, total_credit)
+            if tx_amount > 0:
+                diff = abs(tx_amount - float(amount))
+                rel = diff / float(amount) if float(amount) != 0 else 1
+                if diff < 0.01:
+                    score += 60
+                    reasons.append("Eksakt beløp")
+                elif rel < 0.02:
+                    score += 40
+                    reasons.append("Nær beløp (< 2 %)")
+                elif rel < 0.10:
+                    score += 20
+                    reasons.append("Omtrentlig beløp (< 10 %)")
+
+        # Vendor match
+        if vendor and tx.description:
+            desc = tx.description.lower()
+            if vendor in desc or any(w in desc for w in vendor.split() if len(w) > 3):
+                score += 30
+                reasons.append("Leverandørnavn")
+
+        # Date proximity
+        days_diff = (tx.transaction_date - purchase_date).days
+        date_score = max(0, 10 - days_diff * 2)   # 10 / 8 / 6 / 4 for day 0/1/2/3
+        score += date_score
+
+        if score > 0:
+            results.append({
+                "transaction": TransactionSchema.model_validate(tx),
+                "score": score,
+                "reasons": reasons,
+            })
+
+    results.sort(key=lambda x: x["score"], reverse=True)
+    return results
+
+
 @router.get("/{receipt_id}/image")
 def get_receipt_image(
     receipt_id: int,
@@ -408,20 +496,19 @@ async def extract_receipt_ai(
     if not settings.anthropic_api_key:
         raise HTTPException(status_code=503, detail="AI-gjenkjenning er ikke konfigurert.")
 
-    # Only images are supported by Anthropic vision API
-    supported_types = {"image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp"}
     mime = (receipt.mime_type or "").lower()
-    if mime not in supported_types:
+    supported_image_types = {"image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp"}
+    if mime not in supported_image_types and mime != "application/pdf":
         raise HTTPException(
             status_code=400,
-            detail="AI-gjenkjenning støttes kun for bilder (JPEG, PNG, WebP). PDF-filer må registreres manuelt."
+            detail="AI-gjenkjenning støttes for bilder (JPEG, PNG, WebP) og PDF-filer."
         )
 
     try:
         import anthropic
         client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
 
-        image_data = base64.standard_b64encode(receipt.file_data).decode("utf-8")
+        file_data = base64.standard_b64encode(receipt.file_data).decode("utf-8")
 
         prompt = (
             "Analyser dette vedlegget og ekstraher følgende informasjon som JSON:\n"
@@ -435,22 +522,31 @@ async def extract_receipt_ai(
             "Svar kun med JSON, ingen forklaringstekst."
         )
 
+        if mime == "application/pdf":
+            content_block = {
+                "type": "document",
+                "source": {
+                    "type": "base64",
+                    "media_type": "application/pdf",
+                    "data": file_data,
+                },
+            }
+        else:
+            content_block = {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": mime,
+                    "data": file_data,
+                },
+            }
+
         message = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=300,
             messages=[{
                 "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": mime,
-                            "data": image_data,
-                        },
-                    },
-                    {"type": "text", "text": prompt}
-                ],
+                "content": [content_block, {"type": "text", "text": prompt}],
             }]
         )
 

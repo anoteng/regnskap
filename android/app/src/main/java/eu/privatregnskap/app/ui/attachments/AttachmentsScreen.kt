@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.LinkOff
@@ -368,12 +369,26 @@ private fun AttachmentCard(
             verticalAlignment = Alignment.Top
         ) {
             // Thumbnail
-            AsyncImage(
-                model = imageUrl,
-                contentDescription = null,
-                modifier = Modifier.size(72.dp),
-                contentScale = ContentScale.Crop
-            )
+            if (attachment.mimeType == "application/pdf") {
+                Box(
+                    modifier = Modifier.size(72.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Default.Description,
+                        contentDescription = "PDF",
+                        modifier = Modifier.size(40.dp),
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                }
+            } else {
+                AsyncImage(
+                    model = imageUrl,
+                    contentDescription = null,
+                    modifier = Modifier.size(72.dp),
+                    contentScale = ContentScale.Crop
+                )
+            }
 
             Spacer(Modifier.width(12.dp))
 
@@ -528,15 +543,39 @@ private fun ReceiptDetailSheet(
                 .verticalScroll(rememberScrollState())
                 .padding(bottom = 32.dp)
         ) {
-            // Full-width image
-            AsyncImage(
-                model = imageUrl,
-                contentDescription = "Vedlegg",
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(300.dp),
-                contentScale = ContentScale.Fit
-            )
+            // Full-width preview
+            if (attachment.mimeType == "application/pdf") {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(180.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            Icons.Default.Description,
+                            contentDescription = "PDF",
+                            modifier = Modifier.size(72.dp),
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            attachment.originalFilename ?: "PDF-dokument",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            } else {
+                AsyncImage(
+                    model = imageUrl,
+                    contentDescription = "Vedlegg",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(300.dp),
+                    contentScale = ContentScale.Fit
+                )
+            }
 
             Column(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
