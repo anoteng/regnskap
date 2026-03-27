@@ -12,11 +12,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material3.Switch
+import androidx.core.content.ContextCompat
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -66,10 +74,17 @@ fun ProfileScreen(
     val credentials by profileViewModel.credentials.collectAsStateWithLifecycle()
     val isLoading by profileViewModel.isLoading.collectAsStateWithLifecycle()
     val registerOptionsState by profileViewModel.registerOptionsState.collectAsStateWithLifecycle()
+    val queueNotificationsEnabled by profileViewModel.queueNotificationsEnabled.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) profileViewModel.setQueueNotificationsEnabled(true)
+    }
 
     var deleteConfirmId by remember { mutableStateOf<Int?>(null) }
     var renameTarget by remember { mutableStateOf<PasskeyCredentialResponse?>(null) }
@@ -116,6 +131,44 @@ fun ProfileScreen(
         ) {
             item {
                 Spacer(modifier = Modifier.height(8.dp))
+                Text("Innstillinger", style = MaterialTheme.typography.titleMedium)
+                Spacer(modifier = Modifier.height(4.dp))
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    ListItem(
+                        headlineContent = { Text("Varsler om posteringskø") },
+                        supportingContent = { Text("Varsle om nye transaksjoner i posteringskøen") },
+                        leadingContent = {
+                            Icon(Icons.Default.Notifications, contentDescription = null)
+                        },
+                        trailingContent = {
+                            Switch(
+                                checked = queueNotificationsEnabled,
+                                onCheckedChange = { enabled ->
+                                    if (enabled) {
+                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                            val granted = ContextCompat.checkSelfPermission(
+                                                context, Manifest.permission.POST_NOTIFICATIONS
+                                            ) == PackageManager.PERMISSION_GRANTED
+                                            if (granted) {
+                                                profileViewModel.setQueueNotificationsEnabled(true)
+                                            } else {
+                                                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                            }
+                                        } else {
+                                            profileViewModel.setQueueNotificationsEnabled(true)
+                                        }
+                                    } else {
+                                        profileViewModel.setQueueNotificationsEnabled(false)
+                                    }
+                                }
+                            )
+                        }
+                    )
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
+            item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
