@@ -3,7 +3,9 @@ package eu.privatregnskap.app.ui.profile
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -20,6 +22,9 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.time.LocalDateTime
+import java.time.LocalTime
+import java.time.temporal.ChronoUnit
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
@@ -122,11 +127,21 @@ class ProfileViewModel @Inject constructor(
             notificationPreferences.setQueueNotificationsEnabled(enabled)
             val workManager = WorkManager.getInstance(context)
             if (enabled) {
-                val request = PeriodicWorkRequestBuilder<PostingQueueCheckWorker>(15, TimeUnit.MINUTES)
+                val now = LocalDateTime.now()
+                val nextRun = now.toLocalDate().atTime(LocalTime.of(8, 0)).let {
+                    if (it.isAfter(now)) it else it.plusDays(1)
+                }
+                val initialDelay = ChronoUnit.MINUTES.between(now, nextRun)
+                val constraints = Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build()
+                val request = PeriodicWorkRequestBuilder<PostingQueueCheckWorker>(24, TimeUnit.HOURS)
+                    .setInitialDelay(initialDelay, TimeUnit.MINUTES)
+                    .setConstraints(constraints)
                     .build()
                 workManager.enqueueUniquePeriodicWork(
                     PostingQueueCheckWorker.WORK_NAME,
-                    ExistingPeriodicWorkPolicy.KEEP,
+                    ExistingPeriodicWorkPolicy.REPLACE,
                     request
                 )
             } else {
