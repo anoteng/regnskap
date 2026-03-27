@@ -594,8 +594,12 @@ class App {
             const accounts = await api.getAccounts();
 
             // Filter to only income and expense accounts, and sort by account number
+            // If the budget has an account filter, show only those accounts
+            const filterSet = budget.account_filter_ids && budget.account_filter_ids.length > 0
+                ? new Set(budget.account_filter_ids) : null;
             const budgetAccounts = accounts
-                .filter(acc => acc.account_type === 'REVENUE' || acc.account_type === 'EXPENSE')
+                .filter(acc => (acc.account_type === 'REVENUE' || acc.account_type === 'EXPENSE')
+                    && (!filterSet || filterSet.has(acc.id)))
                 .sort((a, b) => a.account_number.localeCompare(b.account_number));
 
             let html = `
@@ -673,9 +677,10 @@ class App {
                         </table>
                     </div>
 
-                    <div style="margin-top: 1rem; display: flex; gap: 1rem;">
+                    <div style="margin-top: 1rem; display: flex; gap: 1rem; flex-wrap: wrap;">
                         <button class="btn btn-primary" onclick="app.saveBudgetLines(${budgetId})">Lagre budsjett</button>
                         <button class="btn btn-secondary" onclick="app.showBudgetReport(${budgetId})">Se rapport</button>
+                        <button class="btn btn-secondary" onclick="app.showAccountFilterModal(${budgetId})">Kontofilter</button>
                         <button class="btn btn-secondary" onclick="app.loadBudgets()">Tilbake</button>
                     </div>
                 </div>
@@ -1043,6 +1048,93 @@ class App {
         }
     }
 
+    async showAccountFilterModal(budgetId) {
+        try {
+            const [accounts, filterData] = await Promise.all([
+                api.getAccounts(),
+                api.get(`/budgets/${budgetId}/account-filters`)
+            ]);
+            const filtered = new Set(filterData.account_ids || []);
+            const budgetAccounts = accounts
+                .filter(a => a.account_type === 'REVENUE' || a.account_type === 'EXPENSE')
+                .sort((a, b) => a.account_number.localeCompare(b.account_number));
+
+            const rows = budgetAccounts.map(a => `
+                <tr>
+                    <td><label style="cursor:pointer;display:flex;align-items:center;gap:0.5rem;">
+                        <input type="checkbox" value="${a.id}" ${filtered.has(a.id) ? 'checked' : ''}>
+                        <strong>${a.account_number}</strong> ${a.account_name}
+                    </label></td>
+                </tr>
+            `).join('');
+
+            const content = `
+                <p style="margin-bottom:0.75rem;">Velg kontoene som skal vises i dette budsjettet. Tomt filter = vis alle kontoer.</p>
+                <div style="margin-bottom:0.5rem;display:flex;gap:0.5rem;">
+                    <button class="btn btn-secondary" onclick="document.querySelectorAll('#account-filter-table input').forEach(c=>c.checked=true)">Velg alle</button>
+                    <button class="btn btn-secondary" onclick="document.querySelectorAll('#account-filter-table input').forEach(c=>c.checked=false)">Fjern alle</button>
+                </div>
+                <div style="max-height:400px;overflow-y:auto;">
+                    <table class="data-table" id="account-filter-table"><tbody>${rows}</tbody></table>
+                </div>
+                <div style="margin-top:1rem;display:flex;gap:0.5rem;">
+                    <button class="btn btn-primary" onclick="app.saveAccountFilter(${budgetId})">Lagre filter</button>
+                    <button class="btn btn-secondary" onclick="closeModal()">Avbryt</button>
+                </div>
+            `;
+            showModal('Kontofilter', content, '600px');
+        } catch (error) {
+            showError('Kunne ikke laste kontofilter: ' + error.message);
+        }
+    }
+
+    async saveAccountFilter(budgetId) {
+        const checkboxes = document.querySelectorAll('#account-filter-table input[type=checkbox]:checked');
+        const accountIds = Array.from(checkboxes).map(c => parseInt(c.value));
+        try {
+            await api.setBudgetAccountFilters(budgetId, accountIds);
+            closeModal();
+            showSuccess(accountIds.length === 0 ? 'Filter fjernet' : `Filter lagret (${accountIds.length} kontoer)`);
+            this.loadBudgets();
+        } catch (error) {
+            showError('Kunne ikke lagre filter: ' + error.message);
+        }
+    }
+
+    showCopyBudgetModal(budgetId, budgetName, budgetYear) {
+        const content = `
+            <form id="copy-budget-form">
+                <div class="form-group">
+                    <label for="copy-budget-name">Navn</label>
+                    <input type="text" id="copy-budget-name" value="${budgetName} (kopi)" required>
+                </div>
+                <div class="form-group">
+                    <label for="copy-budget-year">År</label>
+                    <input type="number" id="copy-budget-year" value="${budgetYear}" min="2020" max="2100" required>
+                </div>
+                <div style="display:flex;gap:0.5rem;margin-top:1rem;">
+                    <button type="submit" class="btn btn-primary">Kopier</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Avbryt</button>
+                </div>
+            </form>
+        `;
+        showModal('Kopier budsjett', content);
+        document.getElementById('copy-budget-form').onsubmit = async (e) => {
+            e.preventDefault();
+            try {
+                const newBudget = await api.copyBudget(budgetId, {
+                    name: document.getElementById('copy-budget-name').value,
+                    year: parseInt(document.getElementById('copy-budget-year').value)
+                });
+                closeModal();
+                showSuccess('Budsjett kopiert!');
+                this.loadBudgets();
+            } catch (error) {
+                showError('Kunne ikke kopiere budsjett: ' + error.message);
+            }
+        };
+    }
+
     async loadBudgets() {
         try {
             const budgets = await api.getBudgets();
@@ -1055,16 +1147,26 @@ class App {
 
             let html = '<div class="card-grid">';
             for (const budget of budgets) {
+                const filterLabel = budget.account_filter_ids && budget.account_filter_ids.length > 0
+                    ? `<p style="color: #888; font-size: 0.85rem;">${budget.account_filter_ids.length} kontoer filtrert</p>`
+                    : '';
                 html += `
                     <div class="card">
                         <h3>${budget.name}</h3>
                         <p>År: ${budget.year}</p>
-                        <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
+                        ${filterLabel}
+                        <div style="display: flex; gap: 0.5rem; margin-top: 1rem; flex-wrap: wrap;">
                             <button class="btn btn-primary" onclick="app.showBudgetReport(${budget.id})">
                                 Se rapport
                             </button>
                             <button class="btn btn-secondary" onclick="app.showBudgetEditor(${budget.id})">
                                 Rediger
+                            </button>
+                            <button class="btn btn-secondary" onclick="app.showAccountFilterModal(${budget.id})">
+                                Kontofilter
+                            </button>
+                            <button class="btn btn-secondary" onclick="app.showCopyBudgetModal(${budget.id}, '${budget.name.replace(/'/g, "\\'")}', ${budget.year})">
+                                Kopier
                             </button>
                             <button class="btn btn-danger" onclick="app.deleteBudget(${budget.id}, '${budget.name.replace(/'/g, "\\'")}')">
                                 Slett

@@ -302,6 +302,20 @@ class Budget(Base):
     ledger = relationship("Ledger", back_populates="budgets")
     creator = relationship("User")
     lines = relationship("BudgetLine", back_populates="budget", cascade="all, delete-orphan")
+    account_filters = relationship("BudgetAccountFilter", back_populates="budget", cascade="all, delete-orphan")
+
+    @property
+    def account_filter_ids(self):
+        return [f.account_id for f in self.account_filters]
+
+
+class BudgetAccountFilter(Base):
+    __tablename__ = "budget_account_filters"
+
+    budget_id = Column(Integer, ForeignKey("budgets.id"), primary_key=True)
+    account_id = Column(Integer, ForeignKey("accounts.id"), primary_key=True)
+
+    budget = relationship("Budget", back_populates="account_filters")
 
 
 class BudgetLine(Base):

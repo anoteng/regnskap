@@ -232,6 +232,18 @@ CREATE TABLE `budget_lines` (
   CONSTRAINT `budget_lines_ibfk_account` FOREIGN KEY (`account_id`) REFERENCES `accounts` (`id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1909 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `budget_account_filters`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `budget_account_filters` (
+  `budget_id` int(11) NOT NULL,
+  `account_id` int(11) NOT NULL,
+  PRIMARY KEY (`budget_id`,`account_id`),
+  KEY `baf_account_id` (`account_id`),
+  CONSTRAINT `baf_ibfk_1` FOREIGN KEY (`budget_id`) REFERENCES `budgets` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `baf_ibfk_2` FOREIGN KEY (`account_id`) REFERENCES `accounts` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `budgets`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8mb4 */;

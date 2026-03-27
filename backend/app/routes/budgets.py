@@ -5,7 +5,7 @@ from typing import List
 from decimal import Decimal
 
 from backend.database import get_db
-from ..models import User, Ledger, Budget, BudgetLine, JournalEntry, Account, Transaction
+from ..models import User, Ledger, Budget, BudgetLine, BudgetAccountFilter, JournalEntry, Account, Transaction
 from ..schemas import (
     Budget as BudgetSchema,
     BudgetCreate,
@@ -185,8 +185,11 @@ def get_budget_report(
             actual_by_account[row.account_id] = {}
         actual_by_account[row.account_id][int(row.month)] = float(row.amount)
 
-    # Get account details
+    # Apply account filter if configured — show only listed accounts
+    filter_ids = {f.account_id for f in budget.account_filters}
     all_account_ids = set(budget_by_account.keys()) | set(actual_by_account.keys())
+    if filter_ids:
+        all_account_ids = filter_ids
     accounts = db.query(Account).filter(
         Account.id.in_(all_account_ids)
     ).all()
@@ -286,6 +289,96 @@ def get_budget_drilldown(
         'credit': float(r.credit),
         'amount': float(r.debit - r.credit)
     } for r in rows]
+
+
+@router.get("/{budget_id}/account-filters")
+def get_account_filters(
+    budget_id: int,
+    current_user: User = Depends(get_current_active_user),
+    current_ledger: Ledger = Depends(get_current_ledger),
+    db: Session = Depends(get_db)
+):
+    """Get the account filter list for a budget"""
+    budget = db.query(Budget).filter(
+        Budget.id == budget_id,
+        Budget.ledger_id == current_ledger.id
+    ).first()
+    if not budget:
+        raise HTTPException(status_code=404, detail="Budget not found")
+    return {"account_ids": [f.account_id for f in budget.account_filters]}
+
+
+@router.put("/{budget_id}/account-filters")
+def set_account_filters(
+    budget_id: int,
+    data: dict,
+    current_user: User = Depends(get_current_active_user),
+    current_ledger: Ledger = Depends(get_current_ledger),
+    db: Session = Depends(get_db)
+):
+    """Set the account filter list for a budget. Empty list removes all filters."""
+    budget = db.query(Budget).filter(
+        Budget.id == budget_id,
+        Budget.ledger_id == current_ledger.id
+    ).first()
+    if not budget:
+        raise HTTPException(status_code=404, detail="Budget not found")
+
+    account_ids = data.get("account_ids", [])
+
+    db.query(BudgetAccountFilter).filter(
+        BudgetAccountFilter.budget_id == budget_id
+    ).delete()
+
+    for account_id in account_ids:
+        db.add(BudgetAccountFilter(budget_id=budget_id, account_id=account_id))
+
+    db.commit()
+    return {"account_ids": account_ids}
+
+
+@router.post("/{budget_id}/copy", response_model=BudgetSchema)
+def copy_budget(
+    budget_id: int,
+    data: dict,
+    current_user: User = Depends(get_current_active_user),
+    current_ledger: Ledger = Depends(get_current_ledger),
+    db: Session = Depends(get_db)
+):
+    """Copy a budget to a new budget with a new name and optionally a new year"""
+    source = db.query(Budget).filter(
+        Budget.id == budget_id,
+        Budget.ledger_id == current_ledger.id
+    ).first()
+    if not source:
+        raise HTTPException(status_code=404, detail="Budget not found")
+
+    name = data.get("name") or f"{source.name} (kopi)"
+    year = data.get("year") or source.year
+
+    new_budget = Budget(
+        ledger_id=current_ledger.id,
+        name=name,
+        year=int(year),
+        created_by=current_user.id
+    )
+    db.add(new_budget)
+    db.flush()
+
+    for line in source.lines:
+        db.add(BudgetLine(
+            budget_id=new_budget.id,
+            account_id=line.account_id,
+            period=line.period,
+            amount=line.amount
+        ))
+
+    for f in source.account_filters:
+        db.add(BudgetAccountFilter(budget_id=new_budget.id, account_id=f.account_id))
+
+    db.commit()
+    db.refresh(new_budget)
+    return new_budget
 
 
 @router.delete("/{budget_id}")

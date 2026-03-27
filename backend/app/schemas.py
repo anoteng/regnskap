@@ -291,6 +291,7 @@ class Budget(BudgetBase):
     created_by: int
     created_at: datetime
     lines: List['BudgetLine'] = []
+    account_filter_ids: List[int] = []
 
     class Config:
         from_attributes = True

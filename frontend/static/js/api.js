@@ -425,6 +425,14 @@ class API {
         return this.get(`/budgets/${budgetId}/drilldown${params}`);
     }
 
+    async setBudgetAccountFilters(budgetId, accountIds) {
+        return this.put(`/budgets/${budgetId}/account-filters`, { account_ids: accountIds });
+    }
+
+    async copyBudget(budgetId, data) {
+        return this.post(`/budgets/${budgetId}/copy`, data);
+    }
+
     async getBalanceSheet(asOfDate = null) {
         const params = asOfDate ? `?as_of_date=${asOfDate}` : '';
         return this.get(`/reports/balance-sheet${params}`);
@@ -557,6 +565,10 @@ class API {
 
     async extractReceiptAI(id) {
         return this.post(`/receipts/${id}/extract`, {});
+    }
+
+    async getMatchSuggestions(id) {
+        return this.get(`/receipts/${id}/suggest-match`);
     }
 }
 
