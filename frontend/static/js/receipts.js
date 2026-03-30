@@ -259,7 +259,10 @@ class ReceiptsManager {
                     🔍-
                 </button>
                 <button id="save-rotation" class="btn btn-primary" style="background: rgba(59,130,246,0.9); display: none;">
-                    💾 Lagre rotasjon
+                    Lagre rotasjon
+                </button>
+                <button id="open-crop-editor" class="btn btn-secondary" style="background: rgba(255,255,255,0.9); color: #000;">
+                    Beskjær / rediger
                 </button>
                 <button id="close-viewer" class="btn btn-danger" style="background: rgba(220,38,38,0.9);">
                     ✕ Lukk
@@ -313,6 +316,12 @@ class ReceiptsManager {
         overlay.querySelector('#zoom-out').onclick = () => {
             scale = Math.max(scale - 0.25, 0.5);
             img.style.transform = `rotate(${rotation}deg) scale(${scale})`;
+        };
+
+        // Open crop editor
+        overlay.querySelector('#open-crop-editor').onclick = () => {
+            overlay.remove();
+            this.openCropEditor(id, imageUrl);
         };
 
         // Close viewer
@@ -684,6 +693,88 @@ class ReceiptsManager {
         } catch (error) {
             showError('Kunne ikke slette kvittering: ' + error.message);
         }
+    }
+
+    openCropEditor(receiptId, imageUrl) {
+        const overlay = document.createElement('div');
+        overlay.id = 'crop-editor';
+        overlay.style.cssText = `
+            position: fixed; inset: 0;
+            background: #1a1a1a;
+            z-index: 10000;
+            display: flex;
+            flex-direction: column;
+        `;
+        overlay.innerHTML = `
+            <div style="display:flex; align-items:center; gap:0.5rem; padding:0.75rem 1rem; background:#111; flex-wrap:wrap;">
+                <span style="color:#fff; font-weight:600; margin-right:0.5rem;">Beskjær / roter</span>
+                <button id="ce-rotate-left"  class="btn btn-secondary btn-sm">↶ Roter venstre</button>
+                <button id="ce-rotate-right" class="btn btn-secondary btn-sm">Roter høyre ↷</button>
+                <button id="ce-flip-h"       class="btn btn-secondary btn-sm">↔ Speilvend</button>
+                <button id="ce-reset"        class="btn btn-secondary btn-sm">Tilbakestill</button>
+                <div style="flex:1"></div>
+                <button id="ce-save"   class="btn btn-primary btn-sm">Lagre</button>
+                <button id="ce-cancel" class="btn btn-danger btn-sm">Avbryt</button>
+            </div>
+            <div style="flex:1; overflow:hidden; display:flex; align-items:center; justify-content:center;">
+                <img id="ce-image" src="${imageUrl}" style="max-width:100%; max-height:100%;">
+            </div>
+        `;
+        document.body.appendChild(overlay);
+
+        const img = overlay.querySelector('#ce-image');
+        img.onload = () => {
+            const cropper = new Cropper(img, {
+                viewMode: 1,
+                autoCropArea: 1,
+                responsive: true,
+                checkCrossOrigin: false,
+            });
+
+            overlay.querySelector('#ce-rotate-left').onclick  = () => cropper.rotate(-90);
+            overlay.querySelector('#ce-rotate-right').onclick = () => cropper.rotate(90);
+            overlay.querySelector('#ce-flip-h').onclick       = () => {
+                const data = cropper.getData();
+                cropper.scaleX(-(cropper.getImageData().scaleX || 1));
+            };
+            overlay.querySelector('#ce-reset').onclick        = () => cropper.reset();
+
+            overlay.querySelector('#ce-cancel').onclick = () => overlay.remove();
+
+            overlay.querySelector('#ce-save').onclick = async () => {
+                const btn = overlay.querySelector('#ce-save');
+                btn.disabled = true;
+                btn.textContent = 'Lagrer...';
+                try {
+                    const canvas = cropper.getCroppedCanvas({ maxWidth: 2048, maxHeight: 2048 });
+                    await new Promise((resolve, reject) => {
+                        canvas.toBlob(async (blob) => {
+                            try {
+                                const formData = new FormData();
+                                formData.append('file', blob, 'edited.jpg');
+                                const response = await fetch(`${api.baseURL}/receipts/${receiptId}/rotate`, {
+                                    method: 'POST',
+                                    headers: {
+                                        'Authorization': `Bearer ${api.token}`,
+                                        'X-Ledger-ID': api.currentLedgerId
+                                    },
+                                    body: formData
+                                });
+                                if (!response.ok) throw new Error('Lagring feilet');
+                                resolve();
+                            } catch (e) { reject(e); }
+                        }, 'image/jpeg', 0.92);
+                    });
+                    overlay.remove();
+                    showSuccess('Bilde lagret');
+                    await this.loadReceipts();
+                } catch (error) {
+                    showError('Kunne ikke lagre: ' + error.message);
+                    btn.disabled = false;
+                    btn.textContent = 'Lagre';
+                }
+            };
+        };
     }
 
     async saveRotation(receiptId, degrees) {

@@ -691,9 +691,14 @@ async def rotate_receipt(
             detail=f"File too large. Maximum size: {MAX_FILE_SIZE / 1024 / 1024}MB"
         )
 
+    content_type = file.content_type or 'image/jpeg'
+    if content_type.startswith('image/') and content_type != 'image/heic':
+        contents, content_type = compress_image(contents, content_type)
+        file_size = len(contents)
+
     receipt.file_data = contents
     receipt.file_size = file_size
-    receipt.mime_type = file.content_type or 'image/jpeg'
+    receipt.mime_type = content_type
 
     db.commit()
 
