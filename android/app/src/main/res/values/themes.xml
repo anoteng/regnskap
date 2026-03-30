@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="Theme.Privatregnskap" parent="android:Theme.Material.Light.NoActionBar" />
+    <!-- UCrop: opt out of edge-to-edge enforcement (API 35) so system bars don't overlap the UI -->
+    <style name="Theme.UCrop" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="android:windowOptOutEdgeToEdgeEnforcement">true</item>
+    </style>
 </resources>
