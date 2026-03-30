@@ -58,6 +58,10 @@ class AttachmentsViewModel @Inject constructor(
     private val _openFileEvent = MutableSharedFlow<Pair<Uri, String>>()
     val openFileEvent = _openFileEvent.asSharedFlow()
 
+    // Triple<attachmentId, sourceUri, destUri> — collected by screen to launch uCrop
+    private val _cropEditEvent = MutableSharedFlow<Triple<Int, Uri, Uri>>()
+    val cropEditEvent = _cropEditEvent.asSharedFlow()
+
     private var currentLedgerId: Int? = null
     private var currentStatusFilter: String? = null
     private var currentSearch: String? = null
@@ -131,6 +135,45 @@ class AttachmentsViewModel @Inject constructor(
                 _openFileEvent.emit(uri to (attachment.mimeType ?: "application/octet-stream"))
             } catch (e: Exception) {
                 _message.emit("Kunne ikke åpne fil: ${e.message}")
+            }
+        }
+    }
+
+    fun prepareCropEdit(attachment: AttachmentResponse, context: Context) {
+        if (attachment.mimeType == "application/pdf") return
+        viewModelScope.launch {
+            try {
+                val url = imageUrl(attachment.id)
+                val bytes = withContext(Dispatchers.IO) { java.net.URL(url).readBytes() }
+                val srcFile = File(context.cacheDir, "crop_src_${attachment.id}.jpg")
+                val destFile = File(context.cacheDir, "crop_dest_${attachment.id}.jpg")
+                withContext(Dispatchers.IO) { srcFile.writeBytes(bytes) }
+                val srcUri = FileProvider.getUriForFile(
+                    context, "${context.packageName}.fileprovider", srcFile
+                )
+                _cropEditEvent.emit(Triple(attachment.id, srcUri, Uri.fromFile(destFile)))
+            } catch (e: Exception) {
+                _message.emit("Kunne ikke åpne editor: ${e.message}")
+            }
+        }
+    }
+
+    fun uploadCropped(attachmentId: Int, croppedUri: Uri, context: Context) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isUploading = true)
+            try {
+                val bytes = withContext(Dispatchers.IO) {
+                    val path = croppedUri.path ?: throw Exception("Ugyldig fil")
+                    File(path).readBytes()
+                }
+                repository.rotateAttachment(currentLedgerId, attachmentId, bytes).fold(
+                    onSuccess = { _message.emit("Bilde lagret"); loadAll() },
+                    onFailure = { _message.emit("Kunne ikke lagre: ${it.message}") }
+                )
+            } catch (e: Exception) {
+                _message.emit("Feil: ${e.message}")
+            } finally {
+                _uiState.value = _uiState.value.copy(isUploading = false)
             }
         }
     }

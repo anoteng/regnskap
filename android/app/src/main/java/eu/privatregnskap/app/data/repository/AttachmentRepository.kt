@@ -27,6 +27,7 @@ interface AttachmentRepository {
     suspend fun matchAttachment(ledgerId: Int?, id: Int, transactionId: Int): Result<Unit>
     suspend fun unmatchAttachment(ledgerId: Int?, id: Int): Result<Unit>
     suspend fun suggestMatches(ledgerId: Int?, id: Int): Result<List<MatchSuggestionResponse>>
+    suspend fun rotateAttachment(ledgerId: Int?, id: Int, bytes: ByteArray): Result<Unit>
 }
 
 @Singleton
@@ -76,4 +77,14 @@ class AttachmentRepositoryImpl @Inject constructor(
 
     override suspend fun suggestMatches(ledgerId: Int?, id: Int): Result<List<MatchSuggestionResponse>> =
         runCatching { apiService.getMatchSuggestions(ledgerId, id) }
+
+    override suspend fun rotateAttachment(ledgerId: Int?, id: Int, bytes: ByteArray): Result<Unit> =
+        runCatching {
+            val part = MultipartBody.Part.createFormData(
+                "file", "cropped.jpg",
+                bytes.toRequestBody("image/jpeg".toMediaType())
+            )
+            apiService.rotateAttachment(ledgerId, id, part)
+            Unit
+        }
 }

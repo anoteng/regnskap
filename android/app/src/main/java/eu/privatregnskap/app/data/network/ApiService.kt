@@ -182,6 +182,14 @@ interface ApiService {
         @Path("id") id: Int
     ): List<MatchSuggestionResponse>
 
+    @Multipart
+    @POST("receipts/{id}/rotate")
+    suspend fun rotateAttachment(
+        @Header("X-Ledger-ID") ledgerId: Int? = null,
+        @Path("id") id: Int,
+        @Part file: MultipartBody.Part
+    ): ResponseBody
+
     // ─── Chain suggestions ────────────────────────────────────────────────────
 
     @GET("transactions/chain-suggestions")

@@ -21,10 +21,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import android.app.Activity
+import com.yalantis.ucrop.UCrop
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Folder
@@ -109,6 +112,36 @@ fun AttachmentsScreen(
                 flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
             }
             context.startActivity(intent)
+        }
+    }
+
+    // uCrop launcher — receives crop result and uploads to server
+    var cropAttachmentId by remember { mutableStateOf<Int?>(null) }
+    val cropLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val croppedUri = result.data?.let { UCrop.getOutput(it) }
+            val id = cropAttachmentId
+            if (croppedUri != null && id != null) {
+                viewModel.uploadCropped(id, croppedUri, context)
+            }
+        }
+        cropAttachmentId = null
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.cropEditEvent.collect { (attachmentId, srcUri, destUri) ->
+            cropAttachmentId = attachmentId
+            val options = UCrop.Options().apply {
+                setFreeStyleCropEnabled(true)
+                setToolbarTitle("Beskjær / roter")
+                setShowCropGrid(true)
+            }
+            val intent = UCrop.of(srcUri, destUri)
+                .withOptions(options)
+                .getIntent(context)
+            cropLauncher.launch(intent)
         }
     }
 
@@ -300,6 +333,7 @@ fun AttachmentsScreen(
             onUnmatch = { viewModel.unmatchAttachment(att.id) },
             onDelete = { viewingAttachment = null; deletingId = att.id },
             onOpenExternal = { viewModel.openAttachmentExternal(att, context) },
+            onCropEdit = { viewingAttachment = null; viewModel.prepareCropEdit(att, context) },
             onDismiss = { viewingAttachment = null }
         )
     }
@@ -542,6 +576,7 @@ private fun ReceiptDetailSheet(
     onUnmatch: () -> Unit,
     onDelete: () -> Unit,
     onOpenExternal: () -> Unit,
+    onCropEdit: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val isInvoice = attachment.attachmentType == "INVOICE"
@@ -680,6 +715,17 @@ private fun ReceiptDetailSheet(
                             Spacer(Modifier.width(4.dp))
                             Text("Koble til transaksjon")
                         }
+                    }
+                }
+
+                if (attachment.mimeType != "application/pdf") {
+                    OutlinedButton(
+                        onClick = onCropEdit,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Crop, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Beskjær / roter")
                     }
                 }
 

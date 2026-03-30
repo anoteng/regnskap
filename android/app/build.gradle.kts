@@ -21,8 +21,8 @@ android {
         applicationId = "eu.privatregnskap.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 21
-        versionName = "1.9.1"
+        versionCode = 22
+        versionName = "2.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -129,6 +129,9 @@ dependencies {
 
     // Coil (image loading)
     implementation(libs.coil.compose)
+
+    // uCrop (image crop + rotate editor)
+    implementation(libs.ucrop)
 
     // WorkManager + Hilt integration
     implementation(libs.work.runtime.ktx)
