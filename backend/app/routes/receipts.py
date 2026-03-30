@@ -19,6 +19,49 @@ router = APIRouter(prefix="/receipts", tags=["receipts"])
 
 ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.pdf', '.heic'}
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+IMAGE_MAX_PIXELS = 2048           # Resize to max 2048px on longest side
+IMAGE_MAX_BYTES = 2 * 1024 * 1024 # Target max 2 MB stored (well under Anthropic 5 MB base64 limit)
+
+
+def compress_image(data: bytes, mime_type: str) -> tuple:
+    """Resize and compress image to stay within IMAGE_MAX_BYTES.
+    Returns (compressed_bytes, new_mime_type). Falls back to original on error."""
+    try:
+        from PIL import Image
+        import io
+
+        img = Image.open(io.BytesIO(data))
+
+        # Strip EXIF rotation and apply orientation
+        try:
+            from PIL import ImageOps
+            img = ImageOps.exif_transpose(img)
+        except Exception:
+            pass
+
+        # JPEG requires RGB
+        if img.mode in ('RGBA', 'P', 'LA'):
+            img = img.convert('RGB')
+        elif img.mode != 'RGB':
+            img = img.convert('RGB')
+
+        # Downscale if needed
+        w, h = img.size
+        if max(w, h) > IMAGE_MAX_PIXELS:
+            scale = IMAGE_MAX_PIXELS / max(w, h)
+            img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+
+        # Try progressively lower quality until under the size limit
+        for quality in [85, 75, 65, 50]:
+            buf = io.BytesIO()
+            img.save(buf, format='JPEG', quality=quality, optimize=True)
+            compressed = buf.getvalue()
+            if len(compressed) <= IMAGE_MAX_BYTES:
+                return compressed, 'image/jpeg'
+
+        return compressed, 'image/jpeg'
+    except Exception:
+        return data, mime_type
 
 
 def check_subscription_limits(user: User, ledger: Ledger, db: Session):
@@ -158,13 +201,19 @@ async def upload_receipt(
             detail=f"File too large. Maximum size: {MAX_FILE_SIZE / 1024 / 1024}MB"
         )
 
+    # Compress images before storing — keeps DB lean and stays within Anthropic limits
+    content_type = file.content_type or ''
+    if content_type.startswith('image/') and content_type != 'image/heic':
+        contents, content_type = compress_image(contents, content_type)
+        file_size = len(contents)
+
     receipt = Receipt(
         ledger_id=current_ledger.id,
         uploaded_by=current_user.id,
         file_data=contents,
         original_filename=file.filename,
         file_size=file_size,
-        mime_type=file.content_type,
+        mime_type=content_type,
         attachment_type=att_type,
         receipt_date=receipt_date,
         due_date=due_date,
@@ -247,7 +296,9 @@ def suggest_match(
     Scores by:
     - Amount proximity (0–60 pts)
     - Vendor name found in transaction description (30 pts)
-    - Date proximity within purchase_date..purchase_date+3 window (3–10 pts)
+    - Date proximity (3–10 pts):
+      - Receipts: within purchase_date..purchase_date+3
+      - Invoices (due_date set): within receipt_date..due_date+3, scored by proximity to due_date
     """
     receipt = db.query(Receipt).filter(
         Receipt.id == receipt_id,
@@ -257,13 +308,20 @@ def suggest_match(
         raise HTTPException(status_code=404, detail="Receipt not found")
 
     purchase_date = receipt.receipt_date or receipt.ai_extracted_date
+    due_date = receipt.due_date
     amount = receipt.amount or receipt.ai_extracted_amount
     vendor = (receipt.ai_extracted_vendor or "").lower().strip()
+    is_invoice = due_date is not None
 
     if not purchase_date:
         return []
 
-    date_to = purchase_date + timedelta(days=3)
+    if is_invoice:
+        date_from = purchase_date
+        date_to = due_date + timedelta(days=3)
+    else:
+        date_from = purchase_date
+        date_to = purchase_date + timedelta(days=3)
 
     from sqlalchemy.orm import joinedload
     transactions = (
@@ -271,7 +329,7 @@ def suggest_match(
         .options(joinedload(Transaction.journal_entries))
         .filter(
             Transaction.ledger_id == current_ledger.id,
-            Transaction.transaction_date >= purchase_date,
+            Transaction.transaction_date >= date_from,
             Transaction.transaction_date <= date_to,
         )
         .all()
@@ -307,8 +365,9 @@ def suggest_match(
                 score += 30
                 reasons.append("Leverandørnavn")
 
-        # Date proximity
-        days_diff = (tx.transaction_date - purchase_date).days
+        # Date proximity — for invoices score relative to due_date, else purchase_date
+        anchor = due_date if is_invoice else purchase_date
+        days_diff = abs((tx.transaction_date - anchor).days)
         date_score = max(0, 10 - days_diff * 2)   # 10 / 8 / 6 / 4 for day 0/1/2/3
         score += date_score
 

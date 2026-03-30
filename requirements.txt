@@ -8,3 +8,4 @@
 # Kun python-jose og webauthn mangler fra Debian, installer via pip:
 python-jose[cryptography]
 webauthn>=1.11.0
+Pillow
