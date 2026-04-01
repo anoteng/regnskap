@@ -2,6 +2,8 @@ package eu.privatregnskap.app.data.network
 
 import eu.privatregnskap.app.data.network.dto.AccountResponse
 import eu.privatregnskap.app.data.network.dto.AttachmentResponse
+import eu.privatregnskap.app.data.network.dto.BudgetReportResponse
+import eu.privatregnskap.app.data.network.dto.BudgetResponse
 import eu.privatregnskap.app.data.network.dto.ChainRequest
 import eu.privatregnskap.app.data.network.dto.ChainSuggestionsResponse
 import eu.privatregnskap.app.data.network.dto.LedgerResponse
@@ -189,6 +191,19 @@ interface ApiService {
         @Path("id") id: Int,
         @Part file: MultipartBody.Part
     ): ResponseBody
+
+    // ─── Budgets ──────────────────────────────────────────────────────────────
+
+    @GET("budgets/")
+    suspend fun getBudgets(
+        @Header("X-Ledger-ID") ledgerId: Int? = null
+    ): List<BudgetResponse>
+
+    @GET("budgets/{id}/report")
+    suspend fun getBudgetReport(
+        @Header("X-Ledger-ID") ledgerId: Int? = null,
+        @Path("id") id: Int
+    ): BudgetReportResponse
 
     // ─── Chain suggestions ────────────────────────────────────────────────────
 

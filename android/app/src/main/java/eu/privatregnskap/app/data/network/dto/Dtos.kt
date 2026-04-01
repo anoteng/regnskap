@@ -161,3 +161,36 @@ data class MatchSuggestionResponse(
     val score: Int,
     val reasons: List<String>
 )
+
+@JsonClass(generateAdapter = true)
+data class BudgetResponse(
+    val id: Int,
+    val name: String,
+    val year: Int
+)
+
+@JsonClass(generateAdapter = true)
+data class BudgetMonthData(
+    val month: Int,
+    val budget: Double,
+    val actual: Double,
+    val variance: Double
+)
+
+@JsonClass(generateAdapter = true)
+data class BudgetReportLine(
+    @Json(name = "account_id") val accountId: Int,
+    @Json(name = "account_number") val accountNumber: String,
+    @Json(name = "account_name") val accountName: String,
+    @Json(name = "account_type") val accountType: String,
+    val months: List<BudgetMonthData>,
+    @Json(name = "total_budget") val totalBudget: Double,
+    @Json(name = "total_actual") val totalActual: Double,
+    @Json(name = "total_variance") val totalVariance: Double
+)
+
+@JsonClass(generateAdapter = true)
+data class BudgetReportResponse(
+    val budget: BudgetResponse,
+    val lines: List<BudgetReportLine>
+)

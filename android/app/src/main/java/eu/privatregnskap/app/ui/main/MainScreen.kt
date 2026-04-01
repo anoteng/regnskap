@@ -5,6 +5,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.PieChart
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -21,6 +22,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import eu.privatregnskap.app.ui.attachments.AttachmentsScreen
+import eu.privatregnskap.app.ui.budget.BudgetScreen
 import eu.privatregnskap.app.ui.dashboard.DashboardScreen
 import eu.privatregnskap.app.ui.postingqueue.PostingQueueScreen
 import eu.privatregnskap.app.ui.profile.ProfileScreen
@@ -29,10 +31,11 @@ private sealed class Tab(val route: String, val label: String, val icon: ImageVe
     object Dashboard : Tab("tab/dashboard", "Hjem", Icons.Default.Home)
     object PostingQueue : Tab("tab/posting-queue", "Posteringskø", Icons.AutoMirrored.Filled.List)
     object Attachments : Tab("tab/attachments", "Vedlegg", Icons.Default.AttachFile)
+    object Budget : Tab("tab/budget", "Budsjett", Icons.Default.PieChart)
     object Profile : Tab("tab/profile", "Profil", Icons.Default.AccountCircle)
 }
 
-private val tabs = listOf(Tab.Dashboard, Tab.PostingQueue, Tab.Attachments, Tab.Profile)
+private val tabs = listOf(Tab.Dashboard, Tab.PostingQueue, Tab.Attachments, Tab.Budget, Tab.Profile)
 
 @Composable
 fun MainScreen(onLogout: () -> Unit, initialFileUri: Uri? = null) {
@@ -80,6 +83,9 @@ fun MainScreen(onLogout: () -> Unit, initialFileUri: Uri? = null) {
             }
             composable(Tab.Attachments.route) {
                 AttachmentsScreen(innerPadding = padding, initialUri = initialFileUri)
+            }
+            composable(Tab.Budget.route) {
+                BudgetScreen(innerPadding = padding)
             }
             composable(Tab.Profile.route) {
                 ProfileScreen(onLogout = onLogout)
