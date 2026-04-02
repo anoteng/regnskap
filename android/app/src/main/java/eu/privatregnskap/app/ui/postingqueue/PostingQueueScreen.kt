@@ -264,8 +264,8 @@ fun PostingQueueScreen(
                 viewModel.updateTransaction(transaction.id, request)
                 editingTransaction = null
             },
-            onChain = { otherId, autoPost ->
-                viewModel.chainTransactions(transaction.id, otherId, autoPost)
+            onChain = { primaryId, secondaryId, autoPost ->
+                viewModel.chainTransactions(primaryId, secondaryId, autoPost)
                 editingTransaction = null
             }
         )
@@ -440,7 +440,7 @@ private fun EditTransactionSheet(
     otherTransactions: List<TransactionResponse>,
     onDismiss: () -> Unit,
     onSave: (UpdateTransactionRequest) -> Unit,
-    onChain: (Int, Boolean) -> Unit
+    onChain: (primaryId: Int, secondaryId: Int, autoPost: Boolean) -> Unit
 ) {
     var date by remember { mutableStateOf(transaction.transactionDate) }
     var description by remember { mutableStateOf(transaction.description) }
@@ -611,7 +611,9 @@ private fun EditTransactionSheet(
                     val isThisPrimary = suggestion.primaryTransactionId == transaction.id
                     val otherDesc = if (isThisPrimary) suggestion.secondaryDescription else suggestion.primaryDescription
                     val otherAccount = if (isThisPrimary) suggestion.secondaryAccountName else suggestion.primaryAccountName
-                    val otherId = if (isThisPrimary) suggestion.secondaryTransactionId else suggestion.primaryTransactionId
+                    // Always keep API-suggested primary/secondary order regardless of which tx is open
+                    val correctPrimaryId = suggestion.primaryTransactionId
+                    val correctSecondaryId = suggestion.secondaryTransactionId
                     val confidence = if (suggestion.confidence == "HIGH") "Sikker match" else "Sannsynlig match"
 
                     Card(
@@ -645,10 +647,10 @@ private fun EditTransactionSheet(
                                 )
                             }
                             Column(horizontalAlignment = Alignment.End) {
-                                TextButton(onClick = { onChain(otherId, false) }) {
+                                TextButton(onClick = { onChain(correctPrimaryId, correctSecondaryId, false) }) {
                                     Text("Kjed")
                                 }
-                                TextButton(onClick = { onChain(otherId, true) }) {
+                                TextButton(onClick = { onChain(correctPrimaryId, correctSecondaryId, true) }) {
                                     Text("Kjed+poster")
                                 }
                             }
@@ -719,7 +721,8 @@ private fun EditTransactionSheet(
         ChainPickerSheet(
             transactions = otherTransactions,
             onChain = { otherId, autoPost ->
-                onChain(otherId, autoPost)
+                // Manual pick: current transaction is primary, selected is secondary
+                onChain(transaction.id, otherId, autoPost)
                 showChainPicker = false
             },
             onDismiss = { showChainPicker = false }

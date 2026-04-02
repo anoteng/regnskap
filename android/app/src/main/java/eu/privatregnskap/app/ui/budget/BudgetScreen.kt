@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -18,6 +19,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -29,7 +31,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,7 +41,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -144,17 +144,28 @@ fun BudgetScreen(innerPadding: PaddingValues) {
                     val revenueLines = lines.filter { it.accountType == "REVENUE" }
                     val expenseLines = lines.filter { it.accountType == "EXPENSE" }
 
+                    @OptIn(ExperimentalFoundationApi::class)
                     LazyColumn(contentPadding = combinedPadding) {
-                        item { MonthSelector(selectedMonth = selectedMonth, onMonthChange = { selectedMonth = it }) }
-                        item { HorizontalDivider() }
+                        // Sticky header — stays visible while scrolling
+                        stickyHeader(key = "month-selector") {
+                            Surface(
+                                color = MaterialTheme.colorScheme.background,
+                                shadowElevation = 2.dp
+                            ) {
+                                Column {
+                                    MonthSelector(selectedMonth = selectedMonth, onMonthChange = { selectedMonth = it })
+                                    HorizontalDivider()
+                                }
+                            }
+                        }
 
                         if (revenueLines.isNotEmpty()) {
-                            item { SectionHeader("Inntekter") }
-                            items(revenueLines) { line ->
+                            item(key = "header-revenue") { SectionHeader("Inntekter") }
+                            items(revenueLines, key = { "rev-${it.accountId}" }) { line ->
                                 AccountRow(line = line, month = selectedMonth, isRevenue = true)
                                 HorizontalDivider(thickness = 0.5.dp)
                             }
-                            item {
+                            item(key = "sum-revenue") {
                                 SummaryRow(
                                     label = "Sum inntekter",
                                     budget = revenueLines.budgetSum(selectedMonth),
@@ -166,12 +177,12 @@ fun BudgetScreen(innerPadding: PaddingValues) {
                         }
 
                         if (expenseLines.isNotEmpty()) {
-                            item { SectionHeader("Utgifter") }
-                            items(expenseLines) { line ->
+                            item(key = "header-expense") { SectionHeader("Utgifter") }
+                            items(expenseLines, key = { "exp-${it.accountId}" }) { line ->
                                 AccountRow(line = line, month = selectedMonth, isRevenue = false)
                                 HorizontalDivider(thickness = 0.5.dp)
                             }
-                            item {
+                            item(key = "sum-expense") {
                                 SummaryRow(
                                     label = "Sum utgifter",
                                     budget = expenseLines.budgetSum(selectedMonth),
