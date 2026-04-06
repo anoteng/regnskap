@@ -4,13 +4,17 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import eu.privatregnskap.app.data.network.dto.AccountResponse
+import eu.privatregnskap.app.data.network.dto.AttachmentResponse
 import eu.privatregnskap.app.data.network.dto.ChainRequest
 import eu.privatregnskap.app.data.network.dto.ChainSuggestionDto
 import eu.privatregnskap.app.data.network.dto.JournalEntryResponse
 import eu.privatregnskap.app.data.network.dto.TransactionResponse
 import eu.privatregnskap.app.data.network.dto.UpdateTransactionRequest
+import eu.privatregnskap.app.BuildConfig
+import eu.privatregnskap.app.data.repository.AttachmentRepository
 import eu.privatregnskap.app.data.repository.LedgerRepository
 import eu.privatregnskap.app.data.repository.PostingQueueRepository
+import eu.privatregnskap.app.data.repository.TokenRepository
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -29,7 +33,9 @@ data class PostingQueueUiState(
 @HiltViewModel
 class PostingQueueViewModel @Inject constructor(
     private val repository: PostingQueueRepository,
-    private val ledgerRepository: LedgerRepository
+    private val ledgerRepository: LedgerRepository,
+    private val attachmentRepository: AttachmentRepository,
+    private val tokenRepository: TokenRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(PostingQueueUiState())
@@ -40,6 +46,9 @@ class PostingQueueViewModel @Inject constructor(
 
     private val _chainSuggestions = MutableStateFlow<List<ChainSuggestionDto>>(emptyList())
     val chainSuggestions: StateFlow<List<ChainSuggestionDto>> = _chainSuggestions.asStateFlow()
+
+    private val _transactionAttachments = MutableStateFlow<List<AttachmentResponse>>(emptyList())
+    val transactionAttachments: StateFlow<List<AttachmentResponse>> = _transactionAttachments.asStateFlow()
 
     private val _message = MutableSharedFlow<String>()
     val message = _message.asSharedFlow()
@@ -146,6 +155,24 @@ class PostingQueueViewModel @Inject constructor(
                 onFailure = { _message.emit("Feil: ${it.message}") }
             )
         }
+    }
+
+    fun attachmentImageUrl(id: Int): String {
+        val token = tokenRepository.getAccessToken() ?: ""
+        val ledger = currentLedgerId ?: ""
+        return "${BuildConfig.BASE_URL}receipts/$id/image?token=$token&ledger=$ledger"
+    }
+
+    fun loadTransactionAttachments(transactionId: Int) {
+        viewModelScope.launch {
+            _transactionAttachments.value = emptyList()
+            attachmentRepository.getAttachments(currentLedgerId, transactionId = transactionId)
+                .onSuccess { _transactionAttachments.value = it }
+        }
+    }
+
+    fun clearTransactionAttachments() {
+        _transactionAttachments.value = emptyList()
     }
 
     fun chainTransactions(primaryId: Int, secondaryId: Int, autoPost: Boolean) {

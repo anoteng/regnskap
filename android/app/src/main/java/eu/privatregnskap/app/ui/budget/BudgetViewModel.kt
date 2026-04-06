@@ -3,6 +3,7 @@ package eu.privatregnskap.app.ui.budget
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import eu.privatregnskap.app.data.network.dto.BudgetDrilldownEntry
 import eu.privatregnskap.app.data.network.dto.BudgetReportResponse
 import eu.privatregnskap.app.data.network.dto.BudgetResponse
 import eu.privatregnskap.app.data.repository.BudgetRepository
@@ -36,6 +37,9 @@ class BudgetViewModel @Inject constructor(
 
     private val _reportState = MutableStateFlow(BudgetReportUiState())
     val reportState: StateFlow<BudgetReportUiState> = _reportState.asStateFlow()
+
+    private val _drilldown = MutableStateFlow<List<BudgetDrilldownEntry>?>(null)
+    val drilldown: StateFlow<List<BudgetDrilldownEntry>?> = _drilldown.asStateFlow()
 
     private var currentLedgerId: Int? = null
 
@@ -73,5 +77,19 @@ class BudgetViewModel @Inject constructor(
 
     fun clearReport() {
         _reportState.value = BudgetReportUiState()
+        _drilldown.value = null
+    }
+
+    fun loadDrilldown(budgetId: Int, accountId: Int, month: Int?) {
+        viewModelScope.launch {
+            _drilldown.value = null
+            budgetRepository.getDrilldown(currentLedgerId, budgetId, accountId, month).onSuccess {
+                _drilldown.value = it
+            }
+        }
+    }
+
+    fun clearDrilldown() {
+        _drilldown.value = null
     }
 }

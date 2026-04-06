@@ -148,11 +148,23 @@ data class AttachmentResponse(
     val status: String,
     @Json(name = "matched_transaction_id") val matchedTransactionId: Int?,
     @Json(name = "ai_extracted_vendor") val aiExtractedVendor: String?,
+    @Json(name = "ai_extracted_description") val aiExtractedDescription: String?,
     @Json(name = "ai_extracted_amount") val aiExtractedAmount: Double?,
     @Json(name = "ai_extracted_date") val aiExtractedDate: String?,
     @Json(name = "ai_confidence") val aiConfidence: Double?,
     @Json(name = "ai_suggested_account") val aiSuggestedAccount: String?,
     @Json(name = "created_at") val createdAt: String
+)
+
+@JsonClass(generateAdapter = true)
+data class BudgetDrilldownEntry(
+    val id: Int,
+    val date: String,
+    val description: String,
+    val status: String,
+    val debit: Double,
+    val credit: Double,
+    val amount: Double
 )
 
 @JsonClass(generateAdapter = true)

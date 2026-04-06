@@ -2,6 +2,7 @@ package eu.privatregnskap.app.data.network
 
 import eu.privatregnskap.app.data.network.dto.AccountResponse
 import eu.privatregnskap.app.data.network.dto.AttachmentResponse
+import eu.privatregnskap.app.data.network.dto.BudgetDrilldownEntry
 import eu.privatregnskap.app.data.network.dto.BudgetReportResponse
 import eu.privatregnskap.app.data.network.dto.BudgetResponse
 import eu.privatregnskap.app.data.network.dto.ChainRequest
@@ -138,7 +139,8 @@ interface ApiService {
     suspend fun getAttachments(
         @Header("X-Ledger-ID") ledgerId: Int? = null,
         @Query("status") status: String? = null,
-        @Query("q") search: String? = null
+        @Query("q") search: String? = null,
+        @Query("transaction_id") transactionId: Int? = null
     ): List<AttachmentResponse>
 
     @Multipart
@@ -204,6 +206,14 @@ interface ApiService {
         @Header("X-Ledger-ID") ledgerId: Int? = null,
         @Path("id") id: Int
     ): BudgetReportResponse
+
+    @GET("budgets/{id}/drilldown")
+    suspend fun getBudgetDrilldown(
+        @Header("X-Ledger-ID") ledgerId: Int? = null,
+        @Path("id") id: Int,
+        @Query("account_id") accountId: Int,
+        @Query("month") month: Int? = null
+    ): List<BudgetDrilldownEntry>
 
     // ─── Chain suggestions ────────────────────────────────────────────────────
 

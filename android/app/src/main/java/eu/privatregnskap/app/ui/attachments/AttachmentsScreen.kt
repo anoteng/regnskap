@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -48,6 +49,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -79,6 +83,7 @@ import coil.compose.AsyncImage
 import eu.privatregnskap.app.data.network.dto.AttachmentResponse
 import eu.privatregnskap.app.data.network.dto.MatchSuggestionResponse
 import eu.privatregnskap.app.data.network.dto.TransactionResponse
+import eu.privatregnskap.app.ui.common.FullScreenImageViewer
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -100,6 +105,7 @@ fun AttachmentsScreen(
     var deletingId by remember { mutableStateOf<Int?>(null) }
     var matchingAttachmentId by remember { mutableStateOf<Int?>(null) }
     var viewingAttachment by remember { mutableStateOf<AttachmentResponse?>(null) }
+    var fullScreenImageUrl by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         viewModel.message.collect { snackbarHostState.showSnackbar(it) }
@@ -291,7 +297,12 @@ fun AttachmentsScreen(
                                     viewModel.loadTransactionsForMatching()
                                     viewModel.loadSuggestedMatches(attachment.id)
                                 },
-                                onUnmatch = { viewModel.unmatchAttachment(attachment.id) }
+                                onUnmatch = { viewModel.unmatchAttachment(attachment.id) },
+                                onImageTap = { fullScreenImageUrl = viewModel.imageUrl(attachment.id) },
+                                onTagSearch = { tag ->
+                                    searchQuery = tag
+                                    viewModel.loadAll(search = tag)
+                                }
                             )
                         }
                     }
@@ -386,6 +397,11 @@ fun AttachmentsScreen(
             }
         )
     }
+
+    // Full-screen image viewer
+    fullScreenImageUrl?.let { url ->
+        FullScreenImageViewer(imageUrl = url, onDismiss = { fullScreenImageUrl = null })
+    }
 }
 
 // ─── Attachment card ──────────────────────────────────────────────────────────
@@ -398,6 +414,8 @@ private fun AttachmentCard(
     onTap: () -> Unit,
     onDelete: () -> Unit,
     onExtractAI: () -> Unit,
+    onImageTap: () -> Unit,
+    onTagSearch: (String) -> Unit,
     onMatch: () -> Unit,
     onUnmatch: () -> Unit
 ) {
@@ -414,7 +432,7 @@ private fun AttachmentCard(
                 .padding(8.dp),
             verticalAlignment = Alignment.Top
         ) {
-            // Thumbnail
+            // Thumbnail — tappable for full-screen on images
             if (attachment.mimeType == "application/pdf") {
                 Box(
                     modifier = Modifier.size(72.dp),
@@ -431,7 +449,9 @@ private fun AttachmentCard(
                 AsyncImage(
                     model = imageUrl,
                     contentDescription = null,
-                    modifier = Modifier.size(72.dp),
+                    modifier = Modifier
+                        .size(72.dp)
+                        .clickable { onImageTap() },
                     contentScale = ContentScale.Crop
                 )
             }
@@ -457,11 +477,23 @@ private fun AttachmentCard(
 
                 Spacer(Modifier.height(2.dp))
 
-                // Vendor from AI
-                val vendor = attachment.aiExtractedVendor
-                if (vendor != null) {
-                    Text(vendor, style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary)
+                // AI tags — tappable to search
+                val aiTags = listOfNotNull(
+                    attachment.aiExtractedVendor,
+                    attachment.aiExtractedDescription?.takeIf { it != attachment.aiExtractedVendor }
+                )
+                if (aiTags.isNotEmpty()) {
+                    @OptIn(ExperimentalFoundationApi::class)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        aiTags.forEach { tag ->
+                            FilterChip(
+                                selected = false,
+                                onClick = { onTagSearch(tag) },
+                                label = { Text(tag, style = MaterialTheme.typography.labelSmall) },
+                                modifier = Modifier.height(24.dp)
+                            )
+                        }
+                    }
                 }
 
                 // Date

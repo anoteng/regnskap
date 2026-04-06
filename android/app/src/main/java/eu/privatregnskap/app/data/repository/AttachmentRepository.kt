@@ -10,7 +10,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 interface AttachmentRepository {
-    suspend fun getAttachments(ledgerId: Int?, status: String? = null, search: String? = null): Result<List<AttachmentResponse>>
+    suspend fun getAttachments(ledgerId: Int?, status: String? = null, search: String? = null, transactionId: Int? = null): Result<List<AttachmentResponse>>
     suspend fun uploadAttachment(
         ledgerId: Int?,
         fileBytes: ByteArray,
@@ -35,8 +35,8 @@ class AttachmentRepositoryImpl @Inject constructor(
     private val apiService: ApiService
 ) : AttachmentRepository {
 
-    override suspend fun getAttachments(ledgerId: Int?, status: String?, search: String?): Result<List<AttachmentResponse>> =
-        runCatching { apiService.getAttachments(ledgerId, status, search) }
+    override suspend fun getAttachments(ledgerId: Int?, status: String?, search: String?, transactionId: Int?): Result<List<AttachmentResponse>> =
+        runCatching { apiService.getAttachments(ledgerId, status, search, transactionId) }
 
     override suspend fun uploadAttachment(
         ledgerId: Int?,

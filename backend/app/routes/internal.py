@@ -37,13 +37,15 @@ async def sync_all_connections(
     service = BankIntegrationService(db)
 
     for conn in connections:
-        # Skip if synced too recently
+        # Skip only if synced very recently (within 12 hours).
+        # Using a fixed 12h window instead of sync_frequency_hours so that
+        # a manual sync during the day does not prevent the nightly run.
         if conn.last_sync_at:
             last = conn.last_sync_at
             if last.tzinfo is None:
                 last = last.replace(tzinfo=timezone.utc)
             hours_since = (now - last).total_seconds() / 3600
-            if hours_since < conn.sync_frequency_hours:
+            if hours_since < 12:
                 results.append({
                     'connection_id': conn.id,
                     'status': 'skipped',

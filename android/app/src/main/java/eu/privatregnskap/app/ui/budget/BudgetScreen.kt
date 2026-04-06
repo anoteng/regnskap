@@ -7,8 +7,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.lazy.LazyColumn
@@ -25,11 +27,14 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -44,6 +49,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import eu.privatregnskap.app.data.network.dto.BudgetDrilldownEntry
 import eu.privatregnskap.app.data.network.dto.BudgetReportLine
 import eu.privatregnskap.app.data.network.dto.BudgetResponse
 import java.time.LocalDate
@@ -59,10 +65,12 @@ fun BudgetScreen(innerPadding: PaddingValues) {
     val viewModel: BudgetViewModel = hiltViewModel()
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val reportState by viewModel.reportState.collectAsStateWithLifecycle()
+    val drilldown by viewModel.drilldown.collectAsStateWithLifecycle()
 
     var selectedBudget by rememberSaveable { mutableStateOf<BudgetResponse?>(null) }
     // null = year total, 1-12 = specific month
     var selectedMonth by rememberSaveable { mutableStateOf<Int?>(LocalDate.now().monthValue) }
+    var drilldownLine by remember { mutableStateOf<BudgetReportLine?>(null) }
 
     BackHandler(enabled = selectedBudget != null) {
         selectedBudget = null
@@ -143,6 +151,19 @@ fun BudgetScreen(innerPadding: PaddingValues) {
                     val lines = report.lines
                     val revenueLines = lines.filter { it.accountType == "REVENUE" }
                     val expenseLines = lines.filter { it.accountType == "EXPENSE" }
+                    val currentDrilldownLine = drilldownLine
+
+                    if (currentDrilldownLine != null) {
+                        DrilldownSheet(
+                            line = currentDrilldownLine,
+                            month = selectedMonth,
+                            entries = drilldown,
+                            onDismiss = {
+                                drilldownLine = null
+                                viewModel.clearDrilldown()
+                            }
+                        )
+                    }
 
                     @OptIn(ExperimentalFoundationApi::class)
                     LazyColumn(contentPadding = combinedPadding) {
@@ -162,7 +183,10 @@ fun BudgetScreen(innerPadding: PaddingValues) {
                         if (revenueLines.isNotEmpty()) {
                             item(key = "header-revenue") { SectionHeader("Inntekter") }
                             items(revenueLines, key = { "rev-${it.accountId}" }) { line ->
-                                AccountRow(line = line, month = selectedMonth, isRevenue = true)
+                                AccountRow(line = line, month = selectedMonth, isRevenue = true, onClick = {
+                                    drilldownLine = line
+                                    viewModel.loadDrilldown(budget.id, line.accountId, selectedMonth)
+                                })
                                 HorizontalDivider(thickness = 0.5.dp)
                             }
                             item(key = "sum-revenue") {
@@ -179,7 +203,10 @@ fun BudgetScreen(innerPadding: PaddingValues) {
                         if (expenseLines.isNotEmpty()) {
                             item(key = "header-expense") { SectionHeader("Utgifter") }
                             items(expenseLines, key = { "exp-${it.accountId}" }) { line ->
-                                AccountRow(line = line, month = selectedMonth, isRevenue = false)
+                                AccountRow(line = line, month = selectedMonth, isRevenue = false, onClick = {
+                                    drilldownLine = line
+                                    viewModel.loadDrilldown(budget.id, line.accountId, selectedMonth)
+                                })
                                 HorizontalDivider(thickness = 0.5.dp)
                             }
                             item(key = "sum-expense") {
@@ -290,7 +317,7 @@ private fun SectionHeader(title: String) {
 }
 
 @Composable
-private fun AccountRow(line: BudgetReportLine, month: Int?, isRevenue: Boolean) {
+private fun AccountRow(line: BudgetReportLine, month: Int?, isRevenue: Boolean, onClick: () -> Unit) {
     val monthData = if (month != null) line.months.firstOrNull { it.month == month } else null
     val budget = monthData?.budget ?: if (month == null) line.totalBudget else 0.0
     val actual = monthData?.actual ?: if (month == null) line.totalActual else 0.0
@@ -308,6 +335,7 @@ private fun AccountRow(line: BudgetReportLine, month: Int?, isRevenue: Boolean) 
     Row(
         Modifier
             .fillMaxWidth()
+            .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
@@ -391,4 +419,65 @@ private fun AmountCol(amount: Double, modifier: Modifier = Modifier) {
 private fun formatAmount(amount: Double): String {
     if (amount == 0.0) return "0"
     return "%,.0f".format(amount).replace(',', ' ')
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DrilldownSheet(
+    line: BudgetReportLine,
+    month: Int?,
+    entries: List<BudgetDrilldownEntry>?,
+    onDismiss: () -> Unit
+) {
+    val monthLabel = if (month == null) "Hele året" else MONTH_NAMES[month - 1]
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 32.dp)
+        ) {
+            Text(
+                "${line.accountNumber} ${line.accountName}",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                monthLabel,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(12.dp))
+            when {
+                entries == null -> Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(120.dp),
+                    contentAlignment = Alignment.Center
+                ) { CircularProgressIndicator() }
+                entries.isEmpty() -> Text(
+                    "Ingen transaksjoner",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                else -> entries.forEach { entry ->
+                    ListItem(
+                        headlineContent = { Text(entry.description, style = MaterialTheme.typography.bodyMedium) },
+                        supportingContent = { Text(entry.date, style = MaterialTheme.typography.bodySmall) },
+                        trailingContent = {
+                            Text(
+                                formatAmount(entry.amount) + " kr",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    )
+                    HorizontalDivider(thickness = 0.5.dp)
+                }
+            }
+        }
+    }
 }

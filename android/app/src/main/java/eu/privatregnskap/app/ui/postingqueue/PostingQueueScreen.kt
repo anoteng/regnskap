@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Link
@@ -250,7 +251,13 @@ fun PostingQueueScreen(
     }
 
     // Edit bottom sheet
+    val transactionAttachments by viewModel.transactionAttachments.collectAsStateWithLifecycle()
+    var fullScreenImageUrl by remember { mutableStateOf<String?>(null) }
+
     editingTransaction?.let { transaction ->
+        LaunchedEffect(transaction.id) {
+            viewModel.loadTransactionAttachments(transaction.id)
+        }
         val txSuggestions = chainSuggestions.filter {
             it.primaryTransactionId == transaction.id || it.secondaryTransactionId == transaction.id
         }
@@ -259,7 +266,9 @@ fun PostingQueueScreen(
             accounts = accounts,
             chainSuggestions = txSuggestions,
             otherTransactions = uiState.transactions.filter { it.id != transaction.id },
-            onDismiss = { editingTransaction = null },
+            attachments = transactionAttachments,
+            attachmentImageUrl = viewModel::attachmentImageUrl,
+            onDismiss = { editingTransaction = null; viewModel.clearTransactionAttachments() },
             onSave = { request ->
                 viewModel.updateTransaction(transaction.id, request)
                 editingTransaction = null
@@ -267,7 +276,15 @@ fun PostingQueueScreen(
             onChain = { primaryId, secondaryId, autoPost ->
                 viewModel.chainTransactions(primaryId, secondaryId, autoPost)
                 editingTransaction = null
-            }
+            },
+            onImageTap = { url -> fullScreenImageUrl = url }
+        )
+    }
+
+    fullScreenImageUrl?.let { url ->
+        eu.privatregnskap.app.ui.common.FullScreenImageViewer(
+            imageUrl = url,
+            onDismiss = { fullScreenImageUrl = null }
         )
     }
 }
@@ -438,9 +455,12 @@ private fun EditTransactionSheet(
     accounts: List<AccountResponse>,
     chainSuggestions: List<ChainSuggestionDto>,
     otherTransactions: List<TransactionResponse>,
+    attachments: List<eu.privatregnskap.app.data.network.dto.AttachmentResponse>,
+    attachmentImageUrl: (Int) -> String,
     onDismiss: () -> Unit,
     onSave: (UpdateTransactionRequest) -> Unit,
-    onChain: (primaryId: Int, secondaryId: Int, autoPost: Boolean) -> Unit
+    onChain: (primaryId: Int, secondaryId: Int, autoPost: Boolean) -> Unit,
+    onImageTap: (String) -> Unit
 ) {
     var date by remember { mutableStateOf(transaction.transactionDate) }
     var description by remember { mutableStateOf(transaction.description) }
@@ -597,6 +617,60 @@ private fun EditTransactionSheet(
                 Icon(Icons.Default.Add, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
                 Text("Legg til postering")
+            }
+
+            // Attachments section
+            if (attachments.isNotEmpty()) {
+                Spacer(Modifier.height(16.dp))
+                Text("Vedlegg", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(8.dp))
+                attachments.forEach { att ->
+                    val isPdf = att.mimeType == "application/pdf"
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                    ) {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            if (isPdf) {
+                                Icon(
+                                    Icons.Default.Description,
+                                    contentDescription = "PDF",
+                                    modifier = Modifier.size(48.dp),
+                                    tint = MaterialTheme.colorScheme.error
+                                )
+                            } else {
+                                coil.compose.AsyncImage(
+                                    model = attachmentImageUrl(att.id),
+                                    contentDescription = null,
+                                    modifier = Modifier
+                                        .size(56.dp)
+                                        .clickable { onImageTap(attachmentImageUrl(att.id)) },
+                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                                )
+                            }
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    att.originalFilename ?: if (att.attachmentType == "INVOICE") "Faktura" else "Kvittering",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                val vendor = att.aiExtractedVendor
+                                if (vendor != null) Text(vendor, style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary)
+                                val amount = att.amount ?: att.aiExtractedAmount
+                                if (amount != null) Text("%.2f kr".format(amount), style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                }
             }
 
             Spacer(Modifier.height(16.dp))

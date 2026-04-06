@@ -235,14 +235,18 @@ async def upload_receipt(
 def get_receipts(
     status: Optional[str] = None,
     q: Optional[str] = None,
+    transaction_id: Optional[int] = None,
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
     current_ledger: Ledger = Depends(get_current_ledger)
 ):
-    """Get all receipts in queue, with optional text search"""
+    """Get all receipts in queue, with optional text search and transaction filter"""
     query = db.query(Receipt).filter(Receipt.ledger_id == current_ledger.id)
+
+    if transaction_id is not None:
+        query = query.filter(Receipt.matched_transaction_id == transaction_id)
 
     if status:
         try:
