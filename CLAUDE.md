@@ -2,8 +2,8 @@
 
 ## Important System Constraints
 
-- **NO SUDO COMMANDS**: You do not have sudo permissions. Never attempt to run `sudo systemctl restart regnskap` or any other sudo commands.
-- **Backend restart**: Always ask the user to restart the backend manually when changes are made to Python files
+- **Sudo**: Passwordless sudo is configured for `systemctl restart/status` and `journalctl -u` on services: `regnskap`, `ringlog`, `exerlog`. Only these exact forms work — no extra flags.
+- **Backend restart**: Run `sudo systemctl restart regnskap` directly after Python changes
 - **MySQL password**: The password in .env is URL-encoded, so remember to decode it when using it in shell commands
 
 ## Project Context
@@ -119,17 +119,21 @@ mysql -u regnskap -p regnskap
 
 ### Service Management
 ```bash
-# Ask user to run these - you don't have sudo:
+# These work directly (passwordless sudo configured):
 sudo systemctl restart regnskap
+sudo systemctl restart ringlog
+sudo systemctl restart exerlog
+sudo journalctl -u regnskap
 sudo journalctl -u regnskap -f
+# Same pattern for ringlog and exerlog
 ```
 
 ## Development Workflow
 
 1. Make changes to Python files
-2. **Ask user to restart backend** (`sudo systemctl restart regnskap`)
+2. Run `sudo systemctl restart regnskap` directly
 3. Test in browser at https://privatregnskap.eu
-4. Check logs: `sudo journalctl -u regnskap -f` (ask user if needed)
+4. Check logs with `sudo journalctl -u regnskap -f` directly
 
 ## Known Issues
 

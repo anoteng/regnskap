@@ -81,6 +81,7 @@ import eu.privatregnskap.app.data.network.dto.ChainSuggestionDto
 import eu.privatregnskap.app.data.network.dto.JournalEntryUpdate
 import eu.privatregnskap.app.data.network.dto.TransactionResponse
 import eu.privatregnskap.app.data.network.dto.UpdateTransactionRequest
+import eu.privatregnskap.app.ui.common.FullScreenImageViewer
 
 // ─── State for journal entry editing ──────────────────────────────────────────
 
@@ -282,7 +283,7 @@ fun PostingQueueScreen(
     }
 
     fullScreenImageUrl?.let { url ->
-        eu.privatregnskap.app.ui.common.FullScreenImageViewer(
+        FullScreenImageViewer(
             imageUrl = url,
             onDismiss = { fullScreenImageUrl = null }
         )
