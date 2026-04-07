@@ -345,6 +345,7 @@ fun AttachmentsScreen(
             onDelete = { viewingAttachment = null; deletingId = att.id },
             onOpenExternal = { viewModel.openAttachmentExternal(att, context) },
             onCropEdit = { viewingAttachment = null; viewModel.prepareCropEdit(att, context) },
+            onImageTap = { fullScreenImageUrl = viewModel.imageUrl(att.id) },
             onDismiss = { viewingAttachment = null }
         )
     }
@@ -609,6 +610,7 @@ private fun ReceiptDetailSheet(
     onDelete: () -> Unit,
     onOpenExternal: () -> Unit,
     onCropEdit: () -> Unit,
+    onImageTap: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val isInvoice = attachment.attachmentType == "INVOICE"
@@ -652,7 +654,8 @@ private fun ReceiptDetailSheet(
                     contentDescription = "Vedlegg",
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(300.dp),
+                        .height(300.dp)
+                        .clickable { onImageTap() },
                     contentScale = ContentScale.Fit
                 )
             }
