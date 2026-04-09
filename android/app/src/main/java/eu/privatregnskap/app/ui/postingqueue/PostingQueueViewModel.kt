@@ -50,6 +50,10 @@ class PostingQueueViewModel @Inject constructor(
     private val _transactionAttachments = MutableStateFlow<List<AttachmentResponse>>(emptyList())
     val transactionAttachments: StateFlow<List<AttachmentResponse>> = _transactionAttachments.asStateFlow()
 
+    // Pending receipts shown as suggestions when no receipt is matched yet
+    private val _attachmentSuggestions = MutableStateFlow<List<AttachmentResponse>>(emptyList())
+    val attachmentSuggestions: StateFlow<List<AttachmentResponse>> = _attachmentSuggestions.asStateFlow()
+
     private val _message = MutableSharedFlow<String>()
     val message = _message.asSharedFlow()
 
@@ -166,13 +170,21 @@ class PostingQueueViewModel @Inject constructor(
     fun loadTransactionAttachments(transactionId: Int) {
         viewModelScope.launch {
             _transactionAttachments.value = emptyList()
+            _attachmentSuggestions.value = emptyList()
             attachmentRepository.getAttachments(currentLedgerId, transactionId = transactionId)
-                .onSuccess { _transactionAttachments.value = it }
+                .onSuccess { matched ->
+                    _transactionAttachments.value = matched
+                    if (matched.isEmpty()) {
+                        attachmentRepository.getAttachments(currentLedgerId, status = "PENDING")
+                            .onSuccess { _attachmentSuggestions.value = it }
+                    }
+                }
         }
     }
 
     fun clearTransactionAttachments() {
         _transactionAttachments.value = emptyList()
+        _attachmentSuggestions.value = emptyList()
     }
 
     fun chainTransactions(primaryId: Int, secondaryId: Int, autoPost: Boolean) {

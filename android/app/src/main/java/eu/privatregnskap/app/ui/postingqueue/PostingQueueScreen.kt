@@ -253,6 +253,7 @@ fun PostingQueueScreen(
 
     // Edit bottom sheet
     val transactionAttachments by viewModel.transactionAttachments.collectAsStateWithLifecycle()
+    val attachmentSuggestions by viewModel.attachmentSuggestions.collectAsStateWithLifecycle()
     var fullScreenImageUrl by remember { mutableStateOf<String?>(null) }
 
     editingTransaction?.let { transaction ->
@@ -268,6 +269,7 @@ fun PostingQueueScreen(
             chainSuggestions = txSuggestions,
             otherTransactions = uiState.transactions.filter { it.id != transaction.id },
             attachments = transactionAttachments,
+            attachmentSuggestions = attachmentSuggestions,
             attachmentImageUrl = viewModel::attachmentImageUrl,
             onDismiss = { editingTransaction = null; viewModel.clearTransactionAttachments() },
             onSave = { request ->
@@ -457,6 +459,7 @@ private fun EditTransactionSheet(
     chainSuggestions: List<ChainSuggestionDto>,
     otherTransactions: List<TransactionResponse>,
     attachments: List<eu.privatregnskap.app.data.network.dto.AttachmentResponse>,
+    attachmentSuggestions: List<eu.privatregnskap.app.data.network.dto.AttachmentResponse>,
     attachmentImageUrl: (Int) -> String,
     onDismiss: () -> Unit,
     onSave: (UpdateTransactionRequest) -> Unit,
@@ -620,12 +623,18 @@ private fun EditTransactionSheet(
                 Text("Legg til postering")
             }
 
-            // Attachments section
-            if (attachments.isNotEmpty()) {
+            // Attachments section — matched first, then suggestions if nothing matched
+            val displayAttachments = attachments
+            val displaySuggestions = if (attachments.isEmpty()) attachmentSuggestions else emptyList()
+
+            if (displayAttachments.isNotEmpty() || displaySuggestions.isNotEmpty()) {
                 Spacer(Modifier.height(16.dp))
-                Text("Vedlegg", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    if (displayAttachments.isNotEmpty()) "Vedlegg" else "Mulige vedlegg",
+                    style = MaterialTheme.typography.titleMedium
+                )
                 Spacer(Modifier.height(8.dp))
-                attachments.forEach { att ->
+                (displayAttachments + displaySuggestions).forEach { att ->
                     val isPdf = att.mimeType == "application/pdf"
                     Card(
                         modifier = Modifier.fillMaxWidth(),
