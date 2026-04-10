@@ -70,23 +70,17 @@ fun LoginScreen(
     var password by remember { mutableStateOf("") }
     var passkeyError by remember { mutableStateOf<String?>(null) }
     var biometricError by remember { mutableStateOf<String?>(null) }
-    var pendingNavigate by remember { mutableStateOf(false) }
 
     val biometricLoginEnabled = remember { viewModel.isBiometricLoginEnabled() }
 
-    // Mark pending navigation on successful login
     LaunchedEffect(loginState) {
         if (loginState is UiState.Success) {
             viewModel.resetLoginState()
-            pendingNavigate = true
-        }
-    }
-
-    // Navigate only after biometric offer is resolved (or not needed)
-    LaunchedEffect(pendingNavigate, showBiometricOffer) {
-        if (pendingNavigate && !showBiometricOffer) {
-            pendingNavigate = false
-            onLoginSuccess()
+            // Read value directly — set synchronously before loginState=Success in ViewModel
+            if (!viewModel.showBiometricOffer.value) {
+                onLoginSuccess()
+            }
+            // Otherwise the biometric offer dialog handles navigation
         }
     }
 
@@ -115,7 +109,10 @@ fun LoginScreen(
     // Biometric offer dialog shown after password/passkey login
     if (showBiometricOffer) {
         AlertDialog(
-            onDismissRequest = { viewModel.dismissBiometricOffer() },
+            onDismissRequest = {
+                viewModel.dismissBiometricOffer()
+                onLoginSuccess()
+            },
             title = { Text("Logg inn med biometri?") },
             text = { Text("Neste gang kan du logge inn raskere med fingeravtrykk eller ansiktsgjenkjenning.") },
             confirmButton = {
@@ -128,17 +125,21 @@ fun LoginScreen(
                             cipher = cipher,
                             onSuccess = { result ->
                                 result.cryptoObject?.cipher?.let { viewModel.enableBiometricWithCipher(it) }
-                                    ?: viewModel.dismissBiometricOffer()
+                                onLoginSuccess()
                             },
-                            onError = { viewModel.dismissBiometricOffer() }
+                            onError = { /* biometri-prompt avbrutt — dialog forblir åpen */ }
                         )
                     } catch (e: Exception) {
                         viewModel.dismissBiometricOffer()
+                        onLoginSuccess()
                     }
                 }) { Text("Ja, aktiver") }
             },
             dismissButton = {
-                TextButton(onClick = { viewModel.dismissBiometricOffer() }) { Text("Ikke nå") }
+                TextButton(onClick = {
+                    viewModel.dismissBiometricOffer()
+                    onLoginSuccess()
+                }) { Text("Ikke nå") }
             }
         )
     }
