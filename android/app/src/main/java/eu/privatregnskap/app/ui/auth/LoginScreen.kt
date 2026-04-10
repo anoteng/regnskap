@@ -1,5 +1,6 @@
 package eu.privatregnskap.app.ui.auth
 
+import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -12,6 +13,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -44,6 +46,8 @@ import androidx.credentials.GetCredentialRequest
 import androidx.credentials.GetPublicKeyCredentialOption
 import androidx.credentials.PublicKeyCredential
 import androidx.credentials.exceptions.GetCredentialException
+import androidx.core.content.ContextCompat
+import androidx.fragment.app.FragmentActivity
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
@@ -56,17 +60,32 @@ fun LoginScreen(
 ) {
     val loginState by viewModel.loginState.collectAsStateWithLifecycle()
     val passkeyOptionsState by viewModel.passkeyOptionsState.collectAsStateWithLifecycle()
+    val showBiometricOffer by viewModel.showBiometricOffer.collectAsStateWithLifecycle()
     val focusManager = LocalFocusManager.current
     val context = LocalContext.current
+    val activity = context as FragmentActivity
     val scope = rememberCoroutineScope()
 
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var passkeyError by remember { mutableStateOf<String?>(null) }
+    var biometricError by remember { mutableStateOf<String?>(null) }
+    var pendingNavigate by remember { mutableStateOf(false) }
 
+    val biometricLoginEnabled = remember { viewModel.isBiometricLoginEnabled() }
+
+    // Mark pending navigation on successful login
     LaunchedEffect(loginState) {
         if (loginState is UiState.Success) {
             viewModel.resetLoginState()
+            pendingNavigate = true
+        }
+    }
+
+    // Navigate only after biometric offer is resolved (or not needed)
+    LaunchedEffect(pendingNavigate, showBiometricOffer) {
+        if (pendingNavigate && !showBiometricOffer) {
+            pendingNavigate = false
             onLoginSuccess()
         }
     }
@@ -91,6 +110,37 @@ fun LoginScreen(
                 }
             }
         }
+    }
+
+    // Biometric offer dialog shown after password/passkey login
+    if (showBiometricOffer) {
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissBiometricOffer() },
+            title = { Text("Logg inn med biometri?") },
+            text = { Text("Neste gang kan du logge inn raskere med fingeravtrykk eller ansiktsgjenkjenning.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    try {
+                        val cipher = viewModel.getCipherForEncryption()
+                        showBiometricPrompt(
+                            activity = activity,
+                            title = "Bekreft biometri",
+                            cipher = cipher,
+                            onSuccess = { result ->
+                                result.cryptoObject?.cipher?.let { viewModel.enableBiometricWithCipher(it) }
+                                    ?: viewModel.dismissBiometricOffer()
+                            },
+                            onError = { viewModel.dismissBiometricOffer() }
+                        )
+                    } catch (e: Exception) {
+                        viewModel.dismissBiometricOffer()
+                    }
+                }) { Text("Ja, aktiver") }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.dismissBiometricOffer() }) { Text("Ikke nå") }
+            }
+        )
     }
 
     Column(
@@ -174,6 +224,14 @@ fun LoginScreen(
                 style = MaterialTheme.typography.bodySmall
             )
         }
+        if (biometricError != null) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = biometricError!!,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
 
         Spacer(modifier = Modifier.height(8.dp))
         TextButton(
@@ -220,5 +278,58 @@ fun LoginScreen(
                 Text("Logg inn med passkey")
             }
         }
+
+        if (biometricLoginEnabled) {
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = {
+                    biometricError = null
+                    val cipher = viewModel.getCipherForDecryption()
+                    if (cipher == null) {
+                        biometricError = "Biometri-data er ikke lenger gyldig. Logg inn med passord."
+                        return@OutlinedButton
+                    }
+                    showBiometricPrompt(
+                        activity = activity,
+                        title = "Logg inn",
+                        cipher = cipher,
+                        onSuccess = { result ->
+                            result.cryptoObject?.cipher?.let { viewModel.loginWithBiometricCipher(it) }
+                        },
+                        onError = { biometricError = it }
+                    )
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = loginState !is UiState.Loading
+            ) {
+                Text("Logg inn med biometri")
+            }
+        }
     }
+}
+
+private fun showBiometricPrompt(
+    activity: FragmentActivity,
+    title: String,
+    cipher: javax.crypto.Cipher,
+    onSuccess: (BiometricPrompt.AuthenticationResult) -> Unit,
+    onError: (String) -> Unit
+) {
+    val executor = ContextCompat.getMainExecutor(activity)
+    val prompt = BiometricPrompt(activity, executor, object : BiometricPrompt.AuthenticationCallback() {
+        override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+            onSuccess(result)
+        }
+        override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+            if (errorCode != BiometricPrompt.ERROR_USER_CANCELED &&
+                errorCode != BiometricPrompt.ERROR_NEGATIVE_BUTTON) {
+                onError(errString.toString())
+            }
+        }
+    })
+    val promptInfo = BiometricPrompt.PromptInfo.Builder()
+        .setTitle(title)
+        .setNegativeButtonText("Avbryt")
+        .build()
+    prompt.authenticate(promptInfo, BiometricPrompt.CryptoObject(cipher))
 }

@@ -21,8 +21,8 @@ android {
         applicationId = "eu.privatregnskap.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 30
-        versionName = "2.0.0"
+        versionCode = 31
+        versionName = "2.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -141,6 +141,10 @@ dependencies {
     // Credentials (passkeys)
     implementation(libs.credentials)
     implementation(libs.credentials.play.services.auth)
+
+    // Biometric + AppCompat
+    implementation(libs.biometric)
+    implementation(libs.appcompat)
 
     // Testing
     testImplementation("junit:junit:4.13.2")

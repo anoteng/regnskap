@@ -4,10 +4,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import eu.privatregnskap.app.data.repository.AuthRepository
+import eu.privatregnskap.app.data.repository.BiometricRepository
+import eu.privatregnskap.app.data.repository.TokenRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import javax.crypto.Cipher
 import javax.inject.Inject
 
 sealed class UiState<out T> {
@@ -19,7 +22,9 @@ sealed class UiState<out T> {
 
 @HiltViewModel
 class AuthViewModel @Inject constructor(
-    private val authRepository: AuthRepository
+    private val authRepository: AuthRepository,
+    private val biometricRepository: BiometricRepository,
+    private val tokenRepository: TokenRepository
 ) : ViewModel() {
 
     val isLoggedIn = authRepository.isLoggedIn
@@ -35,10 +40,22 @@ class AuthViewModel @Inject constructor(
     private val _forgotPasswordState = MutableStateFlow<UiState<Unit>>(UiState.Idle)
     val forgotPasswordState: StateFlow<UiState<Unit>> = _forgotPasswordState.asStateFlow()
 
+    private val _showBiometricOffer = MutableStateFlow(false)
+    val showBiometricOffer: StateFlow<Boolean> = _showBiometricOffer.asStateFlow()
+
+    fun isBiometricAvailable() = biometricRepository.isBiometricAvailable()
+    fun isBiometricLoginEnabled() = biometricRepository.isBiometricLoginEnabled()
+
+    fun getCipherForEncryption(): Cipher = biometricRepository.getCipherForEncryption()
+    fun getCipherForDecryption(): Cipher? = biometricRepository.getCipherForDecryption()
+
     fun login(email: String, password: String) {
         viewModelScope.launch {
             _loginState.value = UiState.Loading
             val result = authRepository.login(email.trim(), password)
+            if (result.isSuccess) {
+                checkBiometricOffer()
+            }
             _loginState.value = result.fold(
                 onSuccess = { UiState.Success(Unit) },
                 onFailure = { UiState.Error(it.message ?: "Innlogging feilet") }
@@ -64,11 +81,39 @@ class AuthViewModel @Inject constructor(
         viewModelScope.launch {
             _loginState.value = UiState.Loading
             val result = authRepository.verifyPasskeyLogin(credentialJson, optionsJson)
+            if (result.isSuccess) {
+                checkBiometricOffer()
+            }
             _loginState.value = result.fold(
                 onSuccess = { UiState.Success(Unit) },
                 onFailure = { UiState.Error(it.message ?: "Passkey-innlogging feilet") }
             )
         }
+    }
+
+    fun loginWithBiometricCipher(cipher: Cipher) {
+        val token = biometricRepository.decryptToken(cipher) ?: run {
+            _loginState.value = UiState.Error("Kunne ikke dekryptere biometri-data")
+            return
+        }
+        viewModelScope.launch {
+            _loginState.value = UiState.Loading
+            val result = authRepository.refreshLogin(token)
+            _loginState.value = result.fold(
+                onSuccess = { UiState.Success(Unit) },
+                onFailure = { UiState.Error(it.message ?: "Biometri-innlogging feilet") }
+            )
+        }
+    }
+
+    fun enableBiometricWithCipher(cipher: Cipher) {
+        val refreshToken = tokenRepository.getRefreshToken() ?: return
+        biometricRepository.encryptAndStore(refreshToken, cipher)
+        _showBiometricOffer.value = false
+    }
+
+    fun dismissBiometricOffer() {
+        _showBiometricOffer.value = false
     }
 
     fun requestPasswordReset(email: String) {
@@ -89,4 +134,10 @@ class AuthViewModel @Inject constructor(
     fun resetLoginState() { _loginState.value = UiState.Idle }
     fun resetPasskeyOptionsState() { _passkeyOptionsState.value = UiState.Idle }
     fun resetForgotPasswordState() { _forgotPasswordState.value = UiState.Idle }
+
+    private fun checkBiometricOffer() {
+        if (biometricRepository.isBiometricAvailable() && !biometricRepository.isBiometricLoginEnabled()) {
+            _showBiometricOffer.value = true
+        }
+    }
 }

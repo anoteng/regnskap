@@ -14,6 +14,7 @@ interface AuthRepository {
     suspend fun login(email: String, password: String): Result<UserResponse>
     suspend fun loginWithPasskey(optionsJson: String): Result<String>
     suspend fun verifyPasskeyLogin(credentialJson: String, optionsJson: String): Result<Unit>
+    suspend fun refreshLogin(refreshToken: String): Result<Unit>
     suspend fun requestPasswordReset(email: String): Result<Unit>
     suspend fun logout()
 }
@@ -62,6 +63,17 @@ class AuthRepositoryImpl @Inject constructor(
             requestObj.put("assertion", assertionObj)
             val body = requestObj.toString().toRequestBody("application/json".toMediaType())
             val token = apiService.passkeyLoginComplete(body)
+            tokenRepository.saveAccessToken(token.accessToken)
+            token.refreshToken?.let { tokenRepository.saveRefreshToken(it) }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun refreshLogin(refreshToken: String): Result<Unit> {
+        return try {
+            val token = apiService.refresh(eu.privatregnskap.app.data.network.dto.RefreshRequest(refreshToken))
             tokenRepository.saveAccessToken(token.accessToken)
             token.refreshToken?.let { tokenRepository.saveRefreshToken(it) }
             Result.success(Unit)

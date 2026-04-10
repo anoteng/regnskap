@@ -12,6 +12,8 @@ import eu.privatregnskap.app.data.repository.LedgerRepository
 import eu.privatregnskap.app.data.repository.LedgerRepositoryImpl
 import eu.privatregnskap.app.data.repository.AttachmentRepository
 import eu.privatregnskap.app.data.repository.AttachmentRepositoryImpl
+import eu.privatregnskap.app.data.repository.BiometricRepository
+import eu.privatregnskap.app.data.repository.BiometricRepositoryImpl
 import eu.privatregnskap.app.data.repository.BudgetRepository
 import eu.privatregnskap.app.data.repository.BudgetRepositoryImpl
 import eu.privatregnskap.app.data.repository.PasskeyRepository
@@ -57,4 +59,8 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindBudgetRepository(impl: BudgetRepositoryImpl): BudgetRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindBiometricRepository(impl: BiometricRepositoryImpl): BiometricRepository
 }
