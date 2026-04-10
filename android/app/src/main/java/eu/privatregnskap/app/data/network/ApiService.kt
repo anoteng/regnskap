@@ -57,6 +57,9 @@ interface ApiService {
     @GET("auth/me")
     suspend fun getMe(): UserResponse
 
+    @POST("auth/biometric-token")
+    suspend fun createBiometricToken(): eu.privatregnskap.app.data.network.dto.BiometricTokenResponse
+
     // ─── Passkeys ─────────────────────────────────────────────────────────────
 
     @POST("auth/passkey/login/begin")

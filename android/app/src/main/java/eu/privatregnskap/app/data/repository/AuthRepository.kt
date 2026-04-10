@@ -15,6 +15,7 @@ interface AuthRepository {
     suspend fun loginWithPasskey(optionsJson: String): Result<String>
     suspend fun verifyPasskeyLogin(credentialJson: String, optionsJson: String): Result<Unit>
     suspend fun refreshLogin(refreshToken: String): Result<Unit>
+    suspend fun createBiometricToken(): Result<String>
     suspend fun requestPasswordReset(email: String): Result<Unit>
     suspend fun logout()
 }
@@ -66,6 +67,15 @@ class AuthRepositoryImpl @Inject constructor(
             tokenRepository.saveAccessToken(token.accessToken)
             token.refreshToken?.let { tokenRepository.saveRefreshToken(it) }
             Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun createBiometricToken(): Result<String> {
+        return try {
+            val response = apiService.createBiometricToken()
+            Result.success(response.refreshToken)
         } catch (e: Exception) {
             Result.failure(e)
         }

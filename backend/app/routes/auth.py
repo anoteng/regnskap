@@ -66,6 +66,16 @@ def refresh_token(request: RefreshRequest, db: Session = Depends(get_db)):
     return {"access_token": access_token, "token_type": "bearer", "refresh_token": request.refresh_token}
 
 
+@router.post("/biometric-token")
+async def create_biometric_token(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Create a dedicated refresh token for biometric login. Not revoked on regular logout."""
+    refresh_token = create_refresh_token(db, current_user.id)
+    return {"refresh_token": refresh_token}
+
+
 @router.post("/logout")
 def logout(request: RefreshRequest, db: Session = Depends(get_db)):
     """Invalidate refresh token."""

@@ -111,17 +111,29 @@ class AuthViewModel @Inject constructor(
                     _loginState.value = UiState.Idle
                     _navigateToHome.value = true
                 }
-                else -> _loginState.value =
-                    UiState.Error(result.exceptionOrNull()?.message ?: "Biometri-innlogging feilet")
+                else -> {
+                    // Token is invalid (likely revoked) — clear biometric data so user can re-enable
+                    biometricRepository.clearBiometricData()
+                    _loginState.value = UiState.Error(
+                        "Biometri-token er ikke lenger gyldig. Logg inn med passord for å reaktivere."
+                    )
+                }
             }
         }
     }
 
     fun enableBiometricWithCipher(cipher: Cipher) {
-        val refreshToken = tokenRepository.getRefreshToken() ?: return
-        biometricRepository.encryptAndStore(refreshToken, cipher)
-        _showBiometricOffer.value = false
-        _navigateToHome.value = true
+        viewModelScope.launch {
+            // Create a dedicated token separate from the session token,
+            // so regular logout doesn't invalidate biometric login.
+            val dedicatedToken = authRepository.createBiometricToken().getOrElse {
+                // Fallback to session token if request fails
+                tokenRepository.getRefreshToken() ?: return@launch
+            }
+            biometricRepository.encryptAndStore(dedicatedToken, cipher)
+            _showBiometricOffer.value = false
+            _navigateToHome.value = true
+        }
     }
 
     fun dismissBiometricOffer() {
@@ -131,6 +143,7 @@ class AuthViewModel @Inject constructor(
     }
 
     fun disableBiometricLogin() {
+        // Clear local biometric data — dedicated token expires server-side after 30 days
         biometricRepository.clearBiometricData()
     }
 

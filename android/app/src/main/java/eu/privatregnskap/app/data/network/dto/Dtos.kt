@@ -60,6 +60,11 @@ data class TransactionResponse(
 )
 
 @JsonClass(generateAdapter = true)
+data class BiometricTokenResponse(
+    @Json(name = "refresh_token") val refreshToken: String
+)
+
+@JsonClass(generateAdapter = true)
 data class PasskeyLoginBeginRequest(
     val email: String?
 )
