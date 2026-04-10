@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta
 from typing import Optional
+import hashlib
+import secrets
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status, Header, Query
@@ -8,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from backend.config import get_settings
 from backend.database import get_db
-from .models import User, Ledger, LedgerMember, LedgerRole
+from .models import User, Ledger, LedgerMember, LedgerRole, RefreshToken
 from .schemas import TokenData
 
 settings = get_settings()
@@ -34,6 +36,44 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, settings.secret_key, algorithm=settings.algorithm)
     return encoded_jwt
+
+
+def create_refresh_token(db: Session, user_id: int) -> str:
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+    expires_at = datetime.utcnow() + timedelta(days=settings.refresh_token_expire_days)
+    db_token = RefreshToken(user_id=user_id, token_hash=token_hash, expires_at=expires_at)
+    db.add(db_token)
+    db.commit()
+    return raw_token
+
+
+def verify_refresh_token(db: Session, raw_token: str) -> Optional[User]:
+    """Verify refresh token, extend expiry (sliding window), return user."""
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+    db_token = db.query(RefreshToken).filter(
+        RefreshToken.token_hash == token_hash,
+        RefreshToken.expires_at > datetime.utcnow()
+    ).first()
+    if not db_token:
+        return None
+    user = db.query(User).filter(User.id == db_token.user_id, User.is_active == True).first()
+    if not user:
+        db.delete(db_token)
+        db.commit()
+        return None
+    # Extend expiry (sliding window)
+    db_token.expires_at = datetime.utcnow() + timedelta(days=settings.refresh_token_expire_days)
+    db_token.last_used_at = datetime.utcnow()
+    db.commit()
+    return user
+
+
+def revoke_refresh_token(db: Session, raw_token: str) -> bool:
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+    deleted = db.query(RefreshToken).filter(RefreshToken.token_hash == token_hash).delete()
+    db.commit()
+    return deleted > 0
 
 
 def authenticate_user(db: Session, email: str, password: str):

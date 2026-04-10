@@ -8,8 +8,8 @@ from backend.database import get_db
 from backend.config import get_settings
 from backend.email import send_password_reset_email
 from ..models import User, PasswordResetToken, WebAuthnCredential, UserSubscription, SubscriptionStatus, Ledger, LedgerMember, LedgerRole
-from ..schemas import Token, UserCreate, User as UserSchema, PasswordResetRequest, PasswordResetComplete, PasswordResetResponse
-from ..auth import authenticate_user, create_access_token, get_password_hash, get_current_active_user
+from ..schemas import Token, RefreshRequest, UserCreate, User as UserSchema, PasswordResetRequest, PasswordResetComplete, PasswordResetResponse
+from ..auth import authenticate_user, create_access_token, create_refresh_token, verify_refresh_token, revoke_refresh_token, get_password_hash, get_current_active_user
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 settings = get_settings()
@@ -46,19 +46,31 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     access_token = create_access_token(
         data={"sub": user.email}, expires_delta=access_token_expires
     )
-    return {"access_token": access_token, "token_type": "bearer"}
+    refresh_token = create_refresh_token(db, user.id)
+    return {"access_token": access_token, "token_type": "bearer", "refresh_token": refresh_token}
 
 
 @router.post("/refresh", response_model=Token)
-async def refresh_token(
-    current_user: User = Depends(get_current_active_user)
-):
-    """Refresh access token for currently authenticated user"""
-    access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
+def refresh_token(request: RefreshRequest, db: Session = Depends(get_db)):
+    """Issue new access token using a valid refresh token."""
+    user = verify_refresh_token(db, request.refresh_token)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Ugyldig eller utløpt refresh token"
+        )
     access_token = create_access_token(
-        data={"sub": current_user.email}, expires_delta=access_token_expires
+        data={"sub": user.email},
+        expires_delta=timedelta(minutes=settings.access_token_expire_minutes)
     )
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {"access_token": access_token, "token_type": "bearer", "refresh_token": request.refresh_token}
+
+
+@router.post("/logout")
+def logout(request: RefreshRequest, db: Session = Depends(get_db)):
+    """Invalidate refresh token."""
+    revoke_refresh_token(db, request.refresh_token)
+    return {"message": "Logget ut"}
 
 
 @router.post("/password-reset/request", response_model=PasswordResetResponse)

@@ -30,6 +30,7 @@ class AuthRepositoryImpl @Inject constructor(
         return try {
             val token = apiService.login(email, password)
             tokenRepository.saveAccessToken(token.accessToken)
+            token.refreshToken?.let { tokenRepository.saveRefreshToken(it) }
             val user = apiService.getMe()
             Result.success(user)
         } catch (e: Exception) {
@@ -62,6 +63,7 @@ class AuthRepositoryImpl @Inject constructor(
             val body = requestObj.toString().toRequestBody("application/json".toMediaType())
             val token = apiService.passkeyLoginComplete(body)
             tokenRepository.saveAccessToken(token.accessToken)
+            token.refreshToken?.let { tokenRepository.saveRefreshToken(it) }
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -80,6 +82,12 @@ class AuthRepositoryImpl @Inject constructor(
     }
 
     override suspend fun logout() {
+        val refreshToken = tokenRepository.getRefreshToken()
+        if (refreshToken != null) {
+            try {
+                apiService.logout(eu.privatregnskap.app.data.network.dto.RefreshRequest(refreshToken))
+            } catch (_: Exception) {}
+        }
         tokenRepository.clearTokens()
     }
 }

@@ -14,6 +14,8 @@ interface TokenRepository {
     val isLoggedInFlow: Flow<Boolean>
     fun saveAccessToken(accessToken: String)
     fun getAccessToken(): String?
+    fun saveRefreshToken(refreshToken: String)
+    fun getRefreshToken(): String?
     fun clearTokens()
     fun isLoggedIn(): Boolean
 }
@@ -47,8 +49,14 @@ class TokenRepositoryImpl @Inject constructor(
 
     override fun getAccessToken(): String? = prefs.getString(KEY_ACCESS_TOKEN, null)
 
+    override fun saveRefreshToken(refreshToken: String) {
+        prefs.edit().putString(KEY_REFRESH_TOKEN, refreshToken).apply()
+    }
+
+    override fun getRefreshToken(): String? = prefs.getString(KEY_REFRESH_TOKEN, null)
+
     override fun clearTokens() {
-        prefs.edit().remove(KEY_ACCESS_TOKEN).apply()
+        prefs.edit().remove(KEY_ACCESS_TOKEN).remove(KEY_REFRESH_TOKEN).apply()
         _isLoggedInFlow.value = false
     }
 
@@ -56,5 +64,6 @@ class TokenRepositoryImpl @Inject constructor(
 
     companion object {
         private const val KEY_ACCESS_TOKEN = "access_token"
+        private const val KEY_REFRESH_TOKEN = "refresh_token"
     }
 }

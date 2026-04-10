@@ -46,7 +46,10 @@ interface ApiService {
     ): TokenResponse
 
     @POST("auth/refresh")
-    suspend fun refresh(): TokenResponse
+    suspend fun refresh(@Body request: eu.privatregnskap.app.data.network.dto.RefreshRequest): TokenResponse
+
+    @POST("auth/logout")
+    suspend fun logout(@Body request: eu.privatregnskap.app.data.network.dto.RefreshRequest)
 
     @POST("auth/password-reset/request")
     suspend fun requestPasswordReset(@Body request: PasswordResetRequest): Map<String, String>

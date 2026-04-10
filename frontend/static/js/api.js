@@ -3,6 +3,7 @@ const API_BASE = '/api';
 class API {
     constructor() {
         this.token = localStorage.getItem('token');
+        this.refreshToken = localStorage.getItem('refreshToken');
         this.currentLedgerId = localStorage.getItem('currentLedgerId');
         this.tokenRefreshInterval = null;
 
@@ -16,33 +17,32 @@ class API {
         return API_BASE;
     }
 
-    setToken(token) {
+    setToken(token, refreshToken = null) {
         this.token = token;
         localStorage.setItem('token', token);
-
-        // Start token refresh when token is set
+        if (refreshToken) {
+            this.refreshToken = refreshToken;
+            localStorage.setItem('refreshToken', refreshToken);
+        }
         this.startTokenRefresh();
     }
 
     clearToken() {
         this.token = null;
+        this.refreshToken = null;
         localStorage.removeItem('token');
-
-        // Stop token refresh when logged out
+        localStorage.removeItem('refreshToken');
         this.stopTokenRefresh();
     }
 
     startTokenRefresh() {
-        // Stop any existing interval
         this.stopTokenRefresh();
-
-        // Refresh token every 4 hours (token expires after 8 hours)
+        // Refresh access token every 50 minutes (expires after 60 min)
         this.tokenRefreshInterval = setInterval(() => {
-            this.refreshToken().catch(err => {
+            this.doRefreshToken().catch(err => {
                 console.error('Token refresh failed:', err);
-                // If refresh fails, user will be logged out on next API call
             });
-        }, 4 * 60 * 60 * 1000); // 4 hours in milliseconds
+        }, 50 * 60 * 1000);
     }
 
     stopTokenRefresh() {
@@ -52,29 +52,23 @@ class API {
         }
     }
 
-    async refreshToken() {
-        if (!this.token) {
-            return;
-        }
-
+    async doRefreshToken() {
+        if (!this.refreshToken) return false;
         try {
             const response = await fetch(`${API_BASE}/auth/refresh`, {
                 method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${this.token}`,
-                    'Content-Type': 'application/json'
-                }
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ refresh_token: this.refreshToken })
             });
-
             if (response.ok) {
                 const data = await response.json();
-                this.setToken(data.access_token);
-                console.log('Token refreshed successfully');
-            } else {
-                console.error('Token refresh failed:', response.status);
+                this.setToken(data.access_token, data.refresh_token || this.refreshToken);
+                return true;
             }
+            return false;
         } catch (error) {
             console.error('Token refresh error:', error);
+            return false;
         }
     }
 
@@ -116,12 +110,19 @@ class API {
             headers,
         };
 
-        const response = await fetch(`${API_BASE}${endpoint}`, config);
+        let response = await fetch(`${API_BASE}${endpoint}`, config);
 
-        if (response.status === 401) {
-            this.clearToken();
-            window.location.reload();
-            throw new Error('Unauthorized');
+        if (response.status === 401 && !endpoint.includes('/auth/refresh')) {
+            const refreshed = await this.doRefreshToken();
+            if (refreshed) {
+                headers['Authorization'] = `Bearer ${this.token}`;
+                response = await fetch(`${API_BASE}${endpoint}`, { ...config, headers });
+            }
+            if (!refreshed || response.status === 401) {
+                this.clearToken();
+                window.location.reload();
+                throw new Error('Unauthorized');
+            }
         }
 
         if (!response.ok) {
@@ -174,7 +175,7 @@ class API {
         }
 
         const data = await response.json();
-        this.setToken(data.access_token);
+        this.setToken(data.access_token, data.refresh_token);
         return data;
     }
 

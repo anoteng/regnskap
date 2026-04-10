@@ -56,7 +56,7 @@ class Auth {
                 try {
                     const email = document.getElementById('login-email').value;
                     const result = await this.passkeyManager.login(email || null);
-                    api.setToken(result.access_token);
+                    api.setToken(result.access_token, result.refresh_token);
                     window.location.reload();
                 } catch (error) {
                     console.error('Passkey login error:', error);

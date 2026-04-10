@@ -6,7 +6,8 @@ class Settings(BaseSettings):
     database_url: str
     secret_key: str
     algorithm: str = "HS256"
-    access_token_expire_minutes: int = 10080  # 7 days
+    access_token_expire_minutes: int = 60  # 1 hour
+    refresh_token_expire_days: int = 30
 
     # WebAuthn / Passkey settings
     rp_id: str = "localhost"

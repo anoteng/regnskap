@@ -32,7 +32,7 @@ from ..schemas import (
     WebAuthnCredential as WebAuthnCredentialSchema,
     Token,
 )
-from ..auth import get_current_user, create_access_token
+from ..auth import get_current_user, create_access_token, create_refresh_token
 
 router = APIRouter(prefix="/auth/passkey", tags=["passkey"])
 settings = get_settings()
@@ -315,9 +315,11 @@ async def complete_login(
             expires_delta=access_token_expires
         )
 
+        refresh_token = create_refresh_token(db, user.id)
         return {
             'access_token': access_token,
-            'token_type': 'bearer'
+            'token_type': 'bearer',
+            'refresh_token': refresh_token
         }
 
     except Exception as e:
