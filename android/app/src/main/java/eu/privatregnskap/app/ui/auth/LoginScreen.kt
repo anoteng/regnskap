@@ -46,9 +46,9 @@ import androidx.credentials.GetCredentialRequest
 import androidx.credentials.GetPublicKeyCredentialOption
 import androidx.credentials.PublicKeyCredential
 import androidx.credentials.exceptions.GetCredentialException
-import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.hilt.navigation.compose.hiltViewModel
+import eu.privatregnskap.app.ui.common.showBiometricPrompt
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 
@@ -309,28 +309,3 @@ fun LoginScreen(
     }
 }
 
-private fun showBiometricPrompt(
-    activity: FragmentActivity,
-    title: String,
-    cipher: javax.crypto.Cipher,
-    onSuccess: (BiometricPrompt.AuthenticationResult) -> Unit,
-    onError: (String) -> Unit
-) {
-    val executor = ContextCompat.getMainExecutor(activity)
-    val prompt = BiometricPrompt(activity, executor, object : BiometricPrompt.AuthenticationCallback() {
-        override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-            onSuccess(result)
-        }
-        override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-            if (errorCode != BiometricPrompt.ERROR_USER_CANCELED &&
-                errorCode != BiometricPrompt.ERROR_NEGATIVE_BUTTON) {
-                onError(errString.toString())
-            }
-        }
-    })
-    val promptInfo = BiometricPrompt.PromptInfo.Builder()
-        .setTitle(title)
-        .setNegativeButtonText("Avbryt")
-        .build()
-    prompt.authenticate(promptInfo, BiometricPrompt.CryptoObject(cipher))
-}

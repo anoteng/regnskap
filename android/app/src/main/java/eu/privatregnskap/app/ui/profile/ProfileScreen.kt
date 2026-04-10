@@ -17,12 +17,16 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.biometric.BiometricPrompt
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Notifications
+import androidx.fragment.app.FragmentActivity
+import eu.privatregnskap.app.ui.common.showBiometricPrompt
 import androidx.compose.material3.Switch
 import androidx.core.content.ContextCompat
 import androidx.compose.material3.AlertDialog
@@ -78,7 +82,11 @@ fun ProfileScreen(
 
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
+    val activity = context as FragmentActivity
     val scope = rememberCoroutineScope()
+
+    val biometricAvailable = remember { authViewModel.isBiometricAvailable() }
+    var biometricEnabled by remember { mutableStateOf(authViewModel.isBiometricLoginEnabled()) }
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -159,6 +167,45 @@ fun ProfileScreen(
                                         }
                                     } else {
                                         profileViewModel.setQueueNotificationsEnabled(false)
+                                    }
+                                }
+                            )
+                        }
+                    )
+                }
+                if (biometricAvailable) {
+                    ListItem(
+                        headlineContent = { Text("Innlogging med biometri") },
+                        supportingContent = { Text("Bruk fingeravtrykk eller ansiktsgjenkjenning") },
+                        leadingContent = {
+                            Icon(Icons.Default.Fingerprint, contentDescription = null)
+                        },
+                        trailingContent = {
+                            Switch(
+                                checked = biometricEnabled,
+                                onCheckedChange = { enable ->
+                                    if (enable) {
+                                        try {
+                                            val cipher = authViewModel.getCipherForEncryption()
+                                            showBiometricPrompt(
+                                                activity = activity,
+                                                title = "Aktiver biometri-innlogging",
+                                                cipher = cipher,
+                                                onSuccess = { result ->
+                                                    result.cryptoObject?.cipher?.let {
+                                                        authViewModel.enableBiometricWithCipher(it)
+                                                        biometricEnabled = true
+                                                    }
+                                                }
+                                            )
+                                        } catch (e: Exception) {
+                                            scope.launch {
+                                                snackbarHostState.showSnackbar("Kunne ikke aktivere biometri: ${e.message}")
+                                            }
+                                        }
+                                    } else {
+                                        authViewModel.disableBiometricLogin()
+                                        biometricEnabled = false
                                     }
                                 }
                             )

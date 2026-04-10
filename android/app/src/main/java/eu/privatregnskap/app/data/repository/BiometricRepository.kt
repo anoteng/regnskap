@@ -18,6 +18,8 @@ import javax.inject.Singleton
 interface BiometricRepository {
     fun isBiometricAvailable(): Boolean
     fun isBiometricLoginEnabled(): Boolean
+    fun hasDeclinedOffer(): Boolean
+    fun setDeclinedOffer()
     fun getCipherForEncryption(): Cipher
     fun getCipherForDecryption(): Cipher?
     fun encryptAndStore(refreshToken: String, cipher: Cipher)
@@ -42,6 +44,13 @@ class BiometricRepositoryImpl @Inject constructor(
 
     override fun isBiometricLoginEnabled(): Boolean =
         prefs.getString(KEY_ENCRYPTED_TOKEN, null) != null
+
+    override fun hasDeclinedOffer(): Boolean =
+        prefs.getBoolean(KEY_DECLINED, false)
+
+    override fun setDeclinedOffer() {
+        prefs.edit().putBoolean(KEY_DECLINED, true).apply()
+    }
 
     override fun getCipherForEncryption(): Cipher {
         val key = getOrCreateKey()
@@ -113,6 +122,7 @@ class BiometricRepositoryImpl @Inject constructor(
         private const val KEY_ALIAS = "biometric_refresh_key"
         private const val KEY_ENCRYPTED_TOKEN = "bio_enc_token"
         private const val KEY_IV = "bio_iv"
+        private const val KEY_DECLINED = "bio_offer_declined"
         private const val TRANSFORMATION = "AES/GCM/NoPadding"
     }
 }

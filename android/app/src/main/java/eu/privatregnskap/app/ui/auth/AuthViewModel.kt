@@ -113,7 +113,12 @@ class AuthViewModel @Inject constructor(
     }
 
     fun dismissBiometricOffer() {
+        biometricRepository.setDeclinedOffer()
         _showBiometricOffer.value = false
+    }
+
+    fun disableBiometricLogin() {
+        biometricRepository.clearBiometricData()
     }
 
     fun requestPasswordReset(email: String) {
@@ -136,7 +141,10 @@ class AuthViewModel @Inject constructor(
     fun resetForgotPasswordState() { _forgotPasswordState.value = UiState.Idle }
 
     private fun checkBiometricOffer() {
-        if (biometricRepository.isBiometricAvailable() && !biometricRepository.isBiometricLoginEnabled()) {
+        if (biometricRepository.isBiometricAvailable()
+            && !biometricRepository.isBiometricLoginEnabled()
+            && !biometricRepository.hasDeclinedOffer()
+        ) {
             _showBiometricOffer.value = true
         }
     }
