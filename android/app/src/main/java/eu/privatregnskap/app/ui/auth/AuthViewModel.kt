@@ -29,6 +29,7 @@ class AuthViewModel @Inject constructor(
 
     val isLoggedIn = authRepository.isLoggedIn
 
+    // Only used for Loading/Error display — never emits Success
     private val _loginState = MutableStateFlow<UiState<Unit>>(UiState.Idle)
     val loginState: StateFlow<UiState<Unit>> = _loginState.asStateFlow()
 
@@ -40,12 +41,16 @@ class AuthViewModel @Inject constructor(
     private val _forgotPasswordState = MutableStateFlow<UiState<Unit>>(UiState.Idle)
     val forgotPasswordState: StateFlow<UiState<Unit>> = _forgotPasswordState.asStateFlow()
 
+    // Navigation trigger — set to true when app should navigate to home
+    private val _navigateToHome = MutableStateFlow(false)
+    val navigateToHome: StateFlow<Boolean> = _navigateToHome.asStateFlow()
+
+    // Biometric offer shown after first successful login on eligible devices
     private val _showBiometricOffer = MutableStateFlow(false)
     val showBiometricOffer: StateFlow<Boolean> = _showBiometricOffer.asStateFlow()
 
     fun isBiometricAvailable() = biometricRepository.isBiometricAvailable()
     fun isBiometricLoginEnabled() = biometricRepository.isBiometricLoginEnabled()
-
     fun getCipherForEncryption(): Cipher = biometricRepository.getCipherForEncryption()
     fun getCipherForDecryption(): Cipher? = biometricRepository.getCipherForDecryption()
 
@@ -53,13 +58,14 @@ class AuthViewModel @Inject constructor(
         viewModelScope.launch {
             _loginState.value = UiState.Loading
             val result = authRepository.login(email.trim(), password)
-            if (result.isSuccess) {
-                checkBiometricOffer()
+            when {
+                result.isSuccess -> {
+                    _loginState.value = UiState.Idle
+                    handlePostLogin()
+                }
+                else -> _loginState.value =
+                    UiState.Error(result.exceptionOrNull()?.message ?: "Innlogging feilet")
             }
-            _loginState.value = result.fold(
-                onSuccess = { UiState.Success(Unit) },
-                onFailure = { UiState.Error(it.message ?: "Innlogging feilet") }
-            )
         }
     }
 
@@ -81,13 +87,14 @@ class AuthViewModel @Inject constructor(
         viewModelScope.launch {
             _loginState.value = UiState.Loading
             val result = authRepository.verifyPasskeyLogin(credentialJson, optionsJson)
-            if (result.isSuccess) {
-                checkBiometricOffer()
+            when {
+                result.isSuccess -> {
+                    _loginState.value = UiState.Idle
+                    handlePostLogin()
+                }
+                else -> _loginState.value =
+                    UiState.Error(result.exceptionOrNull()?.message ?: "Passkey-innlogging feilet")
             }
-            _loginState.value = result.fold(
-                onSuccess = { UiState.Success(Unit) },
-                onFailure = { UiState.Error(it.message ?: "Passkey-innlogging feilet") }
-            )
         }
     }
 
@@ -99,10 +106,14 @@ class AuthViewModel @Inject constructor(
         viewModelScope.launch {
             _loginState.value = UiState.Loading
             val result = authRepository.refreshLogin(token)
-            _loginState.value = result.fold(
-                onSuccess = { UiState.Success(Unit) },
-                onFailure = { UiState.Error(it.message ?: "Biometri-innlogging feilet") }
-            )
+            when {
+                result.isSuccess -> {
+                    _loginState.value = UiState.Idle
+                    _navigateToHome.value = true
+                }
+                else -> _loginState.value =
+                    UiState.Error(result.exceptionOrNull()?.message ?: "Biometri-innlogging feilet")
+            }
         }
     }
 
@@ -110,11 +121,13 @@ class AuthViewModel @Inject constructor(
         val refreshToken = tokenRepository.getRefreshToken() ?: return
         biometricRepository.encryptAndStore(refreshToken, cipher)
         _showBiometricOffer.value = false
+        _navigateToHome.value = true
     }
 
     fun dismissBiometricOffer() {
         biometricRepository.setDeclinedOffer()
         _showBiometricOffer.value = false
+        _navigateToHome.value = true
     }
 
     fun disableBiometricLogin() {
@@ -136,16 +149,18 @@ class AuthViewModel @Inject constructor(
         viewModelScope.launch { authRepository.logout() }
     }
 
-    fun resetLoginState() { _loginState.value = UiState.Idle }
+    fun resetNavigation() { _navigateToHome.value = false }
     fun resetPasskeyOptionsState() { _passkeyOptionsState.value = UiState.Idle }
     fun resetForgotPasswordState() { _forgotPasswordState.value = UiState.Idle }
 
-    private fun checkBiometricOffer() {
-        if (biometricRepository.isBiometricAvailable()
+    private fun handlePostLogin() {
+        val shouldOffer = biometricRepository.isBiometricAvailable()
             && !biometricRepository.isBiometricLoginEnabled()
             && !biometricRepository.hasDeclinedOffer()
-        ) {
+        if (shouldOffer) {
             _showBiometricOffer.value = true
+        } else {
+            _navigateToHome.value = true
         }
     }
 }

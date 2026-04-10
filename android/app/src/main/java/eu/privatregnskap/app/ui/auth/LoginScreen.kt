@@ -48,8 +48,8 @@ import androidx.credentials.PublicKeyCredential
 import androidx.credentials.exceptions.GetCredentialException
 import androidx.fragment.app.FragmentActivity
 import androidx.hilt.navigation.compose.hiltViewModel
-import eu.privatregnskap.app.ui.common.showBiometricPrompt
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import eu.privatregnskap.app.ui.common.showBiometricPrompt
 import kotlinx.coroutines.launch
 
 @Composable
@@ -60,6 +60,7 @@ fun LoginScreen(
 ) {
     val loginState by viewModel.loginState.collectAsStateWithLifecycle()
     val passkeyOptionsState by viewModel.passkeyOptionsState.collectAsStateWithLifecycle()
+    val navigateToHome by viewModel.navigateToHome.collectAsStateWithLifecycle()
     val showBiometricOffer by viewModel.showBiometricOffer.collectAsStateWithLifecycle()
     val focusManager = LocalFocusManager.current
     val context = LocalContext.current
@@ -73,14 +74,11 @@ fun LoginScreen(
 
     val biometricLoginEnabled = remember { viewModel.isBiometricLoginEnabled() }
 
-    LaunchedEffect(loginState) {
-        if (loginState is UiState.Success) {
-            viewModel.resetLoginState()
-            // Read value directly — set synchronously before loginState=Success in ViewModel
-            if (!viewModel.showBiometricOffer.value) {
-                onLoginSuccess()
-            }
-            // Otherwise the biometric offer dialog handles navigation
+    // Navigation is driven exclusively by navigateToHome — no timing issues with other states
+    LaunchedEffect(navigateToHome) {
+        if (navigateToHome) {
+            viewModel.resetNavigation()
+            onLoginSuccess()
         }
     }
 
@@ -106,13 +104,11 @@ fun LoginScreen(
         }
     }
 
-    // Biometric offer dialog shown after password/passkey login
+    // Biometric offer dialog — dismissBiometricOffer() and enableBiometricWithCipher()
+    // both set navigateToHome = true, so navigation is handled automatically
     if (showBiometricOffer) {
         AlertDialog(
-            onDismissRequest = {
-                viewModel.dismissBiometricOffer()
-                onLoginSuccess()
-            },
+            onDismissRequest = { viewModel.dismissBiometricOffer() },
             title = { Text("Logg inn med biometri?") },
             text = { Text("Neste gang kan du logge inn raskere med fingeravtrykk eller ansiktsgjenkjenning.") },
             confirmButton = {
@@ -125,21 +121,16 @@ fun LoginScreen(
                             cipher = cipher,
                             onSuccess = { result ->
                                 result.cryptoObject?.cipher?.let { viewModel.enableBiometricWithCipher(it) }
-                                onLoginSuccess()
-                            },
-                            onError = { /* biometri-prompt avbrutt — dialog forblir åpen */ }
+                            }
+                            // onError: biometri-prompt avbrutt — dialog forblir åpen
                         )
                     } catch (e: Exception) {
                         viewModel.dismissBiometricOffer()
-                        onLoginSuccess()
                     }
                 }) { Text("Ja, aktiver") }
             },
             dismissButton = {
-                TextButton(onClick = {
-                    viewModel.dismissBiometricOffer()
-                    onLoginSuccess()
-                }) { Text("Ikke nå") }
+                TextButton(onClick = { viewModel.dismissBiometricOffer() }) { Text("Ikke nå") }
             }
         )
     }
@@ -308,4 +299,3 @@ fun LoginScreen(
         }
     }
 }
-
