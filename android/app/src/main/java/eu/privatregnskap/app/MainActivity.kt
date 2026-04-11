@@ -11,9 +11,13 @@ import androidx.core.content.IntentCompat
 import dagger.hilt.android.AndroidEntryPoint
 import eu.privatregnskap.app.ui.navigation.PrivatregnskapNavGraph
 import eu.privatregnskap.app.ui.theme.PrivatregnskapTheme
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : AppCompatActivity() {
+
+    @Inject lateinit var appLockManager: AppLockManager
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -30,6 +34,18 @@ class MainActivity : AppCompatActivity() {
                     PrivatregnskapNavGraph(initialFileUri = sharedUri)
                 }
             }
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        appLockManager.onAppForeground()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        if (!isChangingConfigurations) {
+            appLockManager.onAppBackground()
         }
     }
 }
