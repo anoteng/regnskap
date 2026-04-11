@@ -48,4 +48,11 @@ class MainActivity : AppCompatActivity() {
             appLockManager.onAppBackground()
         }
     }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        if (!isChangingConfigurations) {
+            appLockManager.onAppClosed()
+        }
+    }
 }

@@ -16,21 +16,29 @@ class AppLockManager @Inject constructor(
     private val TIMEOUT_MS = 5 * 60 * 1000L
     private val KEY = "last_backgrounded_at"
 
-    // Compute initial state at construction so cold-start lock is immediate
-    private val _isLocked = MutableStateFlow(computeIsLocked())
+    // In-memory: false on cold start or after explicit close, true once app has been running
+    private var appWasRunning = false
+
+    private val _isLocked = MutableStateFlow(false)
     val isLocked: StateFlow<Boolean> = _isLocked.asStateFlow()
 
-    private fun computeIsLocked(): Boolean {
-        val last = prefs.getLong(KEY, 0L)
-        return last > 0L && System.currentTimeMillis() - last > TIMEOUT_MS
+    fun onAppForeground() {
+        if (!appWasRunning || isTimedOut()) _isLocked.value = true
+        appWasRunning = true
     }
 
     fun onAppBackground() {
         prefs.edit().putLong(KEY, System.currentTimeMillis()).apply()
     }
 
-    fun onAppForeground() {
-        if (computeIsLocked()) _isLocked.value = true
+    fun onAppClosed() {
+        // onStop (and thus onAppBackground) already ran before this, so timestamp is saved
+        appWasRunning = false
+    }
+
+    private fun isTimedOut(): Boolean {
+        val last = prefs.getLong(KEY, 0L)
+        return last > 0L && System.currentTimeMillis() - last > TIMEOUT_MS
     }
 
     fun unlock() {

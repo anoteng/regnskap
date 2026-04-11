@@ -3,6 +3,7 @@ package eu.privatregnskap.app.ui.auth
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import eu.privatregnskap.app.AppLockManager
 import eu.privatregnskap.app.data.repository.AuthRepository
 import eu.privatregnskap.app.data.repository.BiometricRepository
 import eu.privatregnskap.app.data.repository.TokenRepository
@@ -24,7 +25,8 @@ sealed class UiState<out T> {
 class AuthViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     private val biometricRepository: BiometricRepository,
-    private val tokenRepository: TokenRepository
+    private val tokenRepository: TokenRepository,
+    private val appLockManager: AppLockManager
 ) : ViewModel() {
 
     val isLoggedIn = authRepository.isLoggedIn
@@ -108,6 +110,7 @@ class AuthViewModel @Inject constructor(
             val result = authRepository.refreshLogin(token)
             when {
                 result.isSuccess -> {
+                    appLockManager.unlock()
                     _loginState.value = UiState.Idle
                     _navigateToHome.value = true
                 }
@@ -167,6 +170,9 @@ class AuthViewModel @Inject constructor(
     fun resetForgotPasswordState() { _forgotPasswordState.value = UiState.Idle }
 
     private fun handlePostLogin() {
+        // Unlock immediately so the lock navigation in NavGraph doesn't interrupt
+        // the biometric offer dialog or any other post-login UI
+        appLockManager.unlock()
         val shouldOffer = biometricRepository.isBiometricAvailable()
             && !biometricRepository.isBiometricLoginEnabled()
             && !biometricRepository.hasDeclinedOffer()
