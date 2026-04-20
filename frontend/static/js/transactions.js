@@ -245,9 +245,26 @@ class TransactionsManager {
         }
     }
 
+    getAccountHint(accountType) {
+        switch (accountType) {
+            case 'ASSET':
+                return 'Debet: inn / øker &nbsp;·&nbsp; Kredit: ut / reduserer';
+            case 'LIABILITY':
+                return 'Debet: reduserer gjeld &nbsp;·&nbsp; Kredit: øker gjeld';
+            case 'EQUITY':
+                return 'Debet: reduserer egenkapital &nbsp;·&nbsp; Kredit: øker egenkapital';
+            case 'REVENUE':
+                return 'Debet: reduserer inntekt &nbsp;·&nbsp; Kredit: øker inntekt (normalt)';
+            case 'EXPENSE':
+                return 'Debet: øker kostnad (normalt) &nbsp;·&nbsp; Kredit: reduserer kostnad';
+            default:
+                return '';
+        }
+    }
+
     showNewTransactionModal() {
         const accountOptions = this.accounts
-            .map(a => `<option value="${a.id}">${a.account_number} - ${a.account_name}</option>`)
+            .map(a => `<option value="${a.id}" data-type="${a.account_type}">${a.account_number} - ${a.account_name}</option>`)
             .join('');
 
         const content = `
@@ -271,6 +288,7 @@ class TransactionsManager {
                         <div class="form-group">
                             <label>Konto</label>
                             <select class="entry-account" required>${accountOptions}</select>
+                            <small class="account-hint"></small>
                         </div>
                         <div class="form-group">
                             <label>Debet</label>
@@ -288,13 +306,40 @@ class TransactionsManager {
                 </div>
 
                 <button type="button" id="add-entry-btn" class="btn btn-secondary">Legg til postering</button>
-                <div style="margin-top: 1rem;">
+                <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
                     <button type="submit" class="btn btn-primary">Lagre transaksjon</button>
+                    <button type="button" id="save-draft-btn" class="btn btn-secondary">Lagre utkast</button>
                 </div>
             </form>
         `;
 
         showModal('Ny transaksjon', content);
+
+        document.getElementById('save-draft-btn').addEventListener('click', async () => {
+            await this.createTransaction(true);
+        });
+
+        const updateHints = (container) => {
+            container.querySelectorAll('.entry-account').forEach(select => {
+                const hint = select.parentElement.querySelector('.account-hint');
+                if (!hint) return;
+                const selected = select.options[select.selectedIndex];
+                const type = selected ? selected.dataset.type : '';
+                hint.innerHTML = this.getAccountHint(type);
+            });
+        };
+
+        document.getElementById('journal-entries').addEventListener('change', e => {
+            if (e.target.classList.contains('entry-account')) {
+                const hint = e.target.parentElement.querySelector('.account-hint');
+                if (hint) {
+                    const selected = e.target.options[e.target.selectedIndex];
+                    hint.innerHTML = this.getAccountHint(selected ? selected.dataset.type : '');
+                }
+            }
+        });
+
+        updateHints(document.getElementById('journal-entries'));
 
         document.getElementById('add-entry-btn').addEventListener('click', () => {
             const container = document.getElementById('journal-entries');
@@ -303,6 +348,7 @@ class TransactionsManager {
             entry.innerHTML = `
                 <div class="form-group">
                     <select class="entry-account" required>${accountOptions}</select>
+                    <small class="account-hint"></small>
                 </div>
                 <div class="form-group">
                     <input type="number" step="0.01" class="entry-debit" value="0">
@@ -316,6 +362,7 @@ class TransactionsManager {
                 <button type="button" class="btn btn-danger" onclick="this.parentElement.remove()">X</button>
             `;
             container.appendChild(entry);
+            updateHints(entry);
         });
 
         document.getElementById('new-transaction-form').addEventListener('submit', async (e) => {
@@ -324,7 +371,7 @@ class TransactionsManager {
         });
     }
 
-    async createTransaction() {
+    async createTransaction(draft = false) {
         const date = document.getElementById('trans-date').value;
         const description = document.getElementById('trans-description').value;
         const reference = document.getElementById('trans-reference').value;
@@ -336,12 +383,14 @@ class TransactionsManager {
             description: entry.querySelector('.entry-description').value,
         }));
 
-        const totalDebit = entries.reduce((sum, e) => sum + e.debit, 0);
-        const totalCredit = entries.reduce((sum, e) => sum + e.credit, 0);
+        if (!draft) {
+            const totalDebit = entries.reduce((sum, e) => sum + e.debit, 0);
+            const totalCredit = entries.reduce((sum, e) => sum + e.credit, 0);
 
-        if (Math.abs(totalDebit - totalCredit) > 0.01) {
-            showError(`Transaksjonen er ikke balansert. Debet: ${totalDebit}, Kredit: ${totalCredit}`);
-            return;
+            if (Math.abs(totalDebit - totalCredit) > 0.01) {
+                showError(`Transaksjonen er ikke balansert. Debet: ${totalDebit}, Kredit: ${totalCredit}`);
+                return;
+            }
         }
 
         try {
@@ -351,10 +400,11 @@ class TransactionsManager {
                 reference: reference || null,
                 journal_entries: entries,
                 category_ids: [],
+                status: draft ? 'DRAFT' : 'POSTED',
             });
 
             closeModal();
-            showSuccess('Transaksjon opprettet');
+            showSuccess(draft ? 'Utkast lagret' : 'Transaksjon opprettet');
             await this.loadTransactions();
         } catch (error) {
             showError(error.message);

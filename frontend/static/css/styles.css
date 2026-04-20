@@ -780,7 +780,7 @@ body {
 /* Edit transaction form */
 .journal-entry {
     display: grid;
-    grid-template-columns: 2fr 1fr 1fr auto;
+    grid-template-columns: 2fr minmax(120px, 1fr) minmax(120px, 1fr) auto;
     gap: 1rem;
     margin-bottom: 1rem;
     align-items: end;
@@ -807,6 +807,14 @@ body {
     display: block;
     margin-top: 0.25rem;
     font-size: 0.875rem;
+}
+
+.account-hint {
+    display: block;
+    margin-top: 0.2rem;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    font-style: italic;
 }
 
 /* Status badges */

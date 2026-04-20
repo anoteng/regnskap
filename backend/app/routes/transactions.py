@@ -52,21 +52,27 @@ def create_transaction(
     current_user: User = Depends(get_current_active_user),
     current_ledger: Ledger = Depends(get_current_ledger)
 ):
-    total_debit = sum(entry.debit for entry in transaction.journal_entries)
-    total_credit = sum(entry.credit for entry in transaction.journal_entries)
+    requested_status = (transaction.status or 'POSTED').upper()
+    if requested_status not in ('DRAFT', 'POSTED'):
+        requested_status = 'POSTED'
 
-    if abs(total_debit - total_credit) > Decimal("0.01"):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Transaction not balanced. Debit: {total_debit}, Credit: {total_credit}"
-        )
+    if requested_status == 'POSTED':
+        total_debit = sum(entry.debit for entry in transaction.journal_entries)
+        total_credit = sum(entry.credit for entry in transaction.journal_entries)
+
+        if abs(total_debit - total_credit) > Decimal("0.01"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Transaction not balanced. Debit: {total_debit}, Credit: {total_credit}"
+            )
 
     db_transaction = Transaction(
         ledger_id=current_ledger.id,
         created_by=current_user.id,
         transaction_date=transaction.transaction_date,
         description=transaction.description,
-        reference=transaction.reference
+        reference=transaction.reference,
+        status=TransactionStatus[requested_status]
     )
     db.add(db_transaction)
     db.flush()

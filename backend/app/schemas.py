@@ -220,6 +220,7 @@ class TransactionBase(BaseModel):
 class TransactionCreate(TransactionBase):
     journal_entries: List[JournalEntryCreate]
     category_ids: List[int] = []
+    status: Optional[str] = 'POSTED'
 
 
 class Transaction(TransactionBase):

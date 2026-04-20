@@ -316,9 +316,27 @@ class PostingQueueManager {
         });
     }
 
+    getAccountHint(accountType) {
+        switch (accountType) {
+            case 'ASSET':
+                return 'Debet: inn / øker &nbsp;·&nbsp; Kredit: ut / reduserer';
+            case 'LIABILITY':
+                return 'Debet: reduserer gjeld &nbsp;·&nbsp; Kredit: øker gjeld';
+            case 'EQUITY':
+                return 'Debet: reduserer egenkapital &nbsp;·&nbsp; Kredit: øker egenkapital';
+            case 'REVENUE':
+                return 'Debet: reduserer inntekt &nbsp;·&nbsp; Kredit: øker inntekt (normalt)';
+            case 'EXPENSE':
+                return 'Debet: øker kostnad (normalt) &nbsp;·&nbsp; Kredit: reduserer kostnad';
+            default:
+                return '';
+        }
+    }
+
     renderJournalEntryEdit(entry, idx) {
         const currentAccount = entry.account_id ? this.accounts.find(a => a.id === entry.account_id) : null;
         const accountValue = currentAccount ? currentAccount.account_number : '';
+        const hint = currentAccount ? this.getAccountHint(currentAccount.account_type) : '';
 
         return `
             <div class="journal-entry" id="entry-${idx}">
@@ -344,6 +362,7 @@ class PostingQueueManager {
                     <small class="account-name-display" id="account-name-${idx}" style="color: var(--text-secondary);">
                         ${currentAccount ? currentAccount.account_name : ''}
                     </small>
+                    <small class="account-hint" id="account-hint-${idx}">${hint}</small>
                 </div>
                 <div class="form-group">
                     <label>Debet</label>
@@ -403,21 +422,25 @@ class PostingQueueManager {
             }
         }
 
+        const hintEl = document.getElementById(`account-hint-${idx}`);
         if (account) {
             hiddenInput.value = account.id;
             input.value = account.account_number;
             nameDisplay.textContent = account.account_name;
             nameDisplay.style.color = 'var(--text-secondary)';
             input.style.borderColor = 'var(--border-color)';
+            if (hintEl) hintEl.innerHTML = this.getAccountHint(account.account_type);
         } else if (searchTerm) {
             hiddenInput.value = '';
             nameDisplay.textContent = 'Ugyldig konto';
             nameDisplay.style.color = 'var(--danger-color)';
             input.style.borderColor = 'var(--danger-color)';
+            if (hintEl) hintEl.innerHTML = '';
         } else {
             hiddenInput.value = '';
             nameDisplay.textContent = '';
             input.style.borderColor = 'var(--border-color)';
+            if (hintEl) hintEl.innerHTML = '';
         }
     }
 
