@@ -817,6 +817,12 @@ body {
     font-style: italic;
 }
 
+.journal-entry > .account-hint {
+    grid-column: 1 / -1;
+    margin-top: 0;
+    margin-bottom: 0.25rem;
+}
+
 /* Status badges */
 .status-badge {
     display: inline-block;

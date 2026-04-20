@@ -288,7 +288,6 @@ class TransactionsManager {
                         <div class="form-group">
                             <label>Konto</label>
                             <select class="entry-account" required>${accountOptions}</select>
-                            <small class="account-hint"></small>
                         </div>
                         <div class="form-group">
                             <label>Debet</label>
@@ -302,6 +301,7 @@ class TransactionsManager {
                             <label>Beskrivelse</label>
                             <input type="text" class="entry-description">
                         </div>
+                        <small class="account-hint"></small>
                     </div>
                 </div>
 
@@ -321,7 +321,7 @@ class TransactionsManager {
 
         const updateHints = (container) => {
             container.querySelectorAll('.entry-account').forEach(select => {
-                const hint = select.parentElement.querySelector('.account-hint');
+                const hint = select.closest('.journal-entry').querySelector('.account-hint');
                 if (!hint) return;
                 const selected = select.options[select.selectedIndex];
                 const type = selected ? selected.dataset.type : '';
@@ -331,7 +331,7 @@ class TransactionsManager {
 
         document.getElementById('journal-entries').addEventListener('change', e => {
             if (e.target.classList.contains('entry-account')) {
-                const hint = e.target.parentElement.querySelector('.account-hint');
+                const hint = e.target.closest('.journal-entry').querySelector('.account-hint');
                 if (hint) {
                     const selected = e.target.options[e.target.selectedIndex];
                     hint.innerHTML = this.getAccountHint(selected ? selected.dataset.type : '');
@@ -348,7 +348,6 @@ class TransactionsManager {
             entry.innerHTML = `
                 <div class="form-group">
                     <select class="entry-account" required>${accountOptions}</select>
-                    <small class="account-hint"></small>
                 </div>
                 <div class="form-group">
                     <input type="number" step="0.01" class="entry-debit" value="0">
@@ -360,6 +359,7 @@ class TransactionsManager {
                     <input type="text" class="entry-description">
                 </div>
                 <button type="button" class="btn btn-danger" onclick="this.parentElement.remove()">X</button>
+                <small class="account-hint"></small>
             `;
             container.appendChild(entry);
             updateHints(entry);

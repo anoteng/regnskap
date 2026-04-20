@@ -362,7 +362,6 @@ class PostingQueueManager {
                     <small class="account-name-display" id="account-name-${idx}" style="color: var(--text-secondary);">
                         ${currentAccount ? currentAccount.account_name : ''}
                     </small>
-                    <small class="account-hint" id="account-hint-${idx}">${hint}</small>
                 </div>
                 <div class="form-group">
                     <label>Debet</label>
@@ -379,6 +378,7 @@ class PostingQueueManager {
                         Fjern
                     </button>
                 ` : '<div></div>'}
+                <small class="account-hint" id="account-hint-${idx}">${hint}</small>
             </div>
         `;
     }
