@@ -152,31 +152,34 @@ class TransactionDeduplicator:
         db: Session,
         bank_connection_id: int,
         external_id: str,
-        dedup_hash: str
+        dedup_hash: str,
+        reference: Optional[str] = None,
+        transaction_date: Optional[date] = None,
+        amount: Optional[Decimal] = None
     ) -> Optional[BankTransaction]:
         """
         Check if bank transaction was already fetched.
 
-        Uses both external_id (fast unique check) and dedup_hash (for
-        detecting duplicates across different connections).
+        Uses three strategies:
+        1. external_id (fastest, unique constraint)
+        2. dedup_hash (description-based)
+        3. reference + date + amount — catches Norwegian eFaktura payments that the
+           bank returns twice: once as "Betaling til ACCOUNTNO" and once as
+           "eFaktura: INVOICEID/MerchantName". Same reference/KID, different description.
 
         Args:
             db: Database session
             bank_connection_id: Bank connection ID
             external_id: External transaction ID from provider
             dedup_hash: Deduplication hash
+            reference: Optional payment reference/KID
+            transaction_date: Optional transaction date
+            amount: Optional transaction amount
 
         Returns:
             Existing BankTransaction if found, None otherwise
-
-        Example:
-            >>> existing = TransactionDeduplicator.check_duplicate_bank_transaction(
-            ...     db, connection_id=1, external_id="TX123", dedup_hash="abc..."
-            ... )
-            >>> if existing:
-            ...     print(f"Already fetched at {existing.fetched_at}")
         """
-        # First check by external_id (fastest, unique constraint)
+        # Check by external_id (fastest, unique constraint)
         existing = db.query(BankTransaction).filter(
             and_(
                 BankTransaction.bank_connection_id == bank_connection_id,
@@ -187,14 +190,29 @@ class TransactionDeduplicator:
         if existing:
             return existing
 
-        # Fallback: check by dedup_hash
-        # Useful if provider changes external_id format or user has multiple connections
+        # Check by dedup_hash
         existing = db.query(BankTransaction).filter(
             and_(
                 BankTransaction.bank_connection_id == bank_connection_id,
                 BankTransaction.dedup_hash == dedup_hash
             )
         ).first()
+
+        if existing:
+            return existing
+
+        # Check by reference + date + amount to catch eFaktura duplicates.
+        # Norwegian banks return eFaktura payments as two separate records with
+        # the same KID/reference but different descriptions.
+        if reference and transaction_date is not None and amount is not None:
+            existing = db.query(BankTransaction).filter(
+                and_(
+                    BankTransaction.bank_connection_id == bank_connection_id,
+                    BankTransaction.reference == reference,
+                    BankTransaction.transaction_date == transaction_date,
+                    BankTransaction.amount == amount
+                )
+            ).first()
 
         return existing
 

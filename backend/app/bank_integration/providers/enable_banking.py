@@ -801,6 +801,15 @@ class EnableBankingProvider(BaseBankProvider):
             logger.info(f"Processing transaction #{i+1}: {tx.get('entry_reference') or tx.get('transaction_id')}")
             logger.debug(f"Raw transaction data: {tx}")
 
+            # Skip pending/reserved transactions — the bank always follows up with a
+            # BOOK/Overføring record for the same payment. Importing PDNG would create
+            # duplicates since BOOK has a different description and external ID.
+            tx_status = tx.get('status', '')
+            tx_code = (tx.get('bank_transaction_code') or {}).get('code', '')
+            if tx_status == 'PDNG' or tx_code == 'Reservert':
+                logger.info(f"Skipping pending/reserved transaction {tx.get('entry_reference')}: status={tx_status}, code={tx_code}")
+                continue
+
             # Parse amount
             tx_amount = tx.get('transaction_amount', {})
             amount_str = tx_amount.get('amount', '0')
