@@ -38,11 +38,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -825,16 +821,7 @@ private fun JournalEntryEditor(
     onUpdate: (EditEntryState) -> Unit,
     onRemove: () -> Unit
 ) {
-    var accountSearch by remember { mutableStateOf(entry.accountNumber) }
-    var dropdownExpanded by remember { mutableStateOf(false) }
-
-    val filtered = remember(accountSearch) {
-        if (accountSearch.length < 1) emptyList()
-        else accounts.filter {
-            it.accountNumber.startsWith(accountSearch) ||
-                    it.accountName.contains(accountSearch, ignoreCase = true)
-        }.take(10)
-    }
+    var showAccountPicker by remember { mutableStateOf(false) }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -847,66 +834,20 @@ private fun JournalEntryEditor(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                ExposedDropdownMenuBox(
-                    expanded = dropdownExpanded && filtered.isNotEmpty(),
-                    onExpandedChange = { dropdownExpanded = it },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    OutlinedTextField(
-                        value = accountSearch,
-                        onValueChange = { input ->
-                            accountSearch = input
-                            dropdownExpanded = true
-                            if (accounts.none { it.accountNumber == input }) {
-                                onUpdate(
-                                    entry.copy(
-                                        accountId = null,
-                                        accountNumber = input,
-                                        accountName = ""
-                                    )
-                                )
-                            }
-                        },
-                        label = { Text("Konto") },
-                        placeholder = { Text("Nr. eller navn") },
-                        modifier = Modifier
-                            .menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                            .fillMaxWidth(),
-                        singleLine = true,
-                        supportingText = if (entry.accountName.isNotEmpty()) {
-                            { Text(entry.accountName, style = MaterialTheme.typography.labelSmall) }
-                        } else null,
-                        trailingIcon = {
-                            ExposedDropdownMenuDefaults.TrailingIcon(dropdownExpanded && filtered.isNotEmpty())
-                        }
-                    )
-                    ExposedDropdownMenu(
-                        expanded = dropdownExpanded && filtered.isNotEmpty(),
-                        onDismissRequest = { dropdownExpanded = false }
-                    ) {
-                        filtered.forEach { account ->
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        "${account.accountNumber} ${account.accountName}",
-                                        style = MaterialTheme.typography.bodySmall
-                                    )
-                                },
-                                onClick = {
-                                    accountSearch = account.accountNumber
-                                    dropdownExpanded = false
-                                    onUpdate(
-                                        entry.copy(
-                                            accountId = account.id,
-                                            accountNumber = account.accountNumber,
-                                            accountName = account.accountName
-                                        )
-                                    )
-                                }
-                            )
-                        }
+                OutlinedTextField(
+                    value = if (entry.accountId != null) "${entry.accountNumber} ${entry.accountName}" else "",
+                    onValueChange = {},
+                    label = { Text("Konto") },
+                    placeholder = { Text("Velg konto...") },
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { showAccountPicker = true },
+                    readOnly = true,
+                    singleLine = true,
+                    trailingIcon = {
+                        Icon(Icons.Default.Search, contentDescription = null)
                     }
-                }
+                )
                 if (canRemove) {
                     Spacer(Modifier.width(4.dp))
                     IconButton(
@@ -945,6 +886,88 @@ private fun JournalEntryEditor(
                     modifier = Modifier.weight(1f),
                     singleLine = true
                 )
+            }
+        }
+    }
+
+    if (showAccountPicker) {
+        AccountPickerSheet(
+            accounts = accounts,
+            onSelect = { account ->
+                onUpdate(
+                    entry.copy(
+                        accountId = account.id,
+                        accountNumber = account.accountNumber,
+                        accountName = account.accountName
+                    )
+                )
+                showAccountPicker = false
+            },
+            onDismiss = { showAccountPicker = false }
+        )
+    }
+}
+
+// ─── Account picker sheet ──────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AccountPickerSheet(
+    accounts: List<AccountResponse>,
+    onSelect: (AccountResponse) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var search by remember { mutableStateOf("") }
+
+    val filtered = remember(search, accounts) {
+        if (search.isEmpty()) accounts
+        else accounts.filter {
+            it.accountNumber.startsWith(search) ||
+                    it.accountName.contains(search, ignoreCase = true)
+        }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 32.dp)
+        ) {
+            Text("Velg konto", style = MaterialTheme.typography.titleLarge)
+            Spacer(Modifier.height(12.dp))
+
+            OutlinedTextField(
+                value = search,
+                onValueChange = { search = it },
+                label = { Text("Søk kontonummer eller navn") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            Spacer(Modifier.height(8.dp))
+
+            LazyColumn(modifier = Modifier.heightIn(max = 400.dp)) {
+                if (filtered.isEmpty()) {
+                    item {
+                        Text(
+                            "Ingen kontoer funnet",
+                            modifier = Modifier.padding(16.dp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                items(filtered, key = { it.id }) { account ->
+                    ListItem(
+                        headlineContent = { Text(account.accountName) },
+                        supportingContent = { Text(account.accountNumber) },
+                        modifier = Modifier.clickable { onSelect(account) }
+                    )
+                    HorizontalDivider()
+                }
             }
         }
     }
