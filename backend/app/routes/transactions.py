@@ -9,7 +9,7 @@ import io
 import json
 
 from backend.database import get_db
-from ..models import Transaction, JournalEntry, User, Ledger, BankAccount, Account, TransactionCategory, Receipt, ImportLog, CSVMapping, TransactionStatus
+from ..models import Transaction, JournalEntry, User, Ledger, BankAccount, Account, TransactionCategory, Receipt, ImportLog, CSVMapping, TransactionStatus, TransactionSource, BankTransaction, BankConnection, BankTransactionImportStatus
 from ..schemas import Transaction as TransactionSchema, TransactionCreate, PaginatedTransactions, ChainSuggestionsResponse, ChainTransactionsRequest
 from ..auth import get_current_active_user, get_current_ledger
 from ..transaction_chaining import TransactionChainMatcher
@@ -579,8 +579,20 @@ def reverse_transaction(
     current_user: User = Depends(get_current_active_user),
     current_ledger: Ledger = Depends(get_current_ledger)
 ):
-    """Create a reversing entry for a posted transaction (god regnskapsskikk)"""
-    original = db.query(Transaction).filter(
+    """
+    Create a correction voucher for a wrongly posted transaction.
+
+    For BANK_SYNC transactions: creates a DRAFT correction voucher with only
+    the counter-entries reversed (not the bank account entry). The bank side
+    was correct — only the categorization was wrong. User fills in the correct
+    debit account in the posting queue.
+
+    For MANUAL transactions: creates a full mirror reversal (POSTED), since
+    there is no authoritative bank side to preserve.
+    """
+    original = db.query(Transaction).options(
+        joinedload(Transaction.journal_entries)
+    ).filter(
         Transaction.id == transaction_id,
         Transaction.ledger_id == current_ledger.id
     ).first()
@@ -589,36 +601,91 @@ def reverse_transaction(
         raise HTTPException(status_code=404, detail="Transaction not found")
 
     if original.status == TransactionStatus.DRAFT:
-        raise HTTPException(status_code=400, detail="Cannot reverse DRAFT transaction. Delete it instead.")
+        raise HTTPException(status_code=400, detail="Kan ikke reversere en DRAFT-transaksjon. Slett den i stedet.")
 
-    # Create reversing transaction
-    reverse_transaction = Transaction(
-        ledger_id=current_ledger.id,
-        created_by=current_user.id,
-        transaction_date=date.today(),
-        description=f"REVERSERING: {original.description}",
-        reference=f"REV-{original.id}",
-        status=TransactionStatus.POSTED
-    )
-    db.add(reverse_transaction)
-    db.flush()
+    if original.source == TransactionSource.BANK_SYNC:
+        # Find the GL account IDs linked to this transaction via bank connections
+        bank_txs = db.query(BankTransaction).filter(
+            BankTransaction.imported_transaction_id == transaction_id,
+            BankTransaction.import_status == BankTransactionImportStatus.IMPORTED
+        ).all()
 
-    # Create reversed journal entries (swap debit/credit)
-    for entry in original.journal_entries:
-        reversed_entry = JournalEntry(
-            transaction_id=reverse_transaction.id,
-            account_id=entry.account_id,
-            debit=entry.credit,  # Swap
-            credit=entry.debit,  # Swap
-            description=f"Reversering av postering {entry.id}"
+        bank_account_ids = set()
+        for bt in bank_txs:
+            conn = db.query(BankConnection).filter(BankConnection.id == bt.bank_connection_id).first()
+            if conn:
+                ba = db.query(BankAccount).filter(BankAccount.id == conn.bank_account_id).first()
+                if ba:
+                    bank_account_ids.add(ba.account_id)
+
+        # Counter-entries are all entries NOT on a bank account
+        counter_entries = [e for e in original.journal_entries if e.account_id not in bank_account_ids]
+
+        if not counter_entries:
+            raise HTTPException(status_code=400, detail="Fant ingen motposteringer å reversere.")
+
+        # Create a DRAFT correction voucher with only the reversed counter-entries.
+        # User selects the correct debit account in the posting queue.
+        correction = Transaction(
+            ledger_id=current_ledger.id,
+            created_by=current_user.id,
+            transaction_date=date.today(),
+            description=f"Korrigering av bilag #{original.id}: {original.description}",
+            reference=f"KOR-{original.id}",
+            status=TransactionStatus.DRAFT,
+            source=TransactionSource.MANUAL,
         )
-        db.add(reversed_entry)
+        db.add(correction)
+        db.flush()
 
-    db.commit()
-    db.refresh(reverse_transaction)
+        for entry in counter_entries:
+            db.add(JournalEntry(
+                transaction_id=correction.id,
+                account_id=entry.account_id,
+                debit=entry.credit,   # swap
+                credit=entry.debit,   # swap
+                description=f"Korrigering av postering {entry.id}",
+            ))
 
-    return {
-        "message": "Transaction reversed successfully",
-        "original_id": transaction_id,
-        "reversing_id": reverse_transaction.id
-    }
+        db.commit()
+        db.refresh(correction)
+
+        return {
+            "message": "Korrigeringsbilag opprettet i posteringskøen",
+            "original_id": transaction_id,
+            "correction_id": correction.id,
+            "type": "correction_draft",
+        }
+
+    else:
+        # Manual transaction: full mirror reversal (POSTED)
+        reversal = Transaction(
+            ledger_id=current_ledger.id,
+            created_by=current_user.id,
+            transaction_date=date.today(),
+            description=f"Reversering av bilag #{original.id}: {original.description}",
+            reference=f"REV-{original.id}",
+            status=TransactionStatus.POSTED,
+            source=TransactionSource.MANUAL,
+        )
+        db.add(reversal)
+        db.flush()
+
+        for entry in original.journal_entries:
+            db.add(JournalEntry(
+                transaction_id=reversal.id,
+                account_id=entry.account_id,
+                debit=entry.credit,   # swap
+                credit=entry.debit,   # swap
+                description=f"Reversering av postering {entry.id}",
+            ))
+
+        db.commit()
+        db.refresh(reversal)
+
+        return {
+            "message": "Transaksjon reversert",
+            "original_id": transaction_id,
+            "reversing_id": reversal.id,
+            "type": "full_reversal",
+        }

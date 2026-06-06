@@ -426,13 +426,17 @@ class TransactionsManager {
     }
 
     async reverseTransaction(id) {
-        if (!confirm('Dette vil opprette en reverseringspostering som nullstiller denne transaksjonen. Fortsette?')) {
+        if (!confirm('Dette vil opprette et korrigeringsbilag i posteringskøen. Der legger du inn riktig konto. Fortsette?')) {
             return;
         }
 
         try {
             const result = await api.reverseTransaction(id);
-            showSuccess(`Transaksjon reversert. Reverseringsbilag ID: ${result.reversing_id}`);
+            if (result.type === 'correction_draft') {
+                showSuccess(`Korrigeringsbilag #${result.correction_id} er lagt i posteringskøen. Legg inn riktig konto der.`);
+            } else {
+                showSuccess(`Transaksjon reversert. Reverseringsbilag ID: ${result.reversing_id}`);
+            }
             await this.loadTransactions();
         } catch (error) {
             showError(error.message);
