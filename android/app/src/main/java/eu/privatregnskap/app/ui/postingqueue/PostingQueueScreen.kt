@@ -48,6 +48,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -836,20 +837,36 @@ private fun JournalEntryEditor(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                OutlinedTextField(
-                    value = if (entry.accountId != null) "${entry.accountNumber} ${entry.accountName}" else "",
-                    onValueChange = {},
-                    label = { Text("Konto") },
-                    placeholder = { Text("Velg konto...") },
-                    modifier = Modifier
-                        .weight(1f)
-                        .clickable { showAccountPicker = true },
-                    readOnly = true,
-                    singleLine = true,
-                    trailingIcon = {
-                        Icon(Icons.Default.Search, contentDescription = null)
-                    }
-                )
+                Box(modifier = Modifier.weight(1f)) {
+                    // OutlinedTextField fanger opp trykk selv når readOnly = true
+                    // (for fokus/markør) før en ytre clickable-modifier rekker å
+                    // reagere. Derfor: enabled = false (med farger som ser
+                    // "aktive" ut) + en gjennomsiktig klikkbar overlegg-boks.
+                    OutlinedTextField(
+                        value = if (entry.accountId != null) "${entry.accountNumber} ${entry.accountName}" else "",
+                        onValueChange = {},
+                        label = { Text("Konto") },
+                        placeholder = { Text("Velg konto...") },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = false,
+                        singleLine = true,
+                        trailingIcon = {
+                            Icon(Icons.Default.Search, contentDescription = null)
+                        },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                            disabledBorderColor = MaterialTheme.colorScheme.outline,
+                            disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            disabledPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            disabledTrailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    )
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .clickable { showAccountPicker = true }
+                    )
+                }
                 if (canRemove) {
                     Spacer(Modifier.width(4.dp))
                     IconButton(
