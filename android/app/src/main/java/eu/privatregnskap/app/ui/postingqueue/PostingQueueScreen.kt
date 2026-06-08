@@ -70,6 +70,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.privatregnskap.app.data.network.dto.AccountResponse
@@ -908,9 +910,11 @@ private fun JournalEntryEditor(
     }
 }
 
-// ─── Account picker sheet ──────────────────────────────────────────────────────
+// ─── Account picker dialog ─────────────────────────────────────────────────────
+// Bruker Dialog (ikke ModalBottomSheet) fordi denne åpnes oppå et annet bunnark
+// (Rediger transaksjon). To nøstede ModalBottomSheet kolliderer om fokus/touch-
+// håndtering og gjør at den underliggende sheeten slutter å reagere på input.
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AccountPickerSheet(
     accounts: List<AccountResponse>,
@@ -927,46 +931,60 @@ private fun AccountPickerSheet(
         }
     }
 
-    ModalBottomSheet(
+    Dialog(
         onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
-        Column(
+        Surface(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 32.dp)
+                .fillMaxSize()
+                .padding(top = 48.dp),
+            shape = MaterialTheme.shapes.large
         ) {
-            Text("Velg konto", style = MaterialTheme.typography.titleLarge)
-            Spacer(Modifier.height(12.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp)
+            ) {
+                Text("Velg konto", style = MaterialTheme.typography.titleLarge)
+                Spacer(Modifier.height(12.dp))
 
-            OutlinedTextField(
-                value = search,
-                onValueChange = { search = it },
-                label = { Text("Søk kontonummer eller navn") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
-            )
-            Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = search,
+                    onValueChange = { search = it },
+                    label = { Text("Søk kontonummer eller navn") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                Spacer(Modifier.height(8.dp))
 
-            LazyColumn(modifier = Modifier.heightIn(max = 400.dp)) {
-                if (filtered.isEmpty()) {
-                    item {
-                        Text(
-                            "Ingen kontoer funnet",
-                            modifier = Modifier.padding(16.dp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                LazyColumn(modifier = Modifier.weight(1f)) {
+                    if (filtered.isEmpty()) {
+                        item {
+                            Text(
+                                "Ingen kontoer funnet",
+                                modifier = Modifier.padding(16.dp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    items(filtered, key = { it.id }) { account ->
+                        ListItem(
+                            headlineContent = { Text(account.accountName) },
+                            supportingContent = { Text(account.accountNumber) },
+                            modifier = Modifier.clickable { onSelect(account) }
                         )
+                        HorizontalDivider()
                     }
                 }
-                items(filtered, key = { it.id }) { account ->
-                    ListItem(
-                        headlineContent = { Text(account.accountName) },
-                        supportingContent = { Text(account.accountNumber) },
-                        modifier = Modifier.clickable { onSelect(account) }
-                    )
-                    HorizontalDivider()
+
+                Spacer(Modifier.height(8.dp))
+                TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.align(Alignment.End)
+                ) {
+                    Text("Avbryt")
                 }
             }
         }
@@ -975,7 +993,9 @@ private fun AccountPickerSheet(
 
 // ─── Manual chain picker ───────────────────────────────────────────────────────
 
-@OptIn(ExperimentalMaterial3Api::class)
+// Bruker Dialog (ikke ModalBottomSheet) — denne åpnes oppå "Rediger transaksjon"-
+// bunnarket, og to nøstede ModalBottomSheet kolliderer om fokus/touch (se forklaring
+// ved AccountPickerSheet over).
 @Composable
 private fun ChainPickerSheet(
     transactions: List<TransactionResponse>,
@@ -993,30 +1013,35 @@ private fun ChainPickerSheet(
         }
     }
 
-    ModalBottomSheet(
+    Dialog(
         onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
-        Column(
+        Surface(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 32.dp)
+                .fillMaxSize()
+                .padding(top = 48.dp),
+            shape = MaterialTheme.shapes.large
         ) {
-            Text("Kjed med transaksjon", style = MaterialTheme.typography.titleLarge)
-            Spacer(Modifier.height(12.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp)
+            ) {
+                Text("Kjed med transaksjon", style = MaterialTheme.typography.titleLarge)
+                Spacer(Modifier.height(12.dp))
 
-            OutlinedTextField(
-                value = search,
-                onValueChange = { search = it },
-                label = { Text("Søk") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
-            )
-            Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = search,
+                    onValueChange = { search = it },
+                    label = { Text("Søk") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                Spacer(Modifier.height(8.dp))
 
-            LazyColumn(modifier = Modifier.heightIn(max = 320.dp)) {
+                LazyColumn(modifier = Modifier.weight(1f)) {
                 if (filtered.isEmpty()) {
                     item {
                         Text(
@@ -1026,64 +1051,65 @@ private fun ChainPickerSheet(
                         )
                     }
                 }
-                items(filtered, key = { it.id }) { t ->
-                    val amount = t.totalAmount()
-                    val isSelected = selectedId == t.id
-                    ListItem(
-                        headlineContent = {
-                            Text(
-                                t.description,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        },
-                        supportingContent = {
-                            Text("${t.transactionDate} · ${formatAmount(amount)}")
-                        },
-                        leadingContent = if (isSelected) {
-                            {
-                                Icon(
-                                    Icons.Default.CheckCircle,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary
+                    items(filtered, key = { it.id }) { t ->
+                        val amount = t.totalAmount()
+                        val isSelected = selectedId == t.id
+                        ListItem(
+                            headlineContent = {
+                                Text(
+                                    t.description,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
-                            }
-                        } else null,
-                        modifier = Modifier.clickable {
-                            selectedId = if (selectedId == t.id) null else t.id
-                        },
-                        colors = if (isSelected)
-                            ListItemDefaults.colors(
-                                containerColor = MaterialTheme.colorScheme.primaryContainer
-                            )
-                        else ListItemDefaults.colors()
-                    )
-                    HorizontalDivider()
+                            },
+                            supportingContent = {
+                                Text("${t.transactionDate} · ${formatAmount(amount)}")
+                            },
+                            leadingContent = if (isSelected) {
+                                {
+                                    Icon(
+                                        Icons.Default.CheckCircle,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            } else null,
+                            modifier = Modifier.clickable {
+                                selectedId = if (selectedId == t.id) null else t.id
+                            },
+                            colors = if (isSelected)
+                                ListItemDefaults.colors(
+                                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                                )
+                            else ListItemDefaults.colors()
+                        )
+                        HorizontalDivider()
+                    }
                 }
-            }
 
-            selectedId?.let { id ->
-                Spacer(Modifier.height(12.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = { onChain(id, false) },
-                        modifier = Modifier.weight(1f)
-                    ) { Text("Kjed") }
-                    Button(
-                        onClick = { onChain(id, true) },
-                        modifier = Modifier.weight(1f)
-                    ) { Text("Kjed + poster") }
+                selectedId?.let { id ->
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { onChain(id, false) },
+                            modifier = Modifier.weight(1f)
+                        ) { Text("Kjed") }
+                        Button(
+                            onClick = { onChain(id, true) },
+                            modifier = Modifier.weight(1f)
+                        ) { Text("Kjed + poster") }
+                    }
                 }
-            }
 
-            Spacer(Modifier.height(8.dp))
-            OutlinedButton(
-                onClick = onDismiss,
-                modifier = Modifier.fillMaxWidth()
-            ) { Text("Avbryt") }
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Avbryt") }
+            }
         }
     }
 }
