@@ -196,20 +196,27 @@ class TransactionChainMatcher:
             BankTransaction.imported_transaction_id == secondary_tx_id
         ).update({"imported_transaction_id": primary.id})
 
-        # Expunge secondary from session to prevent cascade deleting the
-        # journal entry we just moved
+        # Expunge both transactions and all their loaded journal entries from
+        # the session. The bulk UPDATE above bypasses the ORM, so SQLAlchemy's
+        # in-memory state is stale. If we only expunge secondary, the ORM may
+        # still try to write back primary's old journal_entries collection on
+        # flush, undoing the move or causing FK violations.
+        for entry in list(primary.journal_entries):
+            db.expunge(entry)
+        db.expunge(primary)
         db.expunge(secondary)
 
         # Delete the secondary transaction (now has 0 journal entries)
         db.query(Transaction).filter(Transaction.id == secondary_tx_id).delete()
 
-        # Flush and reload primary with updated entries
         db.flush()
-        db.expire(primary)
 
         primary = db.query(Transaction).options(
             joinedload(Transaction.journal_entries).joinedload(JournalEntry.account)
         ).filter(Transaction.id == primary_id).first()
+
+        if not primary:
+            raise ValueError("Primærtransaksjon forsvant etter kjeding — rull tilbake")
 
         # Check if balanced and auto-post if requested
         total_debit = sum(e.debit for e in primary.journal_entries)
