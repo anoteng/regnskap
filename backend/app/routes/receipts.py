@@ -13,6 +13,12 @@ from backend.database import get_db
 from ..models import Receipt, User, Ledger, Transaction, JournalEntry, ReceiptStatus, AttachmentType, UserSubscription, SubscriptionPlan, SubscriptionTier, UserMonthlyUsage, SubscriptionStatus
 from ..schemas import Receipt as ReceiptSchema, ReceiptCreate, Transaction as TransactionSchema
 from ..auth import get_current_active_user, get_current_ledger, get_user_from_query_token, get_ledger_from_query
+from ..planned_transactions import (
+    sync_planned_from_receipt,
+    mark_planned_matched,
+    reopen_planned_for_receipt,
+)
+from ..models import PlannedTransaction, PlannedTransactionStatus
 from backend.config import get_settings
 
 router = APIRouter(prefix="/receipts", tags=["receipts"])
@@ -225,6 +231,9 @@ async def upload_receipt(
     db.add(receipt)
     db.commit()
     db.refresh(receipt)
+
+    sync_planned_from_receipt(db, receipt, created_by=current_user.id)
+    db.commit()
 
     increment_monthly_usage(current_user, db)
 
@@ -442,6 +451,13 @@ def match_receipt_to_transaction(
     receipt.matched_at = datetime.now()
     receipt.matched_by = current_user.id
 
+    planned = db.query(PlannedTransaction).filter(
+        PlannedTransaction.receipt_id == receipt.id,
+        PlannedTransaction.status == PlannedTransactionStatus.OPEN
+    ).first()
+    if planned:
+        mark_planned_matched(db, planned, transaction, matched_by=current_user.id)
+
     db.commit()
     db.refresh(receipt)
 
@@ -473,6 +489,8 @@ def unmatch_receipt(
     receipt.matched_at = None
     receipt.matched_by = None
 
+    reopen_planned_for_receipt(db, receipt.id)
+
     db.commit()
     db.refresh(receipt)
 
@@ -495,6 +513,9 @@ def delete_receipt(
     if not receipt:
         raise HTTPException(status_code=404, detail="Receipt not found")
 
+    db.query(PlannedTransaction).filter(
+        PlannedTransaction.receipt_id == receipt.id
+    ).delete()
     db.delete(receipt)
     db.commit()
 
@@ -527,6 +548,8 @@ def update_receipt(
     receipt.due_date = receipt_update.due_date
     receipt.amount = receipt_update.amount
     receipt.description = receipt_update.description
+
+    sync_planned_from_receipt(db, receipt, created_by=current_user.id)
 
     db.commit()
     db.refresh(receipt)
@@ -652,6 +675,8 @@ async def extract_receipt_ai(
 
         if result.get("is_invoice") and not receipt.due_date:
             receipt.attachment_type = AttachmentType.INVOICE
+
+        sync_planned_from_receipt(db, receipt, created_by=current_user.id)
 
         db.commit()
         db.refresh(receipt)

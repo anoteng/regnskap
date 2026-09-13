@@ -405,6 +405,24 @@ class Receipt(ReceiptBase):
         from_attributes = True
 
 
+class PlannedTransaction(BaseModel):
+    id: int
+    ledger_id: int
+    receipt_id: Optional[int] = None
+    description: str
+    expected_date: date
+    amount: Decimal
+    suggested_account_id: Optional[int] = None
+    status: str
+    matched_transaction_id: Optional[int] = None
+    created_by: Optional[int] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 # WebAuthn / Passkey schemas
 class WebAuthnRegistrationStart(BaseModel):
     credential_name: Optional[str] = None

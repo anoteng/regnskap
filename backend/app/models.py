@@ -666,3 +666,35 @@ class OAuthState(Base):
     ledger = relationship("Ledger")
     bank_account = relationship("BankAccount")
     provider = relationship("BankProvider")
+
+
+class PlannedTransactionStatus(str, enum.Enum):
+    OPEN = "OPEN"
+    MATCHED = "MATCHED"
+    CANCELLED = "CANCELLED"
+
+
+class PlannedTransaction(Base):
+    __tablename__ = "planned_transactions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ledger_id = Column(Integer, ForeignKey("ledgers.id"), nullable=False)
+    receipt_id = Column(Integer, ForeignKey("receipts.id"), nullable=True)
+
+    description = Column(String(500), nullable=False)
+    expected_date = Column(Date, nullable=False, index=True)
+    amount = Column(DECIMAL(15, 2), nullable=False)
+    suggested_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
+
+    status = Column(SQLEnum(PlannedTransactionStatus), nullable=False, default=PlannedTransactionStatus.OPEN)
+    matched_transaction_id = Column(Integer, ForeignKey("transactions.id"), nullable=True)
+
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    ledger = relationship("Ledger")
+    receipt = relationship("Receipt")
+    suggested_account = relationship("Account")
+    matched_transaction = relationship("Transaction", foreign_keys=[matched_transaction_id])
+    creator = relationship("User", foreign_keys=[created_by])

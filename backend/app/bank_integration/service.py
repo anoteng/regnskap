@@ -28,6 +28,7 @@ from .providers.base import BaseBankProvider
 from .providers.enable_banking import EnableBankingProvider, SessionExpiredError
 from .encryption import TokenEncryption
 from .deduplication import TransactionDeduplicator
+from ..planned_transactions import find_and_match_for_bank_transaction
 
 
 class BankIntegrationService:
@@ -868,6 +869,18 @@ class BankIntegrationService:
                 )
 
         self.db.add(journal_entry)
+
+        # Outgoing payment from a bank account: try matching against open
+        # planned transactions (registered invoices awaiting payment)
+        if not is_liability and amount < 0:
+            self.db.flush()
+            find_and_match_for_bank_transaction(
+                self.db,
+                transaction,
+                abs(amount),
+                bank_connection.ledger_id
+            )
+
         return transaction
 
     async def disconnect_bank(
