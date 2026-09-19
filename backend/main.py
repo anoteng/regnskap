@@ -18,6 +18,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def revalidate_static_assets(request, call_next):
+    # ES-module imports (./api.js) carry no cache-busting query, so browsers
+    # and Cloudflare must revalidate them (ETag -> 304) instead of reusing a
+    # stale copy for hours after a deploy
+    response = await call_next(request)
+    if request.url.path.startswith("/static/") or request.url.path in ("/", "/index.html"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
 app.include_router(auth.router, prefix="/api")
 app.include_router(passkey.router, prefix="/api")
 app.include_router(ledgers.router, prefix="/api")

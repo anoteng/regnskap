@@ -135,6 +135,15 @@ sudo journalctl -u regnskap -f
 3. Test in browser at https://privatregnskap.eu
 4. Check logs with `sudo journalctl -u regnskap -f` directly
 
+### Frontend cache busting (required after any JS change)
+Cloudflare forces a 4h browser TTL on `/static/*` regardless of origin headers, and ES module
+imports share a single version query so the whole module graph is busted together. Bump N in
+both places in one go:
+```bash
+sed -i -E "s#(from '\./[a-z-]+\.js)\?v=[0-9]+'#\1?v=N'#g" frontend/static/js/*.js
+sed -i -E "s#main\.js\?v=[0-9]+#main.js?v=N#" frontend/index.html
+```
+
 ## Known Issues
 
 1. **Enable Banking Account ID Changes**: Account IDs are volatile (change per OAuth session). Always update connection with latest account_id from oauth_state.

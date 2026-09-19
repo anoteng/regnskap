@@ -1,5 +1,5 @@
-import api from './api.js';
-import { formatCurrency, formatDate, showError, showSuccess } from './utils.js';
+import api from './api.js?v=9';
+import { formatCurrency, formatDate, showError, showSuccess } from './utils.js?v=9';
 
 function currentMonth() {
     const d = new Date();

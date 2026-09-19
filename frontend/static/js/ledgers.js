@@ -1,5 +1,5 @@
-import api from './api.js';
-import settlementManager from './settlement.js';
+import api from './api.js?v=9';
+import settlementManager from './settlement.js?v=9';
 
 class LedgerManager {
     constructor() {
