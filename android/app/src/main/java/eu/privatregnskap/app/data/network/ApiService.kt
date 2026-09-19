@@ -13,6 +13,7 @@ import eu.privatregnskap.app.data.network.dto.PasskeyCredentialResponse
 import eu.privatregnskap.app.data.network.dto.PasskeyRegisterBeginRequest
 import eu.privatregnskap.app.data.network.dto.PasswordResetRequest
 import eu.privatregnskap.app.data.network.dto.PostingQueueResponse
+import eu.privatregnskap.app.data.network.dto.SettlementCalculationResponse
 import eu.privatregnskap.app.data.network.dto.TokenResponse
 import eu.privatregnskap.app.data.network.dto.TransactionResponse
 import eu.privatregnskap.app.data.network.dto.UpdateTransactionRequest
@@ -220,6 +221,14 @@ interface ApiService {
         @Query("account_id") accountId: Int,
         @Query("month") month: Int? = null
     ): List<BudgetDrilldownEntry>
+
+    // ─── Settlement ───────────────────────────────────────────────────────────
+
+    @GET("settlement/calculation")
+    suspend fun getSettlementCalculation(
+        @Header("X-Ledger-ID") ledgerId: Int? = null,
+        @Query("month") month: String? = null
+    ): SettlementCalculationResponse
 
     // ─── Chain suggestions ────────────────────────────────────────────────────
 

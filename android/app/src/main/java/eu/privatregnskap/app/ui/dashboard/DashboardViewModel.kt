@@ -3,8 +3,10 @@ package eu.privatregnskap.app.ui.dashboard
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import eu.privatregnskap.app.data.network.dto.SettlementCalculationResponse
 import eu.privatregnskap.app.data.network.dto.TransactionResponse
 import eu.privatregnskap.app.data.repository.LedgerRepository
+import eu.privatregnskap.app.data.repository.SettlementRepository
 import eu.privatregnskap.app.data.repository.TransactionRepository
 import eu.privatregnskap.app.ui.auth.UiState
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,11 +18,16 @@ import javax.inject.Inject
 @HiltViewModel
 class DashboardViewModel @Inject constructor(
     private val transactionRepository: TransactionRepository,
-    private val ledgerRepository: LedgerRepository
+    private val ledgerRepository: LedgerRepository,
+    private val settlementRepository: SettlementRepository
 ) : ViewModel() {
 
     private val _transactionsState = MutableStateFlow<UiState<List<TransactionResponse>>>(UiState.Idle)
     val transactionsState: StateFlow<UiState<List<TransactionResponse>>> = _transactionsState.asStateFlow()
+
+    // null = settlement not enabled for the ledger (or not loaded); card is hidden
+    private val _settlement = MutableStateFlow<SettlementCalculationResponse?>(null)
+    val settlement: StateFlow<SettlementCalculationResponse?> = _settlement.asStateFlow()
 
     private var currentLedgerId: Int? = null
 
@@ -48,6 +55,16 @@ class DashboardViewModel @Inject constructor(
                 onSuccess = { UiState.Success(it) },
                 onFailure = { UiState.Error(it.message ?: "Kunne ikke laste transaksjoner") }
             )
+            loadSettlement()
+        }
+    }
+
+    private fun loadSettlement() {
+        viewModelScope.launch {
+            // Best effort: a failure here should never disturb the dashboard
+            _settlement.value = settlementRepository
+                .getCalculation(currentLedgerId, month = null)
+                .getOrNull()
         }
     }
 }

@@ -26,6 +26,7 @@ import eu.privatregnskap.app.ui.budget.BudgetScreen
 import eu.privatregnskap.app.ui.dashboard.DashboardScreen
 import eu.privatregnskap.app.ui.postingqueue.PostingQueueScreen
 import eu.privatregnskap.app.ui.profile.ProfileScreen
+import eu.privatregnskap.app.ui.settlement.SettlementScreen
 
 private sealed class Tab(val route: String, val label: String, val icon: ImageVector) {
     object Dashboard : Tab("tab/dashboard", "Hjem", Icons.Default.Home)
@@ -36,6 +37,8 @@ private sealed class Tab(val route: String, val label: String, val icon: ImageVe
 }
 
 private val tabs = listOf(Tab.Dashboard, Tab.PostingQueue, Tab.Attachments, Tab.Budget, Tab.Profile)
+
+private const val SETTLEMENT_ROUTE = "settlement"
 
 @Composable
 fun MainScreen(onLogout: () -> Unit, initialFileUri: Uri? = null) {
@@ -76,7 +79,13 @@ fun MainScreen(onLogout: () -> Unit, initialFileUri: Uri? = null) {
             startDestination = Tab.Dashboard.route
         ) {
             composable(Tab.Dashboard.route) {
-                DashboardScreen(innerPadding = padding)
+                DashboardScreen(
+                    innerPadding = padding,
+                    onOpenSettlement = { navController.navigate(SETTLEMENT_ROUTE) { launchSingleTop = true } }
+                )
+            }
+            composable(SETTLEMENT_ROUTE) {
+                SettlementScreen(innerPadding = padding, onBack = { navController.popBackStack() })
             }
             composable(Tab.PostingQueue.route) {
                 PostingQueueScreen(innerPadding = padding)

@@ -217,3 +217,81 @@ data class BudgetReportResponse(
     val budget: BudgetResponse,
     val lines: List<BudgetReportLine>
 )
+
+// ─── Settlement ──────────────────────────────────────────────────────────────
+// Monetary fields are serialised as decimal strings by the backend.
+
+@JsonClass(generateAdapter = true)
+data class SettlementTotals(
+    val booked: String,
+    @Json(name = "booked_fixed") val bookedFixed: String,
+    @Json(name = "booked_variable") val bookedVariable: String,
+    @Json(name = "excluded_booked") val excludedBooked: String,
+    @Json(name = "planned_remaining") val plannedRemaining: String,
+    @Json(name = "recurring_remaining") val recurringRemaining: String,
+    @Json(name = "variable_remaining") val variableRemaining: String,
+    @Json(name = "typical_variable_month") val typicalVariableMonth: String,
+    @Json(name = "forecast_total") val forecastTotal: String
+)
+
+@JsonClass(generateAdapter = true)
+data class SettlementPlannedLine(
+    @Json(name = "planned_transaction_id") val plannedTransactionId: Int,
+    @Json(name = "receipt_id") val receiptId: Int? = null,
+    val description: String,
+    @Json(name = "expected_date") val expectedDate: String,
+    val amount: String,
+    val overdue: Boolean
+)
+
+@JsonClass(generateAdapter = true)
+data class SettlementRecurringLine(
+    val key: String,
+    val description: String,
+    @Json(name = "expected_day") val expectedDay: Int,
+    val amount: String,
+    @Json(name = "period_months") val periodMonths: Int
+)
+
+@JsonClass(generateAdapter = true)
+data class SettlementMemberResult(
+    @Json(name = "user_id") val userId: Int,
+    @Json(name = "full_name") val fullName: String,
+    @Json(name = "share_percent") val sharePercent: String,
+    @Json(name = "deposit_account_id") val depositAccountId: Int? = null,
+    @Json(name = "share_amount") val shareAmount: String,
+    @Json(name = "own_withdrawals") val ownWithdrawals: String,
+    val contributed: String,
+    @Json(name = "recommended_transfer") val recommendedTransfer: String
+)
+
+@JsonClass(generateAdapter = true)
+data class SettlementCreditCard(
+    @Json(name = "bank_account_id") val bankAccountId: Int,
+    val name: String,
+    @Json(name = "account_id") val accountId: Int,
+    val owed: String
+)
+
+@JsonClass(generateAdapter = true)
+data class SettlementLiquidity(
+    @Json(name = "operating_balance") val operatingBalance: String? = null,
+    @Json(name = "credit_cards") val creditCards: List<SettlementCreditCard>,
+    @Json(name = "credit_card_owed_total") val creditCardOwedTotal: String
+)
+
+@JsonClass(generateAdapter = true)
+data class SettlementCalculationResponse(
+    @Json(name = "ledger_id") val ledgerId: Int,
+    val month: String,
+    @Json(name = "as_of") val asOf: String,
+    @Json(name = "days_remaining") val daysRemaining: Int,
+    @Json(name = "month_complete") val monthComplete: Boolean,
+    @Json(name = "operating_account_id") val operatingAccountId: Int? = null,
+    @Json(name = "excluded_account_ids") val excludedAccountIds: List<Int>,
+    val totals: SettlementTotals,
+    val planned: List<SettlementPlannedLine>,
+    val recurring: List<SettlementRecurringLine>,
+    val members: List<SettlementMemberResult>,
+    val liquidity: SettlementLiquidity
+)
