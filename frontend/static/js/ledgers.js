@@ -1,4 +1,5 @@
 import api from './api.js';
+import settlementManager from './settlement.js';
 
 class LedgerManager {
     constructor() {
@@ -114,6 +115,9 @@ class LedgerManager {
 
         // Load members
         await this.loadLedgerMembers();
+
+        // Settlement configuration card
+        settlementManager.loadSettingsCard(ledger);
 
         // Setup event listeners
         this.setupLedgerSettingsHandlers(ledger);

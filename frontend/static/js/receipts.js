@@ -6,6 +6,8 @@ class ReceiptsManager {
         this.receipts = [];
         this.currentFilter = 'PENDING';
         this.subscription = null;
+        this.plansByReceipt = {};
+        this.expenseAccounts = null;
     }
 
     async init() {
@@ -103,11 +105,53 @@ class ReceiptsManager {
         try {
             const status = this.currentFilter === 'all' ? null : this.currentFilter;
             this.receipts = await api.getReceipts(status);
+            await this.loadPlans();
             this.renderReceipts();
         } catch (error) {
             console.error('Error loading receipts:', error);
             showError('Kunne ikke laste vedlegg: ' + error.message);
         }
+    }
+
+    async loadPlans() {
+        // Planned transactions are optional context; never block the queue on them
+        try {
+            await this.ensureExpenseAccounts();
+            const plans = await api.getPlannedTransactions({ limit: 500 });
+            this.plansByReceipt = Object.fromEntries(
+                plans.filter(p => p.receipt_id).map(p => [p.receipt_id, p])
+            );
+        } catch (error) {
+            console.warn('Kunne ikke hente planlagte transaksjoner:', error);
+            this.plansByReceipt = {};
+        }
+    }
+
+    async ensureExpenseAccounts() {
+        if (!this.expenseAccounts) {
+            const accounts = await api.getAccounts('EXPENSE');
+            this.expenseAccounts = accounts.filter(a => a.is_active);
+        }
+        return this.expenseAccounts;
+    }
+
+    accountLabel(id) {
+        const a = (this.expenseAccounts || []).find(x => x.id === id);
+        return a ? `${a.account_number} ${a.account_name}` : `konto #${id}`;
+    }
+
+    renderPlanInfo(receipt) {
+        const plan = this.plansByReceipt[receipt.id];
+        if (!plan) return '';
+        const statusText = {
+            OPEN: 'Planlagt betaling',
+            MATCHED: 'Betaling registrert',
+            CANCELLED: 'Planlagt betaling kansellert',
+        }[plan.status] || plan.status;
+        const account = plan.suggested_account_id
+            ? ` · ${this.accountLabel(plan.suggested_account_id)}`
+            : ' · <em>konto ikke valgt</em>';
+        return `<div><small style="color:#4b5563;">${statusText}${plan.status === 'CANCELLED' ? '' : account}</small></div>`;
     }
 
     renderReceipts() {
@@ -180,6 +224,7 @@ class ReceiptsManager {
                     ${receipt.amount ? `<div><small>Beløp: ${parseFloat(receipt.amount).toFixed(2)} kr</small></div>` : ''}
                     ${aiInfo}
                     ${receipt.description ? `<div><small>${receipt.description}</small></div>` : ''}
+                    ${this.renderPlanInfo(receipt)}
 
                     ${receipt.status === 'MATCHED' ? `
                         <div class="receipt-status">
@@ -598,11 +643,16 @@ class ReceiptsManager {
         }
     }
 
-    editReceipt(id) {
+    async editReceipt(id) {
         const receipt = this.receipts.find(r => r.id === id);
         if (!receipt) return;
 
         const isInvoice = receipt.attachment_type === 'INVOICE';
+        const plan = this.plansByReceipt[id];
+        const accounts = await this.ensureExpenseAccounts();
+        const accountOptions = '<option value="">– ikke valgt –</option>' + accounts.map(a =>
+            `<option value="${a.id}" ${plan?.suggested_account_id === a.id ? 'selected' : ''}>${a.account_number} ${a.account_name}</option>`
+        ).join('');
 
         const content = `
             <form id="edit-receipt-form">
@@ -621,6 +671,11 @@ class ReceiptsManager {
                     <label>Forfallsdato</label>
                     <input type="date" id="receipt-due-date" value="${receipt.due_date || ''}">
                 </div>
+                <div class="form-group" id="expected-account-group" style="${isInvoice ? '' : 'display:none'}">
+                    <label>Forventet kostnadskonto</label>
+                    <select id="receipt-expected-account" ${plan?.status === 'MATCHED' ? 'disabled' : ''}>${accountOptions}</select>
+                    <small style="color:#6b7280;">Brukes av månedsavregningen til å avgjøre om fakturaen er en felleskostnad.</small>
+                </div>
                 <div class="form-group">
                     <label>Beløp</label>
                     <input type="number" step="0.01" id="receipt-amount" value="${receipt.amount || ''}">
@@ -636,8 +691,9 @@ class ReceiptsManager {
         showModal('Rediger vedlegg', content);
 
         document.getElementById('receipt-type').addEventListener('change', (e) => {
-            document.getElementById('due-date-group').style.display =
-                e.target.value === 'INVOICE' ? '' : 'none';
+            const show = e.target.value === 'INVOICE' ? '' : 'none';
+            document.getElementById('due-date-group').style.display = show;
+            document.getElementById('expected-account-group').style.display = show;
         });
 
         document.getElementById('edit-receipt-form').addEventListener('submit', async (e) => {
@@ -652,6 +708,9 @@ class ReceiptsManager {
         const dueDate = document.getElementById('receipt-due-date').value;
         const amount = document.getElementById('receipt-amount').value;
         const description = document.getElementById('receipt-description').value;
+        const accountSelect = document.getElementById('receipt-expected-account');
+        const expectedAccountId = accountSelect && !accountSelect.disabled && accountSelect.value
+            ? parseInt(accountSelect.value, 10) : null;
 
         try {
             await api.updateReceipt(id, {
@@ -661,6 +720,15 @@ class ReceiptsManager {
                 amount: amount || null,
                 description: description || null
             });
+
+            // The plan may have just been created by the update, so re-read before patching
+            if (attachmentType === 'INVOICE') {
+                await this.loadPlans();
+                const plan = this.plansByReceipt[id];
+                if (plan && plan.status !== 'MATCHED' && (plan.suggested_account_id || null) !== expectedAccountId) {
+                    await api.updatePlannedTransaction(plan.id, { suggested_account_id: expectedAccountId });
+                }
+            }
 
             closeModal();
             showSuccess('Vedlegg oppdatert');

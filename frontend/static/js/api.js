@@ -157,6 +157,13 @@ class API {
         });
     }
 
+    async patch(endpoint, data) {
+        return this.request(endpoint, {
+            method: 'PATCH',
+            body: JSON.stringify(data),
+        });
+    }
+
     async login(email, password) {
         const formData = new URLSearchParams();
         formData.append('username', email);
@@ -570,6 +577,37 @@ class API {
 
     async getMatchSuggestions(id) {
         return this.get(`/receipts/${id}/suggest-match`);
+    }
+
+    // Planned transactions
+    async getPlannedTransactions(params = {}) {
+        const query = new URLSearchParams(params).toString();
+        return this.get(`/planned-transactions/${query ? '?' + query : ''}`);
+    }
+
+    async updatePlannedTransaction(id, data) {
+        return this.patch(`/planned-transactions/${id}`, data);
+    }
+
+    async cancelPlannedTransaction(id) {
+        return this.post(`/planned-transactions/${id}/cancel`, {});
+    }
+
+    async reopenPlannedTransaction(id) {
+        return this.post(`/planned-transactions/${id}/reopen`, {});
+    }
+
+    // Settlement
+    async getSettlementSettings() {
+        return this.get('/settlement/settings');
+    }
+
+    async updateSettlementSettings(data) {
+        return this.put('/settlement/settings', data);
+    }
+
+    async getSettlementCalculation(month = null) {
+        return this.get(`/settlement/calculation${month ? '?month=' + month : ''}`);
     }
 }
 

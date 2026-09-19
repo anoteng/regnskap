@@ -1370,3 +1370,57 @@ body {
         }
     }
 }
+
+/* Settlement */
+.settlement-month-nav {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.settlement-month-nav strong {
+    min-width: 10rem;
+    text-align: center;
+}
+
+.settlement-columns {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 1.5rem;
+}
+
+.table td.num,
+.table th.num {
+    text-align: right;
+    white-space: nowrap;
+}
+
+.settlement-due {
+    color: var(--danger-color);
+}
+
+.settlement-ahead {
+    color: var(--success-color);
+}
+
+.table-responsive {
+    overflow-x: auto;
+}
+
+.settlement-exclude-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 0.25rem 1rem;
+    max-height: 18rem;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 0.75rem;
+}
+
+.settlement-exclude-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+}

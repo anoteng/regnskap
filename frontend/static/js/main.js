@@ -8,6 +8,7 @@ import receiptsManager from './receipts.js';
 import reportsManager from './reports.js';
 import bankConnectionsManager from './bank-connections.js';
 import adminManager from './admin.js';
+import settlementManager from './settlement.js';
 import { formatCurrency, formatDate, getTodayDate, getFirstDayOfMonth, getLastDayOfMonth, showModal, closeModal, showError, showSuccess } from './utils.js';
 
 // Make auth available globally for passkey management
@@ -239,6 +240,9 @@ class App {
                 break;
             case 'reports':
                 reportsManager.init();
+                break;
+            case 'settlement':
+                settlementManager.init();
                 break;
             case 'ledger-settings':
                 ledgerManager.showLedgerSettings();
