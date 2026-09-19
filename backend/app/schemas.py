@@ -423,6 +423,13 @@ class PlannedTransaction(BaseModel):
         from_attributes = True
 
 
+class PlannedTransactionUpdate(BaseModel):
+    suggested_account_id: Optional[int] = None
+    description: Optional[str] = None
+    expected_date: Optional[date] = None
+    amount: Optional[Decimal] = None
+
+
 class SettlementMemberInput(BaseModel):
     user_id: int
     share_percent: Decimal

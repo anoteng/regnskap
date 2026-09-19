@@ -83,7 +83,9 @@ def sync_planned_from_receipt(
         planned.description = description
         planned.expected_date = receipt.due_date
         planned.amount = receipt.amount
-        planned.suggested_account_id = suggested_account_id
+        # An account chosen by the user on the plan beats the AI suggestion
+        if planned.suggested_account_id is None:
+            planned.suggested_account_id = suggested_account_id
         planned.status = PlannedTransactionStatus.OPEN
 
     return planned

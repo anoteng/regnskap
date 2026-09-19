@@ -5,13 +5,14 @@ from datetime import date
 
 from backend.database import get_db
 from ..models import (
+    Account,
     Ledger,
     PlannedTransaction,
     PlannedTransactionStatus,
     Transaction,
     User,
 )
-from ..schemas import PlannedTransaction as PlannedTransactionSchema
+from ..schemas import PlannedTransaction as PlannedTransactionSchema, PlannedTransactionUpdate
 from ..auth import get_current_active_user, get_current_ledger
 from ..planned_transactions import mark_planned_matched
 
@@ -125,6 +126,54 @@ def match_planned_transaction(
         raise HTTPException(status_code=404, detail="Transaksjon ikke funnet")
 
     mark_planned_matched(db, planned, transaction, matched_by=current_user.id)
+    db.commit()
+    db.refresh(planned)
+    return planned
+
+
+@router.patch("/{planned_id}", response_model=PlannedTransactionSchema)
+def update_planned_transaction(
+    planned_id: int,
+    payload: PlannedTransactionUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    current_ledger: Ledger = Depends(get_current_ledger)
+):
+    """Update expected account/date/amount/description of a planned transaction.
+
+    Only fields present in the request are changed. The expected account is
+    what the settlement calculation uses to decide whether the payment counts
+    as a shared expense.
+    """
+    planned = db.query(PlannedTransaction).filter(
+        PlannedTransaction.id == planned_id,
+        PlannedTransaction.ledger_id == current_ledger.id
+    ).first()
+
+    if not planned:
+        raise HTTPException(status_code=404, detail="Planlagt transaksjon ikke funnet")
+    if planned.status == PlannedTransactionStatus.MATCHED:
+        raise HTTPException(status_code=400, detail="Kan ikke endre en matchet planlagt transaksjon")
+
+    fields = payload.model_dump(exclude_unset=True)
+
+    if "suggested_account_id" in fields and fields["suggested_account_id"] is not None:
+        account = db.query(Account).filter(
+            Account.id == fields["suggested_account_id"],
+            Account.ledger_id == current_ledger.id
+        ).first()
+        if not account:
+            raise HTTPException(status_code=400, detail="Kontoen tilhører ikke regnskapet")
+    if "amount" in fields and (fields["amount"] is None or fields["amount"] <= 0):
+        raise HTTPException(status_code=400, detail="Beløp må være større enn 0")
+    if "description" in fields and not (fields["description"] or "").strip():
+        raise HTTPException(status_code=400, detail="Beskrivelse kan ikke være tom")
+    if "expected_date" in fields and fields["expected_date"] is None:
+        raise HTTPException(status_code=400, detail="Forventet dato må angis")
+
+    for name, value in fields.items():
+        setattr(planned, name, value.strip() if name == "description" else value)
+
     db.commit()
     db.refresh(planned)
     return planned
