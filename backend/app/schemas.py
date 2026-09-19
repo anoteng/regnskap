@@ -455,6 +455,74 @@ class SettlementSettingsOut(BaseModel):
     updated_at: Optional[datetime] = None
 
 
+class SettlementTotals(BaseModel):
+    booked: Decimal
+    booked_fixed: Decimal
+    booked_variable: Decimal
+    excluded_booked: Decimal
+    planned_remaining: Decimal
+    recurring_remaining: Decimal
+    variable_remaining: Decimal
+    typical_variable_month: Decimal
+    forecast_total: Decimal
+
+
+class SettlementPlannedLine(BaseModel):
+    planned_transaction_id: int
+    receipt_id: Optional[int] = None
+    description: str
+    expected_date: date
+    amount: Decimal
+    overdue: bool
+
+
+class SettlementRecurringLine(BaseModel):
+    key: str
+    description: str
+    expected_day: int
+    amount: Decimal
+    period_months: int
+
+
+class SettlementMemberResult(BaseModel):
+    user_id: int
+    full_name: str
+    share_percent: Decimal
+    deposit_account_id: Optional[int] = None
+    share_amount: Decimal
+    own_withdrawals: Decimal
+    contributed: Decimal
+    recommended_transfer: Decimal
+
+
+class SettlementCreditCard(BaseModel):
+    bank_account_id: int
+    name: str
+    account_id: int
+    owed: Decimal
+
+
+class SettlementLiquidity(BaseModel):
+    operating_balance: Optional[Decimal] = None
+    credit_cards: List[SettlementCreditCard]
+    credit_card_owed_total: Decimal
+
+
+class SettlementCalculation(BaseModel):
+    ledger_id: int
+    month: str
+    as_of: date
+    days_remaining: int
+    month_complete: bool
+    operating_account_id: Optional[int] = None
+    excluded_account_ids: List[int]
+    totals: SettlementTotals
+    planned: List[SettlementPlannedLine]
+    recurring: List[SettlementRecurringLine]
+    members: List[SettlementMemberResult]
+    liquidity: SettlementLiquidity
+
+
 # WebAuthn / Passkey schemas
 class WebAuthnRegistrationStart(BaseModel):
     credential_name: Optional[str] = None

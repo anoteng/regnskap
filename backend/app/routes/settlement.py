@@ -1,6 +1,8 @@
+from datetime import date
 from decimal import Decimal
+import re
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 
 from backend.database import get_db
@@ -15,7 +17,8 @@ from ..models import (
     SettlementSettings,
     User,
 )
-from ..schemas import SettlementSettingsOut, SettlementSettingsUpdate
+from ..schemas import SettlementCalculation, SettlementSettingsOut, SettlementSettingsUpdate
+from ..settlement_engine import SettlementDisabled, calculate_settlement
 from ..auth import get_current_active_user, get_current_ledger, get_user_role_in_ledger
 
 router = APIRouter(prefix="/settlement", tags=["settlement"])
@@ -168,3 +171,30 @@ def _validate(db: Session, ledger_id: int, payload: SettlementSettingsUpdate) ->
         total = sum((m.share_percent for m in payload.members), Decimal("0"))
         if abs(total - Decimal("100")) > SHARE_TOLERANCE:
             raise HTTPException(status_code=400, detail=f"Andelene må summere til 100 % (nå {total} %)")
+
+
+@router.get("/calculation", response_model=SettlementCalculation)
+def get_settlement_calculation(
+    month: str | None = Query(None, description="YYYY-MM, standard er inneværende måned"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    current_ledger: Ledger = Depends(get_current_ledger),
+):
+    """Forecast and per-member split of shared expenses for a month"""
+    today = date.today()
+    if month is None:
+        year, mon = today.year, today.month
+    else:
+        m = re.fullmatch(r"(\d{4})-(\d{2})", month)
+        if not m or not 1 <= int(m.group(2)) <= 12:
+            raise HTTPException(status_code=400, detail="Måned må angis som YYYY-MM")
+        year, mon = int(m.group(1)), int(m.group(2))
+
+    settings = _load_settings(db, current_ledger.id)
+    if settings is None or not settings.is_enabled:
+        raise HTTPException(status_code=409, detail="Månedsavregning er ikke aktivert for dette regnskapet")
+
+    try:
+        return calculate_settlement(db, settings, year, mon, as_of=today)
+    except SettlementDisabled:
+        raise HTTPException(status_code=409, detail="Månedsavregning er ikke aktivert for dette regnskapet")
