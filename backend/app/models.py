@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Date, DECIMAL, Text, ForeignKey, Enum as SQLEnum, LargeBinary
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Date, DECIMAL, Text, ForeignKey, Enum as SQLEnum, LargeBinary, UniqueConstraint
 from sqlalchemy.orm import relationship, deferred
 from sqlalchemy.sql import func
 from datetime import datetime
@@ -698,3 +698,57 @@ class PlannedTransaction(Base):
     suggested_account = relationship("Account")
     matched_transaction = relationship("Transaction", foreign_keys=[matched_transaction_id])
     creator = relationship("User", foreign_keys=[created_by])
+
+
+class SettlementSettings(Base):
+    """Per-ledger configuration for the monthly settlement calculation.
+
+    Feature is opt-in: no row, or is_enabled=False, means the calculation is
+    unavailable for that ledger. Works for a single person (one member at 100%)
+    as well as shared ledgers.
+    """
+    __tablename__ = "settlement_settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ledger_id = Column(Integer, ForeignKey("ledgers.id"), nullable=False, unique=True)
+    is_enabled = Column(Boolean, nullable=False, default=False)
+    # Bank/asset account the shared expenses are paid from
+    operating_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
+    # Months of history used to estimate variable spending
+    variable_lookback_months = Column(Integer, nullable=False, default=3)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    ledger = relationship("Ledger")
+    operating_account = relationship("Account")
+    members = relationship("SettlementMember", back_populates="settings", cascade="all, delete-orphan")
+    excluded_accounts = relationship("SettlementExcludedAccount", back_populates="settings", cascade="all, delete-orphan")
+
+
+class SettlementMember(Base):
+    __tablename__ = "settlement_members"
+    __table_args__ = (UniqueConstraint("settings_id", "user_id", name="uq_settlement_member"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    settings_id = Column(Integer, ForeignKey("settlement_settings.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    share_percent = Column(DECIMAL(5, 2), nullable=False)
+    # Account where this member's contributions are credited and personal
+    # withdrawals from the operating account are debited
+    deposit_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
+
+    settings = relationship("SettlementSettings", back_populates="members")
+    user = relationship("User")
+    deposit_account = relationship("Account")
+
+
+class SettlementExcludedAccount(Base):
+    """Expense accounts left out of the shared-cost calculation."""
+    __tablename__ = "settlement_excluded_accounts"
+
+    settings_id = Column(Integer, ForeignKey("settlement_settings.id"), primary_key=True)
+    account_id = Column(Integer, ForeignKey("accounts.id"), primary_key=True)
+
+    settings = relationship("SettlementSettings", back_populates="excluded_accounts")
+    account = relationship("Account")

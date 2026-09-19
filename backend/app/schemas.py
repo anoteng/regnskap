@@ -423,6 +423,38 @@ class PlannedTransaction(BaseModel):
         from_attributes = True
 
 
+class SettlementMemberInput(BaseModel):
+    user_id: int
+    share_percent: Decimal
+    deposit_account_id: Optional[int] = None
+
+
+class SettlementSettingsUpdate(BaseModel):
+    is_enabled: bool = False
+    operating_account_id: Optional[int] = None
+    variable_lookback_months: int = 3
+    members: List[SettlementMemberInput] = []
+    excluded_account_ids: List[int] = []
+
+
+class SettlementMemberOut(BaseModel):
+    user_id: int
+    full_name: str
+    email: str
+    share_percent: Decimal
+    deposit_account_id: Optional[int] = None
+
+
+class SettlementSettingsOut(BaseModel):
+    ledger_id: int
+    is_enabled: bool
+    operating_account_id: Optional[int] = None
+    variable_lookback_months: int
+    members: List[SettlementMemberOut]
+    excluded_account_ids: List[int]
+    updated_at: Optional[datetime] = None
+
+
 # WebAuthn / Passkey schemas
 class WebAuthnRegistrationStart(BaseModel):
     credential_name: Optional[str] = None
