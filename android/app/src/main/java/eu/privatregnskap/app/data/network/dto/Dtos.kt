@@ -340,3 +340,27 @@ data class SettlementSettingsRequest(
     val members: List<SettlementMemberInput>,
     @Json(name = "excluded_account_ids") val excludedAccountIds: List<Int>
 )
+
+// ─── Ledger creation ─────────────────────────────────────────────────────────
+
+@JsonClass(generateAdapter = true)
+data class ChartTemplateResponse(
+    val id: Int,
+    val name: String,
+    @Json(name = "display_name") val displayName: String,
+    val description: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class BankAccountSetupRequest(
+    val name: String,
+    @Json(name = "account_type") val accountType: String,
+    @Json(name = "account_number") val accountNumber: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class CreateLedgerRequest(
+    val name: String,
+    @Json(name = "chart_template_id") val chartTemplateId: Int? = null,
+    @Json(name = "bank_accounts") val bankAccounts: List<BankAccountSetupRequest>? = null
+)

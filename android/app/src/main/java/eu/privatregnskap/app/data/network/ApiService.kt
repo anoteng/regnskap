@@ -7,6 +7,8 @@ import eu.privatregnskap.app.data.network.dto.BudgetReportResponse
 import eu.privatregnskap.app.data.network.dto.BudgetResponse
 import eu.privatregnskap.app.data.network.dto.ChainRequest
 import eu.privatregnskap.app.data.network.dto.ChainSuggestionsResponse
+import eu.privatregnskap.app.data.network.dto.ChartTemplateResponse
+import eu.privatregnskap.app.data.network.dto.CreateLedgerRequest
 import eu.privatregnskap.app.data.network.dto.LedgerMemberResponse
 import eu.privatregnskap.app.data.network.dto.LedgerResponse
 import eu.privatregnskap.app.data.network.dto.MatchSuggestionResponse
@@ -243,6 +245,12 @@ interface ApiService {
         @Header("X-Ledger-ID") ledgerId: Int? = null,
         @Body settings: SettlementSettingsRequest
     ): SettlementSettingsResponse
+
+    @GET("chart-templates/")
+    suspend fun getChartTemplates(): List<ChartTemplateResponse>
+
+    @POST("ledgers/")
+    suspend fun createLedger(@Body ledger: CreateLedgerRequest): LedgerResponse
 
     @POST("ledgers/{ledgerId}/switch")
     suspend fun switchLedger(

@@ -1,6 +1,7 @@
 package eu.privatregnskap.app.ui.main
 
 import android.net.Uri
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.AttachFile
@@ -15,6 +16,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -28,6 +31,7 @@ import eu.privatregnskap.app.ui.attachments.AttachmentsScreen
 import eu.privatregnskap.app.ui.budget.BudgetScreen
 import eu.privatregnskap.app.ui.dashboard.DashboardScreen
 import eu.privatregnskap.app.ui.postingqueue.PostingQueueScreen
+import eu.privatregnskap.app.ui.ledger.CreateLedgerScreen
 import eu.privatregnskap.app.ui.profile.ProfileScreen
 import eu.privatregnskap.app.ui.settlement.SettlementScreen
 import eu.privatregnskap.app.ui.settlement.SettlementSetupScreen
@@ -44,9 +48,25 @@ private val tabs = listOf(Tab.Dashboard, Tab.PostingQueue, Tab.Attachments, Tab.
 
 private const val SETTLEMENT_ROUTE = "settlement"
 private const val SETTLEMENT_SETUP_ROUTE = "settlement/setup"
+private const val NEW_LEDGER_ROUTE = "ledger/new"
 
 @Composable
-fun MainScreen(onLogout: () -> Unit, initialFileUri: Uri? = null) {
+fun MainScreen(
+    onLogout: () -> Unit,
+    initialFileUri: Uri? = null,
+    mainViewModel: MainViewModel = hiltViewModel()
+) {
+    val hasNoLedgers by mainViewModel.hasNoLedgers.collectAsStateWithLifecycle()
+
+    // Nothing to show until the user has a ledger — onboard instead of the tabs
+    if (hasNoLedgers) {
+        CreateLedgerScreen(
+            innerPadding = PaddingValues(),
+            onCreated = {}
+        )
+        return
+    }
+
     val navController = rememberNavController()
     val currentEntry by navController.currentBackStackEntryAsState()
     val currentRoute = currentEntry?.destination?.route
@@ -89,6 +109,7 @@ fun MainScreen(onLogout: () -> Unit, initialFileUri: Uri? = null) {
                 DashboardScreen(
                     innerPadding = padding,
                     refreshKey = settlementRefresh,
+                    onCreateLedger = { navController.navigate(NEW_LEDGER_ROUTE) { launchSingleTop = true } },
                     onOpenSettlement = { navController.navigate(SETTLEMENT_ROUTE) { launchSingleTop = true } },
                     onSetUpSettlement = { navController.navigate(SETTLEMENT_SETUP_ROUTE) { launchSingleTop = true } }
                 )
@@ -121,7 +142,17 @@ fun MainScreen(onLogout: () -> Unit, initialFileUri: Uri? = null) {
                 BudgetScreen(innerPadding = padding)
             }
             composable(Tab.Profile.route) {
-                ProfileScreen(onLogout = onLogout)
+                ProfileScreen(
+                    onLogout = onLogout,
+                    onCreateLedger = { navController.navigate(NEW_LEDGER_ROUTE) { launchSingleTop = true } }
+                )
+            }
+            composable(NEW_LEDGER_ROUTE) {
+                CreateLedgerScreen(
+                    innerPadding = padding,
+                    onCreated = { navController.popBackStack() },
+                    onBack = { navController.popBackStack() }
+                )
             }
         }
     }

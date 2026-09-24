@@ -7,9 +7,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -31,6 +33,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 @Composable
 fun LedgerPickerSheet(
     onDismiss: () -> Unit,
+    onCreateNew: (() -> Unit)? = null,
     viewModel: LedgerPickerViewModel = hiltViewModel()
 ) {
     val ledgers by viewModel.ledgers.collectAsStateWithLifecycle()
@@ -67,6 +70,21 @@ fun LedgerPickerSheet(
                             onDismiss()
                         }
                     )
+                }
+                if (onCreateNew != null) {
+                    item(key = "create-new") {
+                        HorizontalDivider()
+                        ListItem(
+                            headlineContent = { Text("Nytt regnskap") },
+                            leadingContent = {
+                                Icon(Icons.Default.Add, contentDescription = null)
+                            },
+                            modifier = Modifier.clickable {
+                                onDismiss()
+                                onCreateNew()
+                            }
+                        )
+                    }
                 }
             }
         }

@@ -1,6 +1,8 @@
 package eu.privatregnskap.app.data.repository
 
 import eu.privatregnskap.app.data.network.ApiService
+import eu.privatregnskap.app.data.network.dto.ChartTemplateResponse
+import eu.privatregnskap.app.data.network.dto.CreateLedgerRequest
 import eu.privatregnskap.app.data.network.dto.LedgerResponse
 import eu.privatregnskap.app.data.preferences.LedgerPreferences
 import kotlinx.coroutines.flow.Flow
@@ -49,20 +51,37 @@ class LedgerSelectionRepository @Inject constructor(
             val stored = preferences.selectedLedgerId.first()
             val resolved = list.firstOrNull { it.id == stored } ?: list.firstOrNull()
             _selectedLedgerId.value = resolved?.id
+            _hasNoLedgers.value = list.isEmpty()
         }
     }
 
     suspend fun select(ledgerId: Int) {
-        if (_selectedLedgerId.value == ledgerId) return
+        // Always persist, even when the id is unchanged: a freshly created
+        // ledger may already be the resolved one, and the choice must stick
         preferences.setSelectedLedgerId(ledgerId)
         _selectedLedgerId.value = ledgerId
         // Keep the web session pointing at the same ledger
         runCatching { apiService.switchLedger(ledgerId) }
     }
 
+    /** True once the ledger list is known to be empty — the app has nothing to show. */
+    private val _hasNoLedgers = MutableStateFlow(false)
+    val hasNoLedgers: StateFlow<Boolean> = _hasNoLedgers.asStateFlow()
+
+    suspend fun chartTemplates(): Result<List<ChartTemplateResponse>> =
+        runCatching { apiService.getChartTemplates() }
+
+    /** Creates a ledger and makes it the active one. */
+    suspend fun createLedger(request: CreateLedgerRequest): Result<LedgerResponse> =
+        runCatching { apiService.createLedger(request) }.onSuccess { created ->
+            ensureLoaded(forceRefresh = true)
+            select(created.id)
+        }
+
     suspend fun clear() {
         preferences.clear()
         _selectedLedgerId.value = null
         _ledgers.value = emptyList()
+        _hasNoLedgers.value = false
     }
 }

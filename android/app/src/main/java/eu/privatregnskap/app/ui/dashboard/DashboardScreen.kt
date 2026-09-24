@@ -56,6 +56,7 @@ fun DashboardScreen(
     refreshKey: Int = 0,
     onOpenSettlement: () -> Unit = {},
     onSetUpSettlement: () -> Unit = {},
+    onCreateLedger: () -> Unit = {},
     viewModel: DashboardViewModel = hiltViewModel()
 ) {
     // Reload when the settlement setup screen has saved something
@@ -167,7 +168,10 @@ fun DashboardScreen(
     }
 
     if (showLedgerPicker) {
-        LedgerPickerSheet(onDismiss = { showLedgerPicker = false })
+        LedgerPickerSheet(
+            onDismiss = { showLedgerPicker = false },
+            onCreateNew = onCreateLedger
+        )
     }
 }
 

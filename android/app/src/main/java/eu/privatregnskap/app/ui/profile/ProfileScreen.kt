@@ -75,6 +75,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun ProfileScreen(
     onLogout: () -> Unit,
+    onCreateLedger: () -> Unit = {},
     authViewModel: AuthViewModel = hiltViewModel(),
     profileViewModel: ProfileViewModel = hiltViewModel()
 ) {
@@ -306,7 +307,10 @@ fun ProfileScreen(
     }
 
     if (showLedgerPicker) {
-        LedgerPickerSheet(onDismiss = { showLedgerPicker = false })
+        LedgerPickerSheet(
+            onDismiss = { showLedgerPicker = false },
+            onCreateNew = onCreateLedger
+        )
     }
 
     // Delete confirmation dialog
