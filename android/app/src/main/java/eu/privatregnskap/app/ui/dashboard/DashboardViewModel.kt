@@ -25,9 +25,10 @@ class DashboardViewModel @Inject constructor(
     private val _transactionsState = MutableStateFlow<UiState<List<TransactionResponse>>>(UiState.Idle)
     val transactionsState: StateFlow<UiState<List<TransactionResponse>>> = _transactionsState.asStateFlow()
 
-    // null = settlement not enabled for the ledger (or not loaded); card is hidden
-    private val _settlement = MutableStateFlow<SettlementCalculationResponse?>(null)
-    val settlement: StateFlow<SettlementCalculationResponse?> = _settlement.asStateFlow()
+    // Success(null) = settlement not enabled for this ledger, so the card stays
+    // hidden; Error means the load failed and the user should be told
+    private val _settlementState = MutableStateFlow<UiState<SettlementCalculationResponse?>>(UiState.Idle)
+    val settlementState: StateFlow<UiState<SettlementCalculationResponse?>> = _settlementState.asStateFlow()
 
     private var currentLedgerId: Int? = null
 
@@ -61,10 +62,12 @@ class DashboardViewModel @Inject constructor(
 
     private fun loadSettlement() {
         viewModelScope.launch {
-            // Best effort: a failure here should never disturb the dashboard
-            _settlement.value = settlementRepository
+            _settlementState.value = settlementRepository
                 .getCalculation(currentLedgerId, month = null)
-                .getOrNull()
+                .fold(
+                    onSuccess = { UiState.Success(it) },
+                    onFailure = { UiState.Error(it.message ?: "Ukjent feil") }
+                )
         }
     }
 }

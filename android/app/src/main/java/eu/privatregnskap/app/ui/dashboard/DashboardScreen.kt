@@ -29,6 +29,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -48,7 +49,7 @@ fun DashboardScreen(
     viewModel: DashboardViewModel = hiltViewModel()
 ) {
     val transactionsState by viewModel.transactionsState.collectAsStateWithLifecycle()
-    val settlement by viewModel.settlement.collectAsStateWithLifecycle()
+    val settlementState by viewModel.settlementState.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
@@ -83,29 +84,43 @@ fun DashboardScreen(
                 }
                 is UiState.Success -> {
                     val transactions = state.data
-                    if (transactions.isEmpty()) {
-                        Text(
-                            text = "Ingen transaksjoner",
-                            modifier = Modifier
-                                .align(Alignment.Center)
-                                .padding(24.dp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    } else {
-                        LazyColumn(modifier = Modifier.fillMaxSize()) {
-                            settlement?.let { calc ->
+                    LazyColumn(modifier = Modifier.fillMaxSize()) {
+                        when (val settlement = settlementState) {
+                            is UiState.Success -> settlement.data?.let { calc ->
                                 item(key = "settlement") {
                                     SettlementSummaryCard(calc, onClick = onOpenSettlement)
                                 }
                             }
-                            item(key = "tx-header") {
+                            is UiState.Error -> item(key = "settlement-error") {
                                 Text(
-                                    text = "Siste transaksjoner",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp)
+                                    text = "Kunne ikke hente månedsavregning: ${settlement.message}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                                 )
                             }
+                            else -> Unit
+                        }
+                        item(key = "tx-header") {
+                            Text(
+                                text = "Siste transaksjoner",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp)
+                            )
+                        }
+                        if (transactions.isEmpty()) {
+                            item(key = "tx-empty") {
+                                Text(
+                                    text = "Ingen transaksjoner",
+                                    textAlign = TextAlign.Center,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(24.dp)
+                                )
+                            }
+                        } else {
                             items(transactions) { transaction ->
                                 TransactionItem(transaction)
                             }
