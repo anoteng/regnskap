@@ -15,6 +15,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -27,6 +30,7 @@ import eu.privatregnskap.app.ui.dashboard.DashboardScreen
 import eu.privatregnskap.app.ui.postingqueue.PostingQueueScreen
 import eu.privatregnskap.app.ui.profile.ProfileScreen
 import eu.privatregnskap.app.ui.settlement.SettlementScreen
+import eu.privatregnskap.app.ui.settlement.SettlementSetupScreen
 
 private sealed class Tab(val route: String, val label: String, val icon: ImageVector) {
     object Dashboard : Tab("tab/dashboard", "Hjem", Icons.Default.Home)
@@ -39,12 +43,15 @@ private sealed class Tab(val route: String, val label: String, val icon: ImageVe
 private val tabs = listOf(Tab.Dashboard, Tab.PostingQueue, Tab.Attachments, Tab.Budget, Tab.Profile)
 
 private const val SETTLEMENT_ROUTE = "settlement"
+private const val SETTLEMENT_SETUP_ROUTE = "settlement/setup"
 
 @Composable
 fun MainScreen(onLogout: () -> Unit, initialFileUri: Uri? = null) {
     val navController = rememberNavController()
     val currentEntry by navController.currentBackStackEntryAsState()
     val currentRoute = currentEntry?.destination?.route
+    // Bumped when the setup screen saves, so the screens behind it reload
+    var settlementRefresh by rememberSaveable { mutableIntStateOf(0) }
 
     LaunchedEffect(initialFileUri) {
         if (initialFileUri != null) {
@@ -81,11 +88,28 @@ fun MainScreen(onLogout: () -> Unit, initialFileUri: Uri? = null) {
             composable(Tab.Dashboard.route) {
                 DashboardScreen(
                     innerPadding = padding,
-                    onOpenSettlement = { navController.navigate(SETTLEMENT_ROUTE) { launchSingleTop = true } }
+                    refreshKey = settlementRefresh,
+                    onOpenSettlement = { navController.navigate(SETTLEMENT_ROUTE) { launchSingleTop = true } },
+                    onSetUpSettlement = { navController.navigate(SETTLEMENT_SETUP_ROUTE) { launchSingleTop = true } }
                 )
             }
             composable(SETTLEMENT_ROUTE) {
-                SettlementScreen(innerPadding = padding, onBack = { navController.popBackStack() })
+                SettlementScreen(
+                    innerPadding = padding,
+                    refreshKey = settlementRefresh,
+                    onBack = { navController.popBackStack() },
+                    onSetUp = { navController.navigate(SETTLEMENT_SETUP_ROUTE) { launchSingleTop = true } }
+                )
+            }
+            composable(SETTLEMENT_SETUP_ROUTE) {
+                SettlementSetupScreen(
+                    innerPadding = padding,
+                    onBack = { navController.popBackStack() },
+                    onSaved = {
+                        settlementRefresh++
+                        navController.popBackStack()
+                    }
+                )
             }
             composable(Tab.PostingQueue.route) {
                 PostingQueueScreen(innerPadding = padding)

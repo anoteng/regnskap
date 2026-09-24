@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -26,6 +27,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,9 +47,15 @@ import eu.privatregnskap.app.ui.auth.UiState
 @Composable
 fun DashboardScreen(
     innerPadding: PaddingValues = PaddingValues(),
+    refreshKey: Int = 0,
     onOpenSettlement: () -> Unit = {},
+    onSetUpSettlement: () -> Unit = {},
     viewModel: DashboardViewModel = hiltViewModel()
 ) {
+    // Reload when the settlement setup screen has saved something
+    LaunchedEffect(refreshKey) {
+        if (refreshKey > 0) viewModel.loadTransactions()
+    }
     val transactionsState by viewModel.transactionsState.collectAsStateWithLifecycle()
     val settlementState by viewModel.settlementState.collectAsStateWithLifecycle()
 
@@ -86,9 +94,16 @@ fun DashboardScreen(
                     val transactions = state.data
                     LazyColumn(modifier = Modifier.fillMaxSize()) {
                         when (val settlement = settlementState) {
-                            is UiState.Success -> settlement.data?.let { calc ->
-                                item(key = "settlement") {
-                                    SettlementSummaryCard(calc, onClick = onOpenSettlement)
+                            is UiState.Success -> {
+                                val calc = settlement.data
+                                if (calc != null) {
+                                    item(key = "settlement") {
+                                        SettlementSummaryCard(calc, onClick = onOpenSettlement)
+                                    }
+                                } else {
+                                    item(key = "settlement-invite") {
+                                        SettlementInviteCard(onClick = onSetUpSettlement)
+                                    }
                                 }
                             }
                             is UiState.Error -> item(key = "settlement-error") {
@@ -128,6 +143,38 @@ fun DashboardScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SettlementInviteCard(onClick: () -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "Sett opp månedsavregning",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                text = "Se hvor mye hver av dere bør overføre til felleskontoen denne måneden, " +
+                    "ut fra faktiske kostnader, registrerte fakturaer og faste trekk.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Kom i gang",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary
+            )
         }
     }
 }

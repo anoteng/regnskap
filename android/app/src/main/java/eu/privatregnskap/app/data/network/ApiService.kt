@@ -7,6 +7,7 @@ import eu.privatregnskap.app.data.network.dto.BudgetReportResponse
 import eu.privatregnskap.app.data.network.dto.BudgetResponse
 import eu.privatregnskap.app.data.network.dto.ChainRequest
 import eu.privatregnskap.app.data.network.dto.ChainSuggestionsResponse
+import eu.privatregnskap.app.data.network.dto.LedgerMemberResponse
 import eu.privatregnskap.app.data.network.dto.LedgerResponse
 import eu.privatregnskap.app.data.network.dto.MatchSuggestionResponse
 import eu.privatregnskap.app.data.network.dto.PasskeyCredentialResponse
@@ -14,6 +15,8 @@ import eu.privatregnskap.app.data.network.dto.PasskeyRegisterBeginRequest
 import eu.privatregnskap.app.data.network.dto.PasswordResetRequest
 import eu.privatregnskap.app.data.network.dto.PostingQueueResponse
 import eu.privatregnskap.app.data.network.dto.SettlementCalculationResponse
+import eu.privatregnskap.app.data.network.dto.SettlementSettingsRequest
+import eu.privatregnskap.app.data.network.dto.SettlementSettingsResponse
 import eu.privatregnskap.app.data.network.dto.TokenResponse
 import eu.privatregnskap.app.data.network.dto.TransactionResponse
 import eu.privatregnskap.app.data.network.dto.UpdateTransactionRequest
@@ -229,6 +232,22 @@ interface ApiService {
         @Header("X-Ledger-ID") ledgerId: Int? = null,
         @Query("month") month: String? = null
     ): SettlementCalculationResponse
+
+    @GET("settlement/settings")
+    suspend fun getSettlementSettings(
+        @Header("X-Ledger-ID") ledgerId: Int? = null
+    ): SettlementSettingsResponse
+
+    @PUT("settlement/settings")
+    suspend fun updateSettlementSettings(
+        @Header("X-Ledger-ID") ledgerId: Int? = null,
+        @Body settings: SettlementSettingsRequest
+    ): SettlementSettingsResponse
+
+    @GET("ledgers/{ledgerId}/members")
+    suspend fun getLedgerMembers(
+        @Path("ledgerId") ledgerId: Int
+    ): List<LedgerMemberResponse>
 
     // ─── Chain suggestions ────────────────────────────────────────────────────
 

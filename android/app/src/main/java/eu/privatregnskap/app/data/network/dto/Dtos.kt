@@ -295,3 +295,48 @@ data class SettlementCalculationResponse(
     val members: List<SettlementMemberResult>,
     val liquidity: SettlementLiquidity
 )
+
+// ─── Settlement settings ─────────────────────────────────────────────────────
+
+@JsonClass(generateAdapter = true)
+data class LedgerMemberResponse(
+    @Json(name = "user_id") val userId: Int,
+    val role: String,
+    val user: UserResponse
+)
+
+@JsonClass(generateAdapter = true)
+data class SettlementMemberConfig(
+    @Json(name = "user_id") val userId: Int,
+    @Json(name = "full_name") val fullName: String,
+    val email: String,
+    @Json(name = "share_percent") val sharePercent: String,
+    @Json(name = "deposit_account_id") val depositAccountId: Int? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class SettlementSettingsResponse(
+    @Json(name = "ledger_id") val ledgerId: Int,
+    @Json(name = "is_enabled") val isEnabled: Boolean,
+    @Json(name = "operating_account_id") val operatingAccountId: Int? = null,
+    @Json(name = "variable_lookback_months") val variableLookbackMonths: Int,
+    val members: List<SettlementMemberConfig>,
+    @Json(name = "excluded_account_ids") val excludedAccountIds: List<Int>,
+    @Json(name = "updated_at") val updatedAt: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class SettlementMemberInput(
+    @Json(name = "user_id") val userId: Int,
+    @Json(name = "share_percent") val sharePercent: Double,
+    @Json(name = "deposit_account_id") val depositAccountId: Int? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class SettlementSettingsRequest(
+    @Json(name = "is_enabled") val isEnabled: Boolean,
+    @Json(name = "operating_account_id") val operatingAccountId: Int? = null,
+    @Json(name = "variable_lookback_months") val variableLookbackMonths: Int,
+    val members: List<SettlementMemberInput>,
+    @Json(name = "excluded_account_ids") val excludedAccountIds: List<Int>
+)

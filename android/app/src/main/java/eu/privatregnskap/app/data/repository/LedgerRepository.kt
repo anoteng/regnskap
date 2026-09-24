@@ -1,12 +1,14 @@
 package eu.privatregnskap.app.data.repository
 
 import eu.privatregnskap.app.data.network.ApiService
+import eu.privatregnskap.app.data.network.dto.LedgerMemberResponse
 import eu.privatregnskap.app.data.network.dto.LedgerResponse
 import javax.inject.Inject
 import javax.inject.Singleton
 
 interface LedgerRepository {
     suspend fun getLedgers(): Result<List<LedgerResponse>>
+    suspend fun getMembers(ledgerId: Int): Result<List<LedgerMemberResponse>>
 }
 
 @Singleton
@@ -20,4 +22,7 @@ class LedgerRepositoryImpl @Inject constructor(
             Result.failure(e)
         }
     }
+
+    override suspend fun getMembers(ledgerId: Int): Result<List<LedgerMemberResponse>> =
+        runCatching { apiService.getLedgerMembers(ledgerId) }
 }

@@ -18,6 +18,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -31,6 +32,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -73,9 +75,15 @@ private fun formatDay(iso: String): String =
 fun SettlementScreen(
     innerPadding: PaddingValues,
     onBack: () -> Unit,
+    refreshKey: Int = 0,
+    onSetUp: () -> Unit = {},
     viewModel: SettlementViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+
+    LaunchedEffect(refreshKey) {
+        if (refreshKey > 0) viewModel.load()
+    }
 
     Scaffold(
         topBar = {
@@ -118,12 +126,18 @@ fun SettlementScreen(
                         modifier = Modifier.align(Alignment.Center).padding(24.dp)
                     )
 
-                    !state.isEnabled -> Text(
-                        text = "Månedsavregning er ikke aktivert for dette regnskapet. Eier kan aktivere den under Innstillinger i nettversjonen.",
-                        textAlign = TextAlign.Center,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.align(Alignment.Center).padding(24.dp)
-                    )
+                    !state.isEnabled -> Column(
+                        modifier = Modifier.align(Alignment.Center).padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "Månedsavregning er ikke aktivert for dette regnskapet ennå.",
+                            textAlign = TextAlign.Center,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Button(onClick = onSetUp) { Text("Sett opp nå") }
+                    }
 
                     state.calculation != null -> SettlementContent(state.calculation!!)
                 }
