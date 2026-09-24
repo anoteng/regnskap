@@ -15,14 +15,14 @@ val localProps = Properties().apply {
 
 android {
     namespace = "eu.privatregnskap.app"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "eu.privatregnskap.app"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 42
-        versionName = "2.3.0"
+        targetSdk = 36
+        versionCode = 43
+        versionName = "2.3.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
