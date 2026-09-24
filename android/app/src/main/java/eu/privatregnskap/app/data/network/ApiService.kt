@@ -244,6 +244,11 @@ interface ApiService {
         @Body settings: SettlementSettingsRequest
     ): SettlementSettingsResponse
 
+    @POST("ledgers/{ledgerId}/switch")
+    suspend fun switchLedger(
+        @Path("ledgerId") ledgerId: Int
+    ): ResponseBody
+
     @GET("ledgers/{ledgerId}/members")
     suspend fun getLedgerMembers(
         @Path("ledgerId") ledgerId: Int

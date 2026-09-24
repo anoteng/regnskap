@@ -7,6 +7,7 @@ import eu.privatregnskap.app.data.network.dto.AccountResponse
 import eu.privatregnskap.app.data.network.dto.SettlementMemberInput
 import eu.privatregnskap.app.data.network.dto.SettlementSettingsRequest
 import eu.privatregnskap.app.data.repository.LedgerRepository
+import eu.privatregnskap.app.data.repository.LedgerSelectionRepository
 import eu.privatregnskap.app.data.repository.PostingQueueRepository
 import eu.privatregnskap.app.data.repository.SettlementRepository
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -59,6 +60,7 @@ data class SettlementSetupUiState(
 class SettlementSetupViewModel @Inject constructor(
     private val settlementRepository: SettlementRepository,
     private val ledgerRepository: LedgerRepository,
+    private val ledgerSelection: LedgerSelectionRepository,
     private val postingQueueRepository: PostingQueueRepository
 ) : ViewModel() {
 
@@ -75,7 +77,8 @@ class SettlementSetupViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, loadError = null, saved = false) }
 
-            val ledger = ledgerRepository.getLedgers().getOrNull()?.firstOrNull()
+            ledgerSelection.ensureLoaded()
+            val ledger = ledgerSelection.selectedLedger
             if (ledger == null) {
                 _uiState.update { it.copy(isLoading = false, loadError = "Fant ingen regnskap") }
                 return@launch

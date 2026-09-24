@@ -12,6 +12,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.privatregnskap.app.data.network.dto.PasskeyCredentialResponse
 import eu.privatregnskap.app.data.preferences.NotificationPreferences
+import eu.privatregnskap.app.data.repository.LedgerSelectionRepository
 import eu.privatregnskap.app.data.repository.PasskeyRepository
 import eu.privatregnskap.app.worker.PostingQueueCheckWorker
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -20,6 +21,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.time.LocalDateTime
@@ -32,8 +34,14 @@ import javax.inject.Inject
 class ProfileViewModel @Inject constructor(
     private val passkeyRepository: PasskeyRepository,
     private val notificationPreferences: NotificationPreferences,
+    private val ledgerSelection: LedgerSelectionRepository,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
+
+    val ledgerName: StateFlow<String?> =
+        combine(ledgerSelection.ledgers, ledgerSelection.selected) { list, id ->
+            list.firstOrNull { it.id == id }?.name
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     private val _credentials = MutableStateFlow<List<PasskeyCredentialResponse>>(emptyList())
     val credentials: StateFlow<List<PasskeyCredentialResponse>> = _credentials.asStateFlow()

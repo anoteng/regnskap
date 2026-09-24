@@ -12,7 +12,7 @@ import eu.privatregnskap.app.data.network.dto.TransactionResponse
 import eu.privatregnskap.app.data.network.dto.UpdateTransactionRequest
 import eu.privatregnskap.app.BuildConfig
 import eu.privatregnskap.app.data.repository.AttachmentRepository
-import eu.privatregnskap.app.data.repository.LedgerRepository
+import eu.privatregnskap.app.data.repository.LedgerSelectionRepository
 import eu.privatregnskap.app.data.repository.PostingQueueRepository
 import eu.privatregnskap.app.data.repository.TokenRepository
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -33,7 +33,7 @@ data class PostingQueueUiState(
 @HiltViewModel
 class PostingQueueViewModel @Inject constructor(
     private val repository: PostingQueueRepository,
-    private val ledgerRepository: LedgerRepository,
+    private val ledgerSelection: LedgerSelectionRepository,
     private val attachmentRepository: AttachmentRepository,
     private val tokenRepository: TokenRepository
 ) : ViewModel() {
@@ -60,23 +60,22 @@ class PostingQueueViewModel @Inject constructor(
     private var currentLedgerId: Int? = null
 
     init {
-        loadAll()
+        viewModelScope.launch {
+            ledgerSelection.ensureLoaded().onFailure {
+                _uiState.value = PostingQueueUiState(
+                    error = it.message ?: "Kunne ikke laste regnskaper"
+                )
+            }
+            ledgerSelection.selectedLedgerId.collect { id ->
+                currentLedgerId = id
+                loadAll()
+            }
+        }
     }
 
     fun loadAll() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
-
-            if (currentLedgerId == null) {
-                ledgerRepository.getLedgers().onSuccess { list ->
-                    currentLedgerId = list.firstOrNull()?.id
-                }.onFailure {
-                    _uiState.value = PostingQueueUiState(
-                        error = it.message ?: "Kunne ikke laste regnskaper"
-                    )
-                    return@launch
-                }
-            }
 
             val lid = currentLedgerId
 

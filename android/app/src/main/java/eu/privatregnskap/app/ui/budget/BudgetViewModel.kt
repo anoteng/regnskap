@@ -7,7 +7,7 @@ import eu.privatregnskap.app.data.network.dto.BudgetDrilldownEntry
 import eu.privatregnskap.app.data.network.dto.BudgetReportResponse
 import eu.privatregnskap.app.data.network.dto.BudgetResponse
 import eu.privatregnskap.app.data.repository.BudgetRepository
-import eu.privatregnskap.app.data.repository.LedgerRepository
+import eu.privatregnskap.app.data.repository.LedgerSelectionRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -29,7 +29,7 @@ data class BudgetReportUiState(
 @HiltViewModel
 class BudgetViewModel @Inject constructor(
     private val budgetRepository: BudgetRepository,
-    private val ledgerRepository: LedgerRepository
+    private val ledgerSelection: LedgerSelectionRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(BudgetUiState())
@@ -44,20 +44,21 @@ class BudgetViewModel @Inject constructor(
     private var currentLedgerId: Int? = null
 
     init {
-        loadBudgets()
+        viewModelScope.launch {
+            ledgerSelection.ensureLoaded().onFailure {
+                _uiState.value = BudgetUiState(error = "Kunne ikke laste regnskaper")
+            }
+            ledgerSelection.selectedLedgerId.collect { id ->
+                currentLedgerId = id
+                clearReport()
+                loadBudgets()
+            }
+        }
     }
 
     fun loadBudgets() {
         viewModelScope.launch {
             _uiState.value = BudgetUiState(isLoading = true)
-            if (currentLedgerId == null) {
-                ledgerRepository.getLedgers().onSuccess { list ->
-                    currentLedgerId = list.firstOrNull()?.id
-                }.onFailure {
-                    _uiState.value = BudgetUiState(error = "Kunne ikke laste regnskaper")
-                    return@launch
-                }
-            }
             budgetRepository.getBudgets(currentLedgerId).fold(
                 onSuccess = { _uiState.value = BudgetUiState(budgets = it) },
                 onFailure = { _uiState.value = BudgetUiState(error = it.message ?: "Ukjent feil") }

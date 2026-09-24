@@ -24,8 +24,11 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.fragment.app.FragmentActivity
+import eu.privatregnskap.app.ui.common.LedgerPickerSheet
 import eu.privatregnskap.app.ui.common.showBiometricPrompt
 import androidx.compose.material3.Switch
 import androidx.core.content.ContextCompat
@@ -79,6 +82,8 @@ fun ProfileScreen(
     val isLoading by profileViewModel.isLoading.collectAsStateWithLifecycle()
     val registerOptionsState by profileViewModel.registerOptionsState.collectAsStateWithLifecycle()
     val queueNotificationsEnabled by profileViewModel.queueNotificationsEnabled.collectAsStateWithLifecycle()
+    val ledgerName by profileViewModel.ledgerName.collectAsStateWithLifecycle()
+    var showLedgerPicker by remember { mutableStateOf(false) }
 
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
@@ -138,6 +143,19 @@ fun ProfileScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             item {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("Regnskap", style = MaterialTheme.typography.titleMedium)
+                Spacer(modifier = Modifier.height(4.dp))
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    ListItem(
+                        headlineContent = { Text("Aktivt regnskap") },
+                        supportingContent = { Text(ledgerName ?: "Laster…") },
+                        leadingContent = {
+                            Icon(Icons.Default.SwapHoriz, contentDescription = null)
+                        },
+                        modifier = Modifier.clickable { showLedgerPicker = true }
+                    )
+                }
                 Spacer(modifier = Modifier.height(8.dp))
                 Text("Innstillinger", style = MaterialTheme.typography.titleMedium)
                 Spacer(modifier = Modifier.height(4.dp))
@@ -285,6 +303,10 @@ fun ProfileScreen(
                 Spacer(modifier = Modifier.height(16.dp))
             }
         }
+    }
+
+    if (showLedgerPicker) {
+        LedgerPickerSheet(onDismiss = { showLedgerPicker = false })
     }
 
     // Delete confirmation dialog

@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -29,14 +30,19 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.privatregnskap.app.data.network.dto.SettlementCalculationResponse
 import eu.privatregnskap.app.data.network.dto.TransactionResponse
+import eu.privatregnskap.app.ui.common.LedgerPickerSheet
 import eu.privatregnskap.app.ui.settlement.MemberCard
 import eu.privatregnskap.app.ui.settlement.formatKr
 import eu.privatregnskap.app.ui.settlement.monthLabel
@@ -58,11 +64,25 @@ fun DashboardScreen(
     }
     val transactionsState by viewModel.transactionsState.collectAsStateWithLifecycle()
     val settlementState by viewModel.settlementState.collectAsStateWithLifecycle()
+    val ledgerName by viewModel.ledgerName.collectAsStateWithLifecycle()
+    var showLedgerPicker by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Hjem") },
+                title = {
+                    Row(
+                        modifier = Modifier.clickable { showLedgerPicker = true },
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = ledgerName ?: "Hjem",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Icon(Icons.Default.ArrowDropDown, contentDescription = "Bytt regnskap")
+                    }
+                },
                 actions = {
                     IconButton(onClick = { viewModel.loadTransactions() }) {
                         Icon(Icons.Default.Refresh, contentDescription = "Last på nytt")
@@ -144,6 +164,10 @@ fun DashboardScreen(
                 }
             }
         }
+    }
+
+    if (showLedgerPicker) {
+        LedgerPickerSheet(onDismiss = { showLedgerPicker = false })
     }
 }
 

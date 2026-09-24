@@ -4,7 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import eu.privatregnskap.app.data.network.dto.SettlementCalculationResponse
-import eu.privatregnskap.app.data.repository.LedgerRepository
+import eu.privatregnskap.app.data.repository.LedgerSelectionRepository
 import eu.privatregnskap.app.data.repository.SettlementRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -24,7 +24,7 @@ data class SettlementUiState(
 @HiltViewModel
 class SettlementViewModel @Inject constructor(
     private val settlementRepository: SettlementRepository,
-    private val ledgerRepository: LedgerRepository
+    private val ledgerSelection: LedgerSelectionRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettlementUiState())
@@ -33,7 +33,15 @@ class SettlementViewModel @Inject constructor(
     private var currentLedgerId: Int? = null
 
     init {
-        load()
+        viewModelScope.launch {
+            ledgerSelection.ensureLoaded().onFailure {
+                _uiState.value = _uiState.value.copy(isLoading = false, error = "Kunne ikke laste regnskaper")
+            }
+            ledgerSelection.selectedLedgerId.collect { id ->
+                currentLedgerId = id
+                load()
+            }
+        }
     }
 
     fun previousMonth() = setMonth(_uiState.value.month.minusMonths(1))
@@ -48,15 +56,6 @@ class SettlementViewModel @Inject constructor(
     fun load() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
-            if (currentLedgerId == null) {
-                ledgerRepository.getLedgers().fold(
-                    onSuccess = { currentLedgerId = it.firstOrNull()?.id },
-                    onFailure = {
-                        _uiState.value = _uiState.value.copy(isLoading = false, error = "Kunne ikke laste regnskaper")
-                        return@launch
-                    }
-                )
-            }
             val month = _uiState.value.month.toString()
             settlementRepository.getCalculation(currentLedgerId, month).fold(
                 onSuccess = { calc ->

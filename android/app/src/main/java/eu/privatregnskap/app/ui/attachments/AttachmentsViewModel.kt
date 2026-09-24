@@ -11,7 +11,7 @@ import eu.privatregnskap.app.data.network.dto.AttachmentResponse
 import eu.privatregnskap.app.data.network.dto.MatchSuggestionResponse
 import eu.privatregnskap.app.data.network.dto.TransactionResponse
 import eu.privatregnskap.app.data.repository.AttachmentRepository
-import eu.privatregnskap.app.data.repository.LedgerRepository
+import eu.privatregnskap.app.data.repository.LedgerSelectionRepository
 import eu.privatregnskap.app.data.repository.TokenRepository
 import eu.privatregnskap.app.data.repository.TransactionRepository
 import kotlinx.coroutines.Dispatchers
@@ -38,7 +38,7 @@ data class AttachmentsUiState(
 class AttachmentsViewModel @Inject constructor(
     private val repository: AttachmentRepository,
     private val transactionRepository: TransactionRepository,
-    private val ledgerRepository: LedgerRepository,
+    private val ledgerSelection: LedgerSelectionRepository,
     private val tokenRepository: TokenRepository
 ) : ViewModel() {
 
@@ -67,7 +67,15 @@ class AttachmentsViewModel @Inject constructor(
     private var currentSearch: String? = null
 
     init {
-        loadAll()
+        viewModelScope.launch {
+            ledgerSelection.ensureLoaded().onFailure {
+                _uiState.value = AttachmentsUiState(error = "Kunne ikke laste regnskaper")
+            }
+            ledgerSelection.selectedLedgerId.collect { id ->
+                currentLedgerId = id
+                loadAll()
+            }
+        }
     }
 
     fun imageUrl(id: Int): String {
@@ -81,15 +89,6 @@ class AttachmentsViewModel @Inject constructor(
         currentSearch = search
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
-
-            if (currentLedgerId == null) {
-                ledgerRepository.getLedgers().onSuccess { list ->
-                    currentLedgerId = list.firstOrNull()?.id
-                }.onFailure {
-                    _uiState.value = AttachmentsUiState(error = "Kunne ikke laste regnskaper")
-                    return@launch
-                }
-            }
 
             repository.getAttachments(currentLedgerId, statusFilter, search?.ifBlank { null }).fold(
                 onSuccess = { list ->

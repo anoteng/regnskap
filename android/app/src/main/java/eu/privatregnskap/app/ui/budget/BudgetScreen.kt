@@ -36,6 +36,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -71,6 +72,15 @@ fun BudgetScreen(innerPadding: PaddingValues) {
     // null = year total, 1-12 = specific month
     var selectedMonth by rememberSaveable { mutableStateOf<Int?>(LocalDate.now().monthValue) }
     var drilldownLine by remember { mutableStateOf<BudgetReportLine?>(null) }
+
+    // A ledger switch replaces the budget list; drop a selection that no longer exists
+    LaunchedEffect(uiState.budgets) {
+        val current = selectedBudget
+        if (current != null && uiState.budgets.none { it.id == current.id }) {
+            selectedBudget = null
+            viewModel.clearReport()
+        }
+    }
 
     BackHandler(enabled = selectedBudget != null) {
         selectedBudget = null

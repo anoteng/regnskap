@@ -23,7 +23,8 @@ interface AuthRepository {
 @Singleton
 class AuthRepositoryImpl @Inject constructor(
     private val apiService: ApiService,
-    private val tokenRepository: TokenRepository
+    private val tokenRepository: TokenRepository,
+    private val ledgerSelectionRepository: LedgerSelectionRepository
 ) : AuthRepository {
 
     override val isLoggedIn: Flow<Boolean> = tokenRepository.isLoggedInFlow
@@ -111,5 +112,6 @@ class AuthRepositoryImpl @Inject constructor(
             } catch (_: Exception) {}
         }
         tokenRepository.clearTokens()
+        ledgerSelectionRepository.clear()
     }
 }
