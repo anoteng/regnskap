@@ -5,6 +5,10 @@ import eu.privatregnskap.app.data.network.dto.AttachmentResponse
 import eu.privatregnskap.app.data.network.dto.BudgetDrilldownEntry
 import eu.privatregnskap.app.data.network.dto.BudgetReportResponse
 import eu.privatregnskap.app.data.network.dto.BudgetResponse
+import eu.privatregnskap.app.data.network.dto.BankAccountResponse
+import eu.privatregnskap.app.data.network.dto.CsvImportResultResponse
+import eu.privatregnskap.app.data.network.dto.CsvMappingResponse
+import eu.privatregnskap.app.data.network.dto.CsvPreviewResponse
 import eu.privatregnskap.app.data.network.dto.ChainRequest
 import eu.privatregnskap.app.data.network.dto.ChainSuggestionsResponse
 import eu.privatregnskap.app.data.network.dto.ChartTemplateResponse
@@ -245,6 +249,34 @@ interface ApiService {
         @Header("X-Ledger-ID") ledgerId: Int? = null,
         @Body settings: SettlementSettingsRequest
     ): SettlementSettingsResponse
+
+    // ─── CSV import ───────────────────────────────────────────────────────────
+
+    @GET("bank-accounts/")
+    suspend fun getBankAccounts(
+        @Header("X-Ledger-ID") ledgerId: Int? = null
+    ): List<BankAccountResponse>
+
+    @Multipart
+    @POST("transactions/csv-preview")
+    suspend fun csvPreview(
+        @Part file: MultipartBody.Part,
+        @Part("delimiter") delimiter: RequestBody
+    ): CsvPreviewResponse
+
+    @Multipart
+    @POST("transactions/import-csv/{bankAccountId}")
+    suspend fun importCsv(
+        @Header("X-Ledger-ID") ledgerId: Int? = null,
+        @Path("bankAccountId") bankAccountId: Int,
+        @Part file: MultipartBody.Part,
+        @Part("mapping_config") mappingConfig: RequestBody
+    ): CsvImportResultResponse
+
+    @GET("csv-mappings/")
+    suspend fun getCsvMappings(
+        @Header("X-Ledger-ID") ledgerId: Int? = null
+    ): List<CsvMappingResponse>
 
     @GET("chart-templates/")
     suspend fun getChartTemplates(): List<ChartTemplateResponse>

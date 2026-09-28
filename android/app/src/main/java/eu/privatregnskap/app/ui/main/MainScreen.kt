@@ -31,6 +31,7 @@ import eu.privatregnskap.app.ui.attachments.AttachmentsScreen
 import eu.privatregnskap.app.ui.budget.BudgetScreen
 import eu.privatregnskap.app.ui.dashboard.DashboardScreen
 import eu.privatregnskap.app.ui.postingqueue.PostingQueueScreen
+import eu.privatregnskap.app.ui.csvimport.CsvImportScreen
 import eu.privatregnskap.app.ui.ledger.CreateLedgerScreen
 import eu.privatregnskap.app.ui.profile.ProfileScreen
 import eu.privatregnskap.app.ui.settlement.SettlementScreen
@@ -49,6 +50,7 @@ private val tabs = listOf(Tab.Dashboard, Tab.PostingQueue, Tab.Attachments, Tab.
 private const val SETTLEMENT_ROUTE = "settlement"
 private const val SETTLEMENT_SETUP_ROUTE = "settlement/setup"
 private const val NEW_LEDGER_ROUTE = "ledger/new"
+private const val CSV_IMPORT_ROUTE = "transactions/import-csv"
 
 @Composable
 fun MainScreen(
@@ -72,6 +74,7 @@ fun MainScreen(
     val currentRoute = currentEntry?.destination?.route
     // Bumped when the setup screen saves, so the screens behind it reload
     var settlementRefresh by rememberSaveable { mutableIntStateOf(0) }
+    var queueRefresh by rememberSaveable { mutableIntStateOf(0) }
 
     LaunchedEffect(initialFileUri) {
         if (initialFileUri != null) {
@@ -133,7 +136,21 @@ fun MainScreen(
                 )
             }
             composable(Tab.PostingQueue.route) {
-                PostingQueueScreen(innerPadding = padding)
+                PostingQueueScreen(
+                    innerPadding = padding,
+                    onImportCsv = { navController.navigate(CSV_IMPORT_ROUTE) { launchSingleTop = true } },
+                    refreshKey = queueRefresh
+                )
+            }
+            composable(CSV_IMPORT_ROUTE) {
+                CsvImportScreen(
+                    innerPadding = padding,
+                    onBack = { navController.popBackStack() },
+                    onImported = {
+                        queueRefresh++
+                        navController.popBackStack()
+                    }
+                )
             }
             composable(Tab.Attachments.route) {
                 AttachmentsScreen(innerPadding = padding, initialUri = initialFileUri)

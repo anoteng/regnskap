@@ -364,3 +364,43 @@ data class CreateLedgerRequest(
     @Json(name = "chart_template_id") val chartTemplateId: Int? = null,
     @Json(name = "bank_accounts") val bankAccounts: List<BankAccountSetupRequest>? = null
 )
+
+// ─── CSV import ──────────────────────────────────────────────────────────────
+
+@JsonClass(generateAdapter = true)
+data class BankAccountResponse(
+    val id: Int,
+    val name: String,
+    @Json(name = "account_type") val accountType: String,
+    @Json(name = "account_number") val accountNumber: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class CsvPreviewResponse(
+    val columns: List<String>,
+    val preview: List<List<String>>,
+    @Json(name = "total_rows") val totalRows: Int
+)
+
+@JsonClass(generateAdapter = true)
+data class CsvImportResultResponse(
+    val message: String,
+    val imported: Int,
+    val failed: Int,
+    val errors: List<String> = emptyList()
+)
+
+@JsonClass(generateAdapter = true)
+data class CsvMappingResponse(
+    val id: Int,
+    val name: String,
+    @Json(name = "date_column") val dateColumn: String,
+    @Json(name = "description_column") val descriptionColumn: String,
+    @Json(name = "amount_column") val amountColumn: String,
+    @Json(name = "reference_column") val referenceColumn: String? = null,
+    @Json(name = "date_format") val dateFormat: String = "YYYY-MM-DD",
+    @Json(name = "decimal_separator") val decimalSeparator: String = ".",
+    val delimiter: String = ",",
+    @Json(name = "invert_amount") val invertAmount: Boolean = false,
+    @Json(name = "skip_rows") val skipRows: Int = 0
+)

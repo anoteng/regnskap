@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
@@ -128,9 +129,16 @@ private fun SourceBadge(source: String?) {
 @Composable
 fun PostingQueueScreen(
     innerPadding: PaddingValues = PaddingValues(),
+    onImportCsv: () -> Unit = {},
+    refreshKey: Int = 0,
     viewModel: PostingQueueViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
+    // Reload after a CSV import has added transactions to the queue
+    LaunchedEffect(refreshKey) {
+        if (refreshKey > 0) viewModel.loadAll()
+    }
     val accounts by viewModel.accounts.collectAsStateWithLifecycle()
     val chainSuggestions by viewModel.chainSuggestions.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -161,6 +169,9 @@ fun PostingQueueScreen(
                         TextButton(onClick = { viewModel.postAllTransactions() }) {
                             Text("Poster $balancedCount")
                         }
+                    }
+                    IconButton(onClick = onImportCsv) {
+                        Icon(Icons.Default.UploadFile, contentDescription = "Importer CSV")
                     }
                     IconButton(onClick = { viewModel.loadAll() }) {
                         Icon(Icons.Default.Refresh, contentDescription = "Last på nytt")
