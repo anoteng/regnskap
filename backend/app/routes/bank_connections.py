@@ -18,6 +18,7 @@ from backend.database import get_db
 from backend.app import models, schemas
 from backend.app.auth import get_current_active_user, get_current_ledger
 from backend.app.bank_integration.service import BankIntegrationService
+from backend.app.subscriptions import require_bank_integration
 
 
 router = APIRouter(prefix="/bank-connections", tags=["bank-connections"])
@@ -134,6 +135,8 @@ async def initiate_bank_connection(
             "state_token": "abc123..."
         }
     """
+    require_bank_integration(current_user, db)
+
     # Verify bank account exists and belongs to current ledger
     bank_account = db.query(models.BankAccount).get(connection_request.bank_account_id)
     if not bank_account:
@@ -531,6 +534,8 @@ async def reauthorize_bank_connection(
     Returns new authorization URL. After user authorizes, the existing
     connection will be updated with new tokens and account IDs.
     """
+    require_bank_integration(current_user, db)
+
     # Verify connection exists and belongs to current ledger
     connection = db.query(models.BankConnection).get(connection_id)
     if not connection:
