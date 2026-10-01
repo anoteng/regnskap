@@ -10,8 +10,11 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import eu.privatregnskap.app.data.network.dto.AiKeyStatusResponse
+import eu.privatregnskap.app.data.network.dto.AiKeyUpdateRequest
 import eu.privatregnskap.app.data.network.dto.PasskeyCredentialResponse
 import eu.privatregnskap.app.data.preferences.NotificationPreferences
+import eu.privatregnskap.app.data.network.ApiService
 import eu.privatregnskap.app.data.repository.LedgerSelectionRepository
 import eu.privatregnskap.app.data.repository.PasskeyRepository
 import eu.privatregnskap.app.worker.PostingQueueCheckWorker
@@ -35,8 +38,31 @@ class ProfileViewModel @Inject constructor(
     private val passkeyRepository: PasskeyRepository,
     private val notificationPreferences: NotificationPreferences,
     private val ledgerSelection: LedgerSelectionRepository,
+    private val apiService: ApiService,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
+
+    private val _aiKeyStatus = MutableStateFlow<AiKeyStatusResponse?>(null)
+    val aiKeyStatus: StateFlow<AiKeyStatusResponse?> = _aiKeyStatus.asStateFlow()
+
+    fun loadAiKeyStatus() {
+        viewModelScope.launch {
+            _aiKeyStatus.value = runCatching { apiService.getAiKeyStatus() }.getOrNull()
+        }
+    }
+
+    /** Returns null on success, otherwise a message to show the user. */
+    suspend fun saveAiKey(key: String): String? =
+        runCatching { apiService.setAiKey(AiKeyUpdateRequest(key.trim())) }.fold(
+            onSuccess = { _aiKeyStatus.value = it; null },
+            onFailure = { "Nøkkelen ble avvist. Kontroller at den er riktig og aktiv." }
+        )
+
+    suspend fun deleteAiKey(): String? =
+        runCatching { apiService.deleteAiKey() }.fold(
+            onSuccess = { _aiKeyStatus.value = it; null },
+            onFailure = { "Kunne ikke fjerne nøkkelen" }
+        )
 
     val ledgerName: StateFlow<String?> =
         combine(ledgerSelection.ledgers, ledgerSelection.selected) { list, id ->

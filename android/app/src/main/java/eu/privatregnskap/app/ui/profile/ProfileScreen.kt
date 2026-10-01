@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.fragment.app.FragmentActivity
@@ -60,6 +61,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.credentials.CreatePublicKeyCredentialRequest
 import androidx.credentials.CreatePublicKeyCredentialResponse
@@ -84,7 +86,12 @@ fun ProfileScreen(
     val registerOptionsState by profileViewModel.registerOptionsState.collectAsStateWithLifecycle()
     val queueNotificationsEnabled by profileViewModel.queueNotificationsEnabled.collectAsStateWithLifecycle()
     val ledgerName by profileViewModel.ledgerName.collectAsStateWithLifecycle()
+    val aiKeyStatus by profileViewModel.aiKeyStatus.collectAsStateWithLifecycle()
+    var showAiKeyDialog by remember { mutableStateOf(false) }
+    var aiKeyInput by remember { mutableStateOf("") }
     var showLedgerPicker by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) { profileViewModel.loadAiKeyStatus() }
 
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
@@ -155,6 +162,29 @@ fun ProfileScreen(
                             Icon(Icons.Default.SwapHoriz, contentDescription = null)
                         },
                         modifier = Modifier.clickable { showLedgerPicker = true }
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("AI-gjenkjenning", style = MaterialTheme.typography.titleMedium)
+                Spacer(modifier = Modifier.height(4.dp))
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    ListItem(
+                        headlineContent = { Text("Egen API-nøkkel") },
+                        supportingContent = {
+                            Text(
+                                aiKeyStatus?.let {
+                                    if (it.configured)
+                                        "Lagret (slutter på ${it.hint}). Gjenkjenning kjører på din konto."
+                                    else
+                                        "Ingen egen nøkkel. Krever Premium-abonnement."
+                                } ?: "Laster…"
+                            )
+                        },
+                        leadingContent = { Icon(Icons.Default.Key, contentDescription = null) },
+                        modifier = Modifier.clickable {
+                            aiKeyInput = ""
+                            showAiKeyDialog = true
+                        }
                     )
                 }
                 Spacer(modifier = Modifier.height(8.dp))
@@ -304,6 +334,57 @@ fun ProfileScreen(
                 Spacer(modifier = Modifier.height(16.dp))
             }
         }
+    }
+
+    if (showAiKeyDialog) {
+        AlertDialog(
+            onDismissRequest = { showAiKeyDialog = false },
+            title = { Text("Egen API-nøkkel") },
+            text = {
+                Column {
+                    Text(
+                        "Lim inn en API-nøkkel fra Anthropic. Da kjører AI-gjenkjenning på " +
+                            "din egen konto, og du trenger ikke Premium. Nøkkelen lagres kryptert " +
+                            "og vises aldri igjen.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = aiKeyInput,
+                        onValueChange = { aiKeyInput = it },
+                        label = { Text("sk-ant-…") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = aiKeyInput.isNotBlank(),
+                    onClick = {
+                        scope.launch {
+                            val error = profileViewModel.saveAiKey(aiKeyInput)
+                            showAiKeyDialog = false
+                            snackbarHostState.showSnackbar(error ?: "API-nøkkel lagret")
+                        }
+                    }
+                ) { Text("Lagre") }
+            },
+            dismissButton = {
+                Row {
+                    if (aiKeyStatus?.configured == true) {
+                        TextButton(onClick = {
+                            scope.launch {
+                                val error = profileViewModel.deleteAiKey()
+                                showAiKeyDialog = false
+                                snackbarHostState.showSnackbar(error ?: "API-nøkkel fjernet")
+                            }
+                        }) { Text("Fjern", color = MaterialTheme.colorScheme.error) }
+                    }
+                    TextButton(onClick = { showAiKeyDialog = false }) { Text("Avbryt") }
+                }
+            }
+        )
     }
 
     if (showLedgerPicker) {

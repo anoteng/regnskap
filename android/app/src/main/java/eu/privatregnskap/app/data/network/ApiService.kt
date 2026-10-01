@@ -1,6 +1,8 @@
 package eu.privatregnskap.app.data.network
 
 import eu.privatregnskap.app.data.network.dto.AccountResponse
+import eu.privatregnskap.app.data.network.dto.AiKeyStatusResponse
+import eu.privatregnskap.app.data.network.dto.AiKeyUpdateRequest
 import eu.privatregnskap.app.data.network.dto.AttachmentResponse
 import eu.privatregnskap.app.data.network.dto.BudgetDrilldownEntry
 import eu.privatregnskap.app.data.network.dto.BudgetReportResponse
@@ -249,6 +251,17 @@ interface ApiService {
         @Header("X-Ledger-ID") ledgerId: Int? = null,
         @Body settings: SettlementSettingsRequest
     ): SettlementSettingsResponse
+
+    // ─── Personal AI key ──────────────────────────────────────────────────────
+
+    @GET("auth/me/ai-key")
+    suspend fun getAiKeyStatus(): AiKeyStatusResponse
+
+    @PUT("auth/me/ai-key")
+    suspend fun setAiKey(@Body body: AiKeyUpdateRequest): AiKeyStatusResponse
+
+    @DELETE("auth/me/ai-key")
+    suspend fun deleteAiKey(): AiKeyStatusResponse
 
     // ─── CSV import ───────────────────────────────────────────────────────────
 

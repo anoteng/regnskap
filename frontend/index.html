@@ -448,6 +448,20 @@
                     </div>
 
                     <div class="card">
+                        <h2>AI-gjenkjenning</h2>
+                        <p class="subtitle">Les beløp, dato og leverandør automatisk fra vedlegg.
+                        Legger du inn din egen API-nøkkel fra Anthropic, kjører gjenkjenningen på
+                        din konto og du trenger ikke Premium. Nøkkelen lagres kryptert og vises aldri igjen.</p>
+                        <div id="ai-key-status" class="subtitle"></div>
+                        <div class="form-group">
+                            <label for="ai-key-input">API-nøkkel</label>
+                            <input type="password" id="ai-key-input" placeholder="sk-ant-..." autocomplete="off">
+                        </div>
+                        <button id="ai-key-save" class="btn btn-primary">Lagre nøkkel</button>
+                        <button id="ai-key-delete" class="btn btn-secondary" style="display:none;">Fjern nøkkel</button>
+                    </div>
+
+                    <div class="card">
                         <h2>Månedsavregning</h2>
                         <div id="settlement-settings-container"><p class="subtitle">Laster…</p></div>
                     </div>
@@ -549,6 +563,6 @@
     </div>
 
     <script src="/static/js/passkey.js?v=7"></script>
-    <script type="module" src="/static/js/main.js?v=9"></script>
+    <script type="module" src="/static/js/main.js?v=10"></script>
 </body>
 </html>

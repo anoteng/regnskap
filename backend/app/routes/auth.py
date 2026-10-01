@@ -8,7 +8,9 @@ from backend.database import get_db
 from backend.config import get_settings
 from backend.email import send_password_reset_email
 from ..models import User, PasswordResetToken, WebAuthnCredential, UserSubscription, SubscriptionStatus, Ledger, LedgerMember, LedgerRole
-from ..schemas import Token, RefreshRequest, UserCreate, User as UserSchema, PasswordResetRequest, PasswordResetComplete, PasswordResetResponse
+from ..schemas import Token, RefreshRequest, UserCreate, User as UserSchema, PasswordResetRequest, PasswordResetComplete, PasswordResetResponse, AiKeyStatus, AiKeyUpdate
+from ..bank_integration.encryption import TokenEncryption
+from ..subscriptions import personal_ai_key
 from ..auth import authenticate_user, create_access_token, create_refresh_token, verify_refresh_token, revoke_refresh_token, get_password_hash, get_current_active_user
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -194,6 +196,50 @@ async def get_my_subscription(
         "price_yearly": float(plan.price_yearly) if plan.price_yearly else None,
         "features": plan.features,
     }
+
+
+@router.get("/me/ai-key", response_model=AiKeyStatus)
+async def get_my_ai_key(current_user: User = Depends(get_current_active_user)):
+    """Whether the user has a personal Anthropic key stored. Never returns the key."""
+    key = personal_ai_key(current_user)
+    return AiKeyStatus(configured=key is not None, hint=key[-4:] if key else None)
+
+
+@router.put("/me/ai-key", response_model=AiKeyStatus)
+async def set_my_ai_key(
+    payload: AiKeyUpdate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Store a personal Anthropic key after checking that it actually works."""
+    api_key = payload.api_key.strip()
+    if not api_key:
+        raise HTTPException(status_code=400, detail="API-nøkkelen kan ikke være tom.")
+
+    # Verify before storing: a models list costs nothing and fails fast on a bad key
+    try:
+        import anthropic
+        anthropic.Anthropic(api_key=api_key).models.list(limit=1)
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail="Nøkkelen ble avvist av Anthropic. Kontroller at den er riktig og aktiv."
+        )
+
+    current_user.ai_api_key_encrypted = TokenEncryption().encrypt(api_key)
+    db.commit()
+    return AiKeyStatus(configured=True, hint=api_key[-4:])
+
+
+@router.delete("/me/ai-key", response_model=AiKeyStatus)
+async def delete_my_ai_key(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Remove the personal key; AI falls back to the platform key for Premium."""
+    current_user.ai_api_key_encrypted = None
+    db.commit()
+    return AiKeyStatus(configured=False, hint=None)
 
 
 @router.delete("/me")

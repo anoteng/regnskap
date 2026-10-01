@@ -530,6 +530,16 @@ class SettlementCalculation(BaseModel):
     liquidity: SettlementLiquidity
 
 
+class AiKeyStatus(BaseModel):
+    configured: bool
+    hint: Optional[str] = None
+    """Last four characters, so the user can tell which key is stored."""
+
+
+class AiKeyUpdate(BaseModel):
+    api_key: str
+
+
 # WebAuthn / Passkey schemas
 class WebAuthnRegistrationStart(BaseModel):
     credential_name: Optional[str] = None

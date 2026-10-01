@@ -144,6 +144,9 @@ class User(Base):
     full_name = Column(String(255), nullable=False)
     is_active = Column(Boolean, default=True)
     is_admin = Column(Boolean, default=False)
+    # Optional personal Anthropic key, Fernet-encrypted. When set, AI features
+    # run on the user's own account instead of the platform key
+    ai_api_key_encrypted = Column(Text, nullable=True)
     last_active_ledger_id = Column(Integer, ForeignKey("ledgers.id"))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

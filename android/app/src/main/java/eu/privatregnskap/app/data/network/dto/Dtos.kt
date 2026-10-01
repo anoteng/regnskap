@@ -404,3 +404,17 @@ data class CsvMappingResponse(
     @Json(name = "invert_amount") val invertAmount: Boolean = false,
     @Json(name = "skip_rows") val skipRows: Int = 0
 )
+
+
+// ─── Personal AI key ─────────────────────────────────────────────────────────
+
+@JsonClass(generateAdapter = true)
+data class AiKeyStatusResponse(
+    val configured: Boolean,
+    val hint: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class AiKeyUpdateRequest(
+    @Json(name = "api_key") val apiKey: String
+)

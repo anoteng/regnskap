@@ -13,6 +13,7 @@ from backend.database import get_db
 from ..models import Account, AccountType, Receipt, User, Ledger, Transaction, JournalEntry, ReceiptStatus, AttachmentType, UserSubscription, SubscriptionPlan, SubscriptionTier, UserMonthlyUsage, SubscriptionStatus
 from ..schemas import Receipt as ReceiptSchema, ReceiptCreate, Transaction as TransactionSchema
 from ..auth import get_current_active_user, get_current_ledger, get_user_from_query_token, get_ledger_from_query
+from ..subscriptions import resolve_ai_api_key
 from ..planned_transactions import (
     sync_planned_from_receipt,
     mark_planned_matched,
@@ -133,20 +134,6 @@ def increment_monthly_usage(user: User, db: Session):
         db.add(usage)
 
     db.commit()
-
-
-def check_ai_access(user: User, db: Session):
-    """Check if user has Premium subscription required for AI features"""
-    subscription = db.query(UserSubscription).filter(
-        UserSubscription.user_id == user.id,
-        UserSubscription.status == SubscriptionStatus.ACTIVE
-    ).first()
-
-    if not subscription or subscription.plan.tier != SubscriptionTier.PREMIUM:
-        raise HTTPException(
-            status_code=403,
-            detail="AI-gjenkjenning krever Premium-abonnement."
-        )
 
 
 def increment_ai_usage(user: User, db: Session):
@@ -565,8 +552,12 @@ async def extract_receipt_ai(
     current_ledger: Ledger = Depends(get_current_ledger),
     settings=Depends(get_settings)
 ):
-    """Extract metadata from receipt/invoice using AI (Premium only)"""
-    check_ai_access(current_user, db)
+    """Extract metadata from a receipt/invoice using AI.
+
+    Runs on the user's own Anthropic key when they have set one, otherwise on
+    the platform key for Premium subscribers.
+    """
+    api_key = resolve_ai_api_key(current_user, db, settings.anthropic_api_key)
 
     receipt = db.query(Receipt).filter(
         Receipt.id == receipt_id,
@@ -579,9 +570,6 @@ async def extract_receipt_ai(
     if not receipt.file_data:
         raise HTTPException(status_code=400, detail="Ingen bildefil funnet.")
 
-    if not settings.anthropic_api_key:
-        raise HTTPException(status_code=503, detail="AI-gjenkjenning er ikke konfigurert.")
-
     mime = (receipt.mime_type or "").lower()
     supported_image_types = {"image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp"}
     if mime not in supported_image_types and mime != "application/pdf":
@@ -592,7 +580,7 @@ async def extract_receipt_ai(
 
     try:
         import anthropic
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        client = anthropic.Anthropic(api_key=api_key)
 
         file_data = base64.standard_b64encode(receipt.file_data).decode("utf-8")
 

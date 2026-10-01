@@ -579,6 +579,19 @@ class API {
         return this.get(`/receipts/${id}/suggest-match`);
     }
 
+    // Personal AI key
+    async getAiKeyStatus() {
+        return this.get('/auth/me/ai-key');
+    }
+
+    async setAiKey(apiKey) {
+        return this.put('/auth/me/ai-key', { api_key: apiKey });
+    }
+
+    async deleteAiKey() {
+        return this.delete('/auth/me/ai-key');
+    }
+
     // Planned transactions
     async getPlannedTransactions(params = {}) {
         const query = new URLSearchParams(params).toString();
