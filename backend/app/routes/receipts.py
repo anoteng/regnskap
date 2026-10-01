@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 
 from backend.database import get_db
-from ..models import Receipt, User, Ledger, Transaction, JournalEntry, ReceiptStatus, AttachmentType, UserSubscription, SubscriptionPlan, SubscriptionTier, UserMonthlyUsage, SubscriptionStatus
+from ..models import Account, AccountType, Receipt, User, Ledger, Transaction, JournalEntry, ReceiptStatus, AttachmentType, UserSubscription, SubscriptionPlan, SubscriptionTier, UserMonthlyUsage, SubscriptionStatus
 from ..schemas import Receipt as ReceiptSchema, ReceiptCreate, Transaction as TransactionSchema
 from ..auth import get_current_active_user, get_current_ledger, get_user_from_query_token, get_ledger_from_query
 from ..planned_transactions import (
@@ -596,16 +596,37 @@ async def extract_receipt_ai(
 
         file_data = base64.standard_b64encode(receipt.file_data).decode("utf-8")
 
+        # The model must pick from this ledger's own chart; a number from the
+        # generic Norwegian standard chart never matches and is discarded
+        expense_accounts = db.query(Account).filter(
+            Account.ledger_id == current_ledger.id,
+            Account.account_type == AccountType.EXPENSE,
+            Account.is_active == True  # noqa: E712
+        ).order_by(Account.account_number).all()
+        accounts_text = "\n".join(
+            f"{a.account_number} {a.account_name}" for a in expense_accounts
+        )
+
         prompt = (
             "Analyser dette vedlegget og ekstraher følgende informasjon som JSON:\n"
             "- vendor: leverandørens navn (string eller null)\n"
             "- date: dato for kvittering/faktura i ISO-format YYYY-MM-DD (string eller null)\n"
-            "- amount: totalbeløp inkl. mva som tall uten valutasymbol (number eller null)\n"
+            "- amount: beløpet kunden faktisk skal betale, inkludert mva og etter at alle\n"
+            "  fradrag er trukket fra. Les det ferdige sluttbeløpet som står på vedlegget —\n"
+            "  summer aldri delsummer selv. Beløpet står ofte merket «Å betale»,\n"
+            "  «Beløp å betale», «Sum å betale», «Total», eller «Trekkes fra konto» ved\n"
+            "  AvtaleGiro. Negative linjer (strømstøtte, Norgespris, rabatt, tilgodebeløp,\n"
+            "  kreditnota, fradrag fra netteier) reduserer beløpet og skal være hensyntatt.\n"
+            "  Hvis flere totaler finnes, velg den som er kundens faktiske betaling — den er\n"
+            "  aldri større enn summen av delsummene. Tall uten valutasymbol (number eller null)\n"
             "- due_date: forfallsdato i ISO-format YYYY-MM-DD, kun hvis dette er en faktura (string eller null)\n"
-            "- is_invoice: true hvis dette er en faktura med forfallsdato, false hvis kvittering (boolean)\n"
-            "- suggested_account: foreslått 4-sifret kontonummer fra norsk kontoplan (string eller null)\n"
+            "- is_invoice: true hvis dette er en faktura, false hvis kvittering (boolean)\n"
+            "- suggested_account: kontonummeret som passer best fra kontoplanen nedenfor.\n"
+            "  Bruk kun et nummer som står i listen; finner du ingen som passer, svar null (string eller null)\n"
             "- confidence: din sikkerhetsscore for ekstraksjonen, 0.0 til 1.0 (number)\n"
-            "Svar kun med JSON, ingen forklaringstekst."
+            "\nKontoplan (kostnadskontoer i dette regnskapet):\n"
+            f"{accounts_text}\n"
+            "\nSvar kun med JSON, ingen forklaringstekst."
         )
 
         if mime == "application/pdf":
@@ -628,7 +649,7 @@ async def extract_receipt_ai(
             }
 
         message = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model="claude-sonnet-5",
             max_tokens=300,
             messages=[{
                 "role": "user",
@@ -673,7 +694,7 @@ async def extract_receipt_ai(
             except ValueError:
                 pass
 
-        if result.get("is_invoice") and not receipt.due_date:
+        if result.get("is_invoice"):
             receipt.attachment_type = AttachmentType.INVOICE
 
         sync_planned_from_receipt(db, receipt, created_by=current_user.id)
