@@ -58,6 +58,10 @@ class AttachmentsViewModel @Inject constructor(
     private val _openFileEvent = MutableSharedFlow<Pair<Uri, String>>()
     val openFileEvent = _openFileEvent.asSharedFlow()
 
+    // Local copy of a PDF being shown inside the app; null when the viewer is closed
+    private val _pdfFile = MutableStateFlow<File?>(null)
+    val pdfFile: StateFlow<File?> = _pdfFile.asStateFlow()
+
     // Triple<attachmentId, sourceUri, destUri> — collected by screen to launch uCrop
     private val _cropEditEvent = MutableSharedFlow<Triple<Int, Uri, Uri>>()
     val cropEditEvent = _cropEditEvent.asSharedFlow()
@@ -122,14 +126,33 @@ class AttachmentsViewModel @Inject constructor(
         }
     }
 
+    private suspend fun downloadToCache(attachment: AttachmentResponse, context: Context): File {
+        val url = imageUrl(attachment.id)
+        val bytes = withContext(Dispatchers.IO) { java.net.URL(url).readBytes() }
+        val ext = if (attachment.mimeType == "application/pdf") "pdf" else "jpg"
+        val file = File(context.cacheDir, "attachment_${attachment.id}.$ext")
+        withContext(Dispatchers.IO) { file.writeBytes(bytes) }
+        return file
+    }
+
+    fun openPdfInApp(attachment: AttachmentResponse, context: Context) {
+        viewModelScope.launch {
+            try {
+                _pdfFile.value = downloadToCache(attachment, context)
+            } catch (e: Exception) {
+                _message.emit("Kunne ikke hente PDF: ${e.message}")
+            }
+        }
+    }
+
+    fun closePdf() {
+        _pdfFile.value = null
+    }
+
     fun openAttachmentExternal(attachment: AttachmentResponse, context: Context) {
         viewModelScope.launch {
             try {
-                val url = imageUrl(attachment.id)
-                val bytes = withContext(Dispatchers.IO) { java.net.URL(url).readBytes() }
-                val ext = if (attachment.mimeType == "application/pdf") "pdf" else "jpg"
-                val file = File(context.cacheDir, "attachment_${attachment.id}.$ext")
-                withContext(Dispatchers.IO) { file.writeBytes(bytes) }
+                val file = downloadToCache(attachment, context)
                 val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
                 _openFileEvent.emit(uri to (attachment.mimeType ?: "application/octet-stream"))
             } catch (e: Exception) {

@@ -1,6 +1,7 @@
 package eu.privatregnskap.app.ui.attachments
 
 import android.content.Context
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -31,6 +32,7 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.LinkOff
@@ -84,6 +86,7 @@ import eu.privatregnskap.app.data.network.dto.AttachmentResponse
 import eu.privatregnskap.app.data.network.dto.MatchSuggestionResponse
 import eu.privatregnskap.app.data.network.dto.TransactionResponse
 import eu.privatregnskap.app.ui.common.FullScreenImageViewer
+import eu.privatregnskap.app.ui.common.PdfViewer
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -95,6 +98,7 @@ fun AttachmentsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val transactions by viewModel.transactions.collectAsStateWithLifecycle()
+    val pdfFile by viewModel.pdfFile.collectAsStateWithLifecycle()
     val suggestedMatches by viewModel.suggestedMatches.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
@@ -117,7 +121,13 @@ fun AttachmentsScreen(
                 setDataAndType(uri, mimeType)
                 flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
             }
-            context.startActivity(intent)
+            // Always offer the chooser: a sticky default must never be able to
+            // send the file back into this app as a new attachment
+            try {
+                context.startActivity(Intent.createChooser(intent, "Åpne med"))
+            } catch (_: ActivityNotFoundException) {
+                snackbarHostState.showSnackbar("Fant ingen app som kan åpne PDF-filer")
+            }
         }
     }
 
@@ -344,10 +354,15 @@ fun AttachmentsScreen(
             onUnmatch = { viewModel.unmatchAttachment(att.id) },
             onDelete = { viewingAttachment = null; deletingId = att.id },
             onOpenExternal = { viewModel.openAttachmentExternal(att, context) },
+            onViewPdf = { viewModel.openPdfInApp(att, context) },
             onCropEdit = { viewingAttachment = null; viewModel.prepareCropEdit(att, context) },
             onImageTap = { fullScreenImageUrl = viewModel.imageUrl(att.id) },
             onDismiss = { viewingAttachment = null }
         )
+    }
+
+    pdfFile?.let { file ->
+        PdfViewer(file = file, onDismiss = { viewModel.closePdf() })
     }
 
     // Match picker sheet
@@ -609,6 +624,7 @@ private fun ReceiptDetailSheet(
     onUnmatch: () -> Unit,
     onDelete: () -> Unit,
     onOpenExternal: () -> Unit,
+    onViewPdf: () -> Unit,
     onCropEdit: () -> Unit,
     onImageTap: () -> Unit,
     onDismiss: () -> Unit
@@ -630,7 +646,8 @@ private fun ReceiptDetailSheet(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(180.dp),
+                        .height(180.dp)
+                        .clickable(onClick = onViewPdf),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -766,12 +783,20 @@ private fun ReceiptDetailSheet(
 
                 if (attachment.mimeType == "application/pdf") {
                     OutlinedButton(
-                        onClick = onOpenExternal,
+                        onClick = onViewPdf,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("Åpne PDF i ekstern app")
+                        Text("Vis PDF")
+                    }
+                    OutlinedButton(
+                        onClick = onOpenExternal,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Åpne i annen app")
                     }
                 }
 
