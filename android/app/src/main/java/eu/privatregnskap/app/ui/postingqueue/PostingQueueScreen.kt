@@ -567,14 +567,31 @@ private fun EditTransactionSheet(
                     postingSuggestions.forEach { suggestion ->
                         AssistChip(
                             onClick = {
-                                // Fill the first entry still missing an account
-                                val idx = entries.indexOfFirst { it.accountId == null }
-                                    .let { if (it >= 0) it else 0 }
-                                entries[idx] = entries[idx].copy(
-                                    accountId = suggestion.accountId,
-                                    accountNumber = suggestion.accountNumber,
-                                    accountName = suggestion.accountName
-                                )
+                                // A bank-synced draft holds only the bank line, which
+                                // already has an account — add a line rather than
+                                // overwriting the one that came from the bank
+                                val empty = entries.indexOfFirst { it.accountId == null }
+                                if (empty >= 0) {
+                                    entries[empty] = entries[empty].copy(
+                                        accountId = suggestion.accountId,
+                                        accountNumber = suggestion.accountNumber,
+                                        accountName = suggestion.accountName
+                                    )
+                                } else {
+                                    val debitSum = entries.sumOf { it.debit.toDoubleOrNull() ?: 0.0 }
+                                    val creditSum = entries.sumOf { it.credit.toDoubleOrNull() ?: 0.0 }
+                                    val diff = creditSum - debitSum
+                                    entries.add(
+                                        EditEntryState(
+                                            id = nextEntryId(),
+                                            accountId = suggestion.accountId,
+                                            accountNumber = suggestion.accountNumber,
+                                            accountName = suggestion.accountName,
+                                            debit = if (diff > 0.01) formatEntry(diff) else "0.00",
+                                            credit = if (diff < -0.01) formatEntry(-diff) else "0.00"
+                                        )
+                                    )
+                                }
                             },
                             label = {
                                 Text("${suggestion.accountNumber} ${suggestion.accountName} · ${suggestion.timesUsed}\u00d7")

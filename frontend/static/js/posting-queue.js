@@ -1,5 +1,5 @@
-import api from './api.js?v=11';
-import { showModal, closeModal, showError, showSuccess } from './utils.js?v=11';
+import api from './api.js?v=12';
+import { showModal, closeModal, showError, showSuccess } from './utils.js?v=12';
 
 class PostingQueueManager {
     constructor() {
@@ -275,13 +275,20 @@ class PostingQueueManager {
         `;
     }
 
-    /** Fills the first empty account field, or the first one if all are set. */
+    /** Fills an empty account field, adding a balancing line when there is none. */
     applySuggestion(accountId) {
         const account = this.accounts.find(a => a.id === accountId);
         if (!account) return;
 
-        const hidden = [...document.querySelectorAll('.entry-account')];
-        const target = hidden.find(h => !h.value) || hidden[0];
+        const emptyField = () => [...document.querySelectorAll('.entry-account')].find(h => !h.value);
+
+        // A bank-synced draft has only the bank line, and that line already has
+        // an account — adding a new line is right, never overwriting it
+        let target = emptyField();
+        if (!target) {
+            this.addJournalEntry();
+            target = emptyField();
+        }
         if (!target) return;
 
         const idx = target.dataset.idx;
