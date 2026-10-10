@@ -1424,3 +1424,40 @@ body {
     gap: 0.5rem;
     font-size: 0.9rem;
 }
+
+/* Posting suggestions */
+.suggestion-row {
+    margin: 0 0 1rem;
+}
+
+.suggestion-row small {
+    color: var(--text-secondary);
+}
+
+.suggestion-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.4rem;
+}
+
+.suggestion-chip {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    padding: 0.35rem 0.75rem;
+    font-size: 0.85rem;
+    cursor: pointer;
+    color: var(--text-primary);
+}
+
+.suggestion-chip:hover {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+}
+
+.suggestion-count {
+    color: var(--text-secondary);
+    margin-left: 0.3rem;
+    font-size: 0.78rem;
+}

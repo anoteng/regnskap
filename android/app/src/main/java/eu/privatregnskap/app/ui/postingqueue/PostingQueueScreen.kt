@@ -3,6 +3,7 @@ package eu.privatregnskap.app.ui.postingqueue
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,6 +38,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -78,6 +80,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.privatregnskap.app.data.network.dto.AccountResponse
 import eu.privatregnskap.app.data.network.dto.ChainSuggestionDto
+import eu.privatregnskap.app.data.network.dto.PostingSuggestionDto
 import eu.privatregnskap.app.data.network.dto.JournalEntryUpdate
 import eu.privatregnskap.app.data.network.dto.TransactionResponse
 import eu.privatregnskap.app.data.network.dto.UpdateTransactionRequest
@@ -277,6 +280,7 @@ fun PostingQueueScreen(
             transaction = transaction,
             accounts = accounts,
             chainSuggestions = txSuggestions,
+            postingSuggestions = uiState.postingSuggestions[transaction.id.toString()] ?: emptyList(),
             otherTransactions = uiState.transactions.filter { it.id != transaction.id },
             attachments = transactionAttachments,
             attachmentSuggestions = attachmentSuggestions,
@@ -467,6 +471,7 @@ private fun EditTransactionSheet(
     transaction: TransactionResponse,
     accounts: List<AccountResponse>,
     chainSuggestions: List<ChainSuggestionDto>,
+    postingSuggestions: List<PostingSuggestionDto>,
     otherTransactions: List<TransactionResponse>,
     attachments: List<eu.privatregnskap.app.data.network.dto.AttachmentResponse>,
     attachmentSuggestions: List<eu.privatregnskap.app.data.network.dto.AttachmentResponse>,
@@ -546,6 +551,39 @@ private fun EditTransactionSheet(
 
             Text("Posteringer", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(8.dp))
+
+            if (postingSuggestions.isNotEmpty()) {
+                Text(
+                    "Tidligere postert til samme leverandør:",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(
+                    modifier = Modifier
+                        .horizontalScroll(rememberScrollState())
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    postingSuggestions.forEach { suggestion ->
+                        AssistChip(
+                            onClick = {
+                                // Fill the first entry still missing an account
+                                val idx = entries.indexOfFirst { it.accountId == null }
+                                    .let { if (it >= 0) it else 0 }
+                                entries[idx] = entries[idx].copy(
+                                    accountId = suggestion.accountId,
+                                    accountNumber = suggestion.accountNumber,
+                                    accountName = suggestion.accountName
+                                )
+                            },
+                            label = {
+                                Text("${suggestion.accountNumber} ${suggestion.accountName} · ${suggestion.timesUsed}\u00d7")
+                            }
+                        )
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+            }
 
             entries.forEachIndexed { idx, entry ->
                 key(entry.id) {

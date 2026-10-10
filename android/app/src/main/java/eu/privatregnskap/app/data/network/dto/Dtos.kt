@@ -87,7 +87,18 @@ data class PostingQueueResponse(
     val transactions: List<TransactionResponse>,
     val total: Int,
     val skip: Int,
-    val limit: Int
+    val limit: Int,
+    /** Keyed by transaction id as a string, because JSON object keys are strings. */
+    val suggestions: Map<String, List<PostingSuggestionDto>> = emptyMap()
+)
+
+@JsonClass(generateAdapter = true)
+data class PostingSuggestionDto(
+    @Json(name = "account_id") val accountId: Int,
+    @Json(name = "account_number") val accountNumber: String,
+    @Json(name = "account_name") val accountName: String,
+    @Json(name = "times_used") val timesUsed: Int,
+    @Json(name = "last_used") val lastUsed: String
 )
 
 @JsonClass(generateAdapter = true)

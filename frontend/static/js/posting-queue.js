@@ -1,5 +1,5 @@
-import api from './api.js?v=10';
-import { showModal, closeModal, showError, showSuccess } from './utils.js?v=10';
+import api from './api.js?v=11';
+import { showModal, closeModal, showError, showSuccess } from './utils.js?v=11';
 
 class PostingQueueManager {
     constructor() {
@@ -26,6 +26,7 @@ class PostingQueueManager {
             const response = await api.getPostingQueue(skip, this.pageSize);
             this.transactions = response.transactions;
             this.totalCount = response.total;
+            this.suggestions = response.suggestions || {};
             this.accounts = await api.getAccounts();
 
             // Fetch chain suggestions
@@ -254,6 +255,42 @@ class PostingQueueManager {
         return 'Legg til motposter slik at debet = kredit.';
     }
 
+    renderSuggestionChips(transactionId) {
+        const items = (this.suggestions || {})[String(transactionId)] || [];
+        if (items.length === 0) return '';
+
+        const chips = items.map(sv => `
+            <button type="button" class="suggestion-chip"
+                    onclick="postingQueueManager.applySuggestion(${sv.account_id})">
+                ${sv.account_number} ${sv.account_name}
+                <span class="suggestion-count">${sv.times_used}&times;</span>
+            </button>
+        `).join('');
+
+        return `
+            <div class="suggestion-row">
+                <small>Tidligere postert til samme leverandør:</small>
+                <div class="suggestion-chips">${chips}</div>
+            </div>
+        `;
+    }
+
+    /** Fills the first empty account field, or the first one if all are set. */
+    applySuggestion(accountId) {
+        const account = this.accounts.find(a => a.id === accountId);
+        if (!account) return;
+
+        const hidden = [...document.querySelectorAll('.entry-account')];
+        const target = hidden.find(h => !h.value) || hidden[0];
+        if (!target) return;
+
+        const idx = target.dataset.idx;
+        target.value = account.id;
+        document.querySelector(`.entry-account-input[data-idx="${idx}"]`).value = account.account_number;
+        const nameEl = document.getElementById(`account-name-${idx}`);
+        if (nameEl) nameEl.textContent = account.account_name;
+    }
+
     editTransaction(id) {
         const transaction = this.transactions.find(t => t.id === id);
         if (!transaction) {
@@ -277,6 +314,8 @@ class PostingQueueManager {
                 </div>
 
                 <h4>Posteringer</h4>
+
+                ${this.renderSuggestionChips(transaction.id)}
 
                 <div id="journal-entries-container">
                     ${transaction.journal_entries.map((entry, idx) => this.renderJournalEntryEdit(entry, idx)).join('')}

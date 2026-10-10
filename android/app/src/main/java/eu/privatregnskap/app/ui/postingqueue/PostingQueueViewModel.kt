@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import eu.privatregnskap.app.data.network.dto.AccountResponse
+import eu.privatregnskap.app.data.network.dto.PostingSuggestionDto
 import eu.privatregnskap.app.data.network.dto.AttachmentResponse
 import eu.privatregnskap.app.data.network.dto.ChainRequest
 import eu.privatregnskap.app.data.network.dto.ChainSuggestionDto
@@ -25,6 +26,7 @@ import javax.inject.Inject
 
 data class PostingQueueUiState(
     val transactions: List<TransactionResponse> = emptyList(),
+    val postingSuggestions: Map<String, List<PostingSuggestionDto>> = emptyMap(),
     val total: Int = 0,
     val isLoading: Boolean = false,
     val error: String? = null
@@ -83,6 +85,7 @@ class PostingQueueViewModel @Inject constructor(
                 onSuccess = { response ->
                     _uiState.value = PostingQueueUiState(
                         transactions = response.transactions,
+                        postingSuggestions = response.suggestions,
                         total = response.total
                     )
                 },

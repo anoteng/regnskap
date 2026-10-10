@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr, Field
-from typing import Optional, List
+from typing import Optional, List, Dict
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -238,11 +238,22 @@ class Transaction(TransactionBase):
         from_attributes = True
 
 
+class PostingSuggestion(BaseModel):
+    account_id: int
+    account_number: str
+    account_name: str
+    times_used: int
+    last_used: date
+
+
 class PaginatedTransactions(BaseModel):
     transactions: List[Transaction]
     total: int
     skip: int
     limit: int
+    # Keyed by transaction id. Empty for endpoints that don't compute them,
+    # so adding this never changes an existing response shape.
+    suggestions: Dict[str, List[PostingSuggestion]] = {}
 
 
 class CategoryBase(BaseModel):

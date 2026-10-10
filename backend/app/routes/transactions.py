@@ -13,6 +13,7 @@ from ..models import Transaction, JournalEntry, User, Ledger, BankAccount, Accou
 from ..schemas import Transaction as TransactionSchema, TransactionCreate, PaginatedTransactions, ChainSuggestionsResponse, ChainTransactionsRequest
 from ..auth import get_current_active_user, get_current_ledger
 from ..transaction_chaining import TransactionChainMatcher
+from ..posting_suggestions import suggestions_for_drafts
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
@@ -122,11 +123,14 @@ def get_posting_queue(
         Transaction.status == TransactionStatus.DRAFT
     ).order_by(Transaction.transaction_date.desc()).offset(skip).limit(limit).all()
 
+    suggestions = suggestions_for_drafts(db, current_ledger.id, transactions)
+
     return {
         "transactions": transactions,
         "total": total,
         "skip": skip,
-        "limit": limit
+        "limit": limit,
+        "suggestions": {str(tx_id): items for tx_id, items in suggestions.items()}
     }
 
 
