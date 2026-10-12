@@ -8,6 +8,7 @@ from backend.database import get_db
 from ..models import BankAccount, User, Ledger, Transaction, JournalEntry, Account
 from ..schemas import BankAccount as BankAccountSchema, BankAccountCreate, BankAccountUpdate
 from ..auth import get_current_active_user, get_current_ledger
+from ..opening_balance import set_opening_balance
 
 router = APIRouter(prefix="/bank-accounts", tags=["bank-accounts"])
 
@@ -68,10 +69,9 @@ def update_bank_account(
     """
     Update bank account and optionally set opening balance.
 
-    If opening_balance is provided, creates an IB (Ingående Balans) transaction
-    dated 2026-01-01 with:
-    - Debit: Bank account
-    - Credit: IB account (2050)
+    If opening_balance is provided, creates an IB (inngående balanse) transaction
+    dated 2026-01-01 against the ledger's equity account. Re-sending it replaces
+    the previous one.
     """
     bank_account = db.query(BankAccount).filter(
         BankAccount.id == bank_account_id,
@@ -87,65 +87,18 @@ def update_bank_account(
 
     # Handle opening balance if provided
     if updates.opening_balance is not None:
-        # Find IB account (2050 - Inngående balanse)
-        ib_account = db.query(Account).filter(
-            Account.ledger_id == current_ledger.id,
-            Account.account_number == "2050"
-        ).first()
-
-        if not ib_account:
-            raise HTTPException(
-                status_code=404,
-                detail="IB-konto (2050) ikke funnet. Opprett kontoen først."
-            )
-
-        # Check if IB transaction already exists for this bank account
-        existing_ib = db.query(Transaction).join(JournalEntry).filter(
-            Transaction.ledger_id == current_ledger.id,
-            Transaction.description.like(f"%Ingående balans%{bank_account.name}%"),
-            JournalEntry.account_id == bank_account.account_id
-        ).first()
-
-        if existing_ib and existing_ib.status == "POSTED":
-            raise HTTPException(
-                status_code=400,
-                detail="Ingående balans allerede registrert. Slett eksisterende transaksjon først."
-            )
-
-        # Create IB transaction
-        ib_transaction = Transaction(
+        account = db.query(Account).filter(Account.id == bank_account.account_id).first()
+        if not account:
+            raise HTTPException(status_code=404, detail="Tilknyttet konto ikke funnet")
+        set_opening_balance(
+            db=db,
             ledger_id=current_ledger.id,
-            description=f"Ingående balans - {bank_account.name}",
-            transaction_date=datetime(2026, 1, 1).date(),
+            account=account,
+            amount=updates.opening_balance,
+            as_of=datetime(2026, 1, 1).date(),
             created_by=current_user.id,
-            status="POSTED",  # IB transactions are posted immediately
-            source="MANUAL",
-            is_reconciled=False
+            label=bank_account.name,
         )
-        db.add(ib_transaction)
-        db.flush()  # Get transaction ID
-
-        # Create journal entries
-        # Debit: Bank account
-        debit_entry = JournalEntry(
-            transaction_id=ib_transaction.id,
-            account_id=bank_account.account_id,
-            debit=abs(updates.opening_balance),
-            credit=Decimal("0.00"),
-            description=f"IB {bank_account.name}"
-        )
-
-        # Credit: IB account (2050)
-        credit_entry = JournalEntry(
-            transaction_id=ib_transaction.id,
-            account_id=ib_account.id,
-            debit=Decimal("0.00"),
-            credit=abs(updates.opening_balance),
-            description=f"IB {bank_account.name}"
-        )
-
-        db.add(debit_entry)
-        db.add(credit_entry)
 
     db.commit()
     db.refresh(bank_account)

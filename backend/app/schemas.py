@@ -238,6 +238,12 @@ class Transaction(TransactionBase):
         from_attributes = True
 
 
+class OpeningBalanceRequest(BaseModel):
+    """A positive amount sits on the account's natural side; negative flips it."""
+    amount: Decimal
+    as_of: Optional[date] = None
+
+
 class PostingSuggestion(BaseModel):
     account_id: int
     account_number: str

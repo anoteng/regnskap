@@ -1,11 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from datetime import date
 from typing import List
 
 from backend.database import get_db
 from ..models import Account, User, Ledger, BankAccount, JournalEntry, BudgetLine
-from ..schemas import Account as AccountSchema, AccountCreate
+from ..schemas import Account as AccountSchema, AccountCreate, OpeningBalanceRequest
 from ..auth import get_current_active_user, get_current_ledger
+from ..opening_balance import set_opening_balance
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 
@@ -213,3 +215,37 @@ def toggle_account_active(
         "message": f"Account is now {new_state}",
         "is_active": account.is_active
     }
+
+
+@router.put("/{account_id}/opening-balance", response_model=AccountSchema)
+def set_account_opening_balance(
+    account_id: int,
+    payload: OpeningBalanceRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    current_ledger: Ledger = Depends(get_current_ledger)
+):
+    """Set (or replace) the opening balance for an account.
+
+    Dating it matters: a property bought years ago should carry its purchase
+    date, so later calculations can weight contributions by how long they have
+    been in place.
+    """
+    account = db.query(Account).filter(
+        Account.id == account_id,
+        Account.ledger_id == current_ledger.id
+    ).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Konto ikke funnet")
+
+    set_opening_balance(
+        db=db,
+        ledger_id=current_ledger.id,
+        account=account,
+        amount=payload.amount,
+        as_of=payload.as_of or date(2026, 1, 1),
+        created_by=current_user.id,
+    )
+    db.commit()
+    db.refresh(account)
+    return account
