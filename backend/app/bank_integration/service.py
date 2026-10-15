@@ -30,6 +30,16 @@ from .encryption import TokenEncryption
 from .deduplication import TransactionDeduplicator
 from ..planned_transactions import find_and_match_for_bank_transaction
 
+# How far back an ongoing sync re-reads. Banks book reserved transactions days
+# after the fact and stamp them with the earlier booking date, so they land
+# behind the sync marker and a one-day overlap never sees them. Deduplication
+# is hash-based with a +/-3 day window, so re-reading costs nothing but time.
+SYNC_OVERLAP_DAYS = 30
+
+# Enable Banking only serves the last 90 days once the post-authorization
+# window has closed
+MAX_HISTORY_DAYS = 89
+
 
 class BankIntegrationService:
     """
@@ -587,12 +597,13 @@ class BankIntegrationService:
 
             if not from_date:
                 if bank_connection.last_successful_sync_at:
-                    # Ongoing sync: overlap by 1 day to catch late-posting transactions
-                    # (booking date vs value date differences, especially for credit cards)
-                    # Cap at 89 days ago to stay within the 90-day availability window
+                    # Ongoing sync: re-read SYNC_OVERLAP_DAYS so transactions the
+                    # bank books late, but dates earlier, are still picked up.
+                    # Cap at the 90-day availability window.
                     from_date = max(
-                        bank_connection.last_successful_sync_at.date() - timedelta(days=1),
-                        date.today() - timedelta(days=89)
+                        bank_connection.last_successful_sync_at.date()
+                        - timedelta(days=SYNC_OVERLAP_DAYS),
+                        date.today() - timedelta(days=MAX_HISTORY_DAYS)
                     )
                 else:
                     # Initial sync: use initial_sync_from_date if set
