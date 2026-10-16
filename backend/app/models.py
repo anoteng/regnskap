@@ -214,12 +214,21 @@ class Account(Base):
     account_name = Column(String(255), nullable=False)
     account_type = Column(SQLEnum(AccountType), nullable=False)
     parent_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
+    # Where market value adjustments for this account are booked. Keeping it per
+    # account lets separate pots — own funds, locked pension, a child's savings —
+    # accumulate on separate counter-accounts.
+    value_change_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
     is_active = Column(Boolean, default=True)
     description = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     ledger = relationship("Ledger", back_populates="accounts")
-    parent_account = relationship("Account", remote_side=[id], backref="sub_accounts")
+    parent_account = relationship(
+        "Account",
+        remote_side=[id],
+        foreign_keys=[parent_account_id],
+        backref="sub_accounts",
+    )
     journal_entries = relationship("JournalEntry", back_populates="account")
     bank_accounts = relationship("BankAccount", back_populates="account")
 

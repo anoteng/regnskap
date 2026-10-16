@@ -30,6 +30,7 @@ CREATE TABLE `accounts` (
   `account_name` varchar(255) NOT NULL,
   `account_type` enum('ASSET','LIABILITY','EQUITY','REVENUE','EXPENSE') NOT NULL,
   `parent_account_id` int(11) DEFAULT NULL,
+  `value_change_account_id` int(11) DEFAULT NULL,
   `is_active` tinyint(1) DEFAULT 1,
   `description` text DEFAULT NULL,
   `created_at` timestamp NULL DEFAULT current_timestamp(),
@@ -38,8 +39,10 @@ CREATE TABLE `accounts` (
   KEY `idx_account_type` (`account_type`),
   KEY `idx_parent` (`parent_account_id`),
   KEY `idx_ledger` (`ledger_id`),
+  KEY `fk_account_value_change` (`value_change_account_id`),
   CONSTRAINT `accounts_ibfk_1` FOREIGN KEY (`parent_account_id`) REFERENCES `accounts` (`id`) ON DELETE SET NULL,
-  CONSTRAINT `fk_account_ledger` FOREIGN KEY (`ledger_id`) REFERENCES `ledgers` (`id`) ON DELETE CASCADE
+  CONSTRAINT `fk_account_ledger` FOREIGN KEY (`ledger_id`) REFERENCES `ledgers` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_account_value_change` FOREIGN KEY (`value_change_account_id`) REFERENCES `accounts` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB AUTO_INCREMENT=1655 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 

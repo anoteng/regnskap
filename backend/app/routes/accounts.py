@@ -5,9 +5,16 @@ from typing import List
 
 from backend.database import get_db
 from ..models import Account, User, Ledger, BankAccount, JournalEntry, BudgetLine
-from ..schemas import Account as AccountSchema, AccountCreate, OpeningBalanceRequest
+from ..schemas import (
+    Account as AccountSchema,
+    AccountCreate,
+    MarketValueEntry,
+    MarketValueRequest,
+    OpeningBalanceRequest,
+)
 from ..auth import get_current_active_user, get_current_ledger
 from ..opening_balance import set_opening_balance
+from ..market_value import adjustments_for, balance_at, set_market_value
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 
@@ -66,6 +73,7 @@ def create_account(
         account_name=account.account_name,
         account_type=account.account_type,
         parent_account_id=account.parent_account_id,
+        value_change_account_id=account.value_change_account_id,
         description=account.description,
         is_active=True
     )
@@ -128,6 +136,7 @@ def update_account(
     account.account_name = account_update.account_name
     account.account_type = account_update.account_type
     account.parent_account_id = account_update.parent_account_id
+    account.value_change_account_id = account_update.value_change_account_id
     account.description = account_update.description
 
     db.commit()
@@ -249,3 +258,88 @@ def set_account_opening_balance(
     db.commit()
     db.refresh(account)
     return account
+
+
+@router.put("/{account_id}/market-value")
+def set_account_market_value(
+    account_id: int,
+    payload: MarketValueRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    current_ledger: Ledger = Depends(get_current_ledger)
+):
+    """Adjust an investment account to what it is actually worth.
+
+    The caller supplies the value, not the change: reading a figure off a
+    statement is easy, working out the difference is not.
+    """
+    account = db.query(Account).filter(
+        Account.id == account_id,
+        Account.ledger_id == current_ledger.id
+    ).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Konto ikke funnet")
+
+    as_of = payload.as_of or date.today()
+    transaction = set_market_value(
+        db=db,
+        ledger_id=current_ledger.id,
+        account=account,
+        value=payload.value,
+        as_of=as_of,
+        created_by=current_user.id,
+    )
+    db.commit()
+
+    return {
+        "account_id": account.id,
+        "as_of": as_of,
+        "value": payload.value,
+        "change": _change_of(db, transaction, account_id) if transaction else 0,
+        "created": transaction is not None,
+    }
+
+
+@router.get("/{account_id}/market-values", response_model=List[MarketValueEntry])
+def get_account_market_values(
+    account_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    current_ledger: Ledger = Depends(get_current_ledger)
+):
+    """Every dated adjustment on the account, oldest first."""
+    account = db.query(Account).filter(
+        Account.id == account_id,
+        Account.ledger_id == current_ledger.id
+    ).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Konto ikke funnet")
+
+    entries = []
+    for transaction in adjustments_for(db, account_id):
+        change = _change_of(db, transaction, account_id)
+        counter = next(
+            (je for je in transaction.journal_entries if je.account_id != account_id),
+            None
+        )
+        counter_account = counter.account if counter else None
+        entries.append(MarketValueEntry(
+            transaction_id=transaction.id,
+            as_of=transaction.transaction_date,
+            value=balance_at(db, account_id, transaction.transaction_date),
+            change=change,
+            counter_account_number=counter_account.account_number if counter_account else None,
+            counter_account_name=counter_account.account_name if counter_account else None,
+        ))
+    return entries
+
+
+def _change_of(db: Session, transaction, account_id: int):
+    """Signed change the adjustment applied to the account."""
+    line = next(
+        (je for je in transaction.journal_entries if je.account_id == account_id),
+        None
+    )
+    if not line:
+        return 0
+    return (line.debit or 0) - (line.credit or 0)

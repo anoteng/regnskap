@@ -1,5 +1,5 @@
-import api from './api.js?v=12';
-import { formatCurrency, getTodayDate, getFirstDayOfMonth, getLastDayOfMonth } from './utils.js?v=12';
+import api from './api.js?v=13';
+import { formatCurrency, getTodayDate, getFirstDayOfMonth, getLastDayOfMonth } from './utils.js?v=13';
 
 class ReportsManager {
     constructor() {

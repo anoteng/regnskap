@@ -1,15 +1,15 @@
-import auth from './auth.js?v=12';
-import api from './api.js?v=12';
-import ledgerManager from './ledgers.js?v=12';
-import transactionsManager from './transactions.js?v=12';
-import bankAccountsManager from './bank-accounts.js?v=12';
-import postingQueueManager from './posting-queue.js?v=12';
-import receiptsManager from './receipts.js?v=12';
-import reportsManager from './reports.js?v=12';
-import bankConnectionsManager from './bank-connections.js?v=12';
-import adminManager from './admin.js?v=12';
-import settlementManager from './settlement.js?v=12';
-import { formatCurrency, formatDate, getTodayDate, getFirstDayOfMonth, getLastDayOfMonth, showModal, closeModal, showError, showSuccess } from './utils.js?v=12';
+import auth from './auth.js?v=13';
+import api from './api.js?v=13';
+import ledgerManager from './ledgers.js?v=13';
+import transactionsManager from './transactions.js?v=13';
+import bankAccountsManager from './bank-accounts.js?v=13';
+import postingQueueManager from './posting-queue.js?v=13';
+import receiptsManager from './receipts.js?v=13';
+import reportsManager from './reports.js?v=13';
+import bankConnectionsManager from './bank-connections.js?v=13';
+import adminManager from './admin.js?v=13';
+import settlementManager from './settlement.js?v=13';
+import { formatCurrency, formatDate, getTodayDate, getFirstDayOfMonth, getLastDayOfMonth, showModal, closeModal, showError, showSuccess } from './utils.js?v=13';
 
 // Make auth available globally for passkey management
 window.auth = auth;
@@ -311,6 +311,7 @@ class App {
             const typeFilter = document.getElementById('account-type-filter').value;
             const showHidden = document.getElementById('show-hidden-accounts').checked;
             const accounts = await api.getAccounts(typeFilter || null, showHidden);
+            this._accounts = accounts;
 
             const container = document.getElementById('accounts-list');
 
@@ -351,12 +352,17 @@ class App {
                                         <td>${a.account_name}</td>
                                         <td>${a.description || '-'}</td>
                                         <td>
+                                            ${a.value_change_account_id ? `
+                                                <button class="btn btn-sm btn-secondary" onclick="app.showMarketValueModal(${a.id})">
+                                                    Verdi
+                                                </button>
+                                            ` : ''}
                                             ${a.is_system ? `
                                                 <button class="btn btn-sm btn-secondary" onclick="app.toggleAccountVisibility(${a.id})">
                                                     Skjul konto
                                                 </button>
                                             ` : `
-                                                <button class="btn btn-sm btn-secondary" onclick="app.showEditAccountModal(${a.id}, '${a.account_number}', '${a.account_name.replace(/'/g, "\\'")}', '${a.account_type}', '${a.description || ''}')">
+                                                <button class="btn btn-sm btn-secondary" onclick="app.showEditAccountModal(${a.id}, '${a.account_number}', '${a.account_name.replace(/'/g, "\\'")}', '${a.account_type}', '${a.description || ''}', ${a.value_change_account_id || 'null'})">
                                                     Rediger
                                                 </button>
                                                 <button class="btn btn-sm btn-danger" onclick="app.deleteAccount(${a.id})">
@@ -466,7 +472,76 @@ class App {
         }
     }
 
-    showEditAccountModal(id, accountNumber, accountName, accountType, description) {
+    async showMarketValueModal(id) {
+        const account = (this._accounts || []).find(a => a.id === id);
+        if (!account) return;
+
+        let history = [];
+        try {
+            history = await api.getMarketValues(id);
+        } catch (error) {
+            console.error('Error loading market values:', error);
+        }
+
+        // The latest recorded value is the anchor the user compares against
+        const latest = history.length ? history[history.length - 1] : null;
+        const rows = history.slice().reverse().map(h => `
+            <tr>
+                <td>${formatDate(h.as_of)}</td>
+                <td style="text-align:right">${formatCurrency(h.value)}</td>
+                <td style="text-align:right; color:${Number(h.change) < 0 ? '#c0392b' : '#27ae60'}">
+                    ${Number(h.change) > 0 ? '+' : ''}${formatCurrency(h.change)}
+                </td>
+            </tr>
+        `).join('');
+
+        const content = `
+            <form id="market-value-form">
+                <p style="margin-top:0">
+                    <strong>${account.account_number} ${account.account_name}</strong><br>
+                    ${latest
+                        ? `Sist registrert ${formatDate(latest.as_of)}: <strong>${formatCurrency(latest.value)}</strong>`
+                        : 'Ingen verdi registrert ennå.'}
+                </p>
+                <div class="form-group">
+                    <label>Verdi i dag</label>
+                    <input type="number" id="mv-value" step="0.01" required autofocus>
+                </div>
+                <div class="form-group">
+                    <label>Dato</label>
+                    <input type="date" id="mv-date" value="${getTodayDate()}" required>
+                </div>
+                <button type="submit" class="btn btn-primary">Lagre verdi</button>
+            </form>
+            ${history.length ? `
+                <h3 style="margin-top:1.5rem">Verdiutvikling</h3>
+                <table class="table">
+                    <thead><tr><th>Dato</th><th style="text-align:right">Verdi</th><th style="text-align:right">Endring</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            ` : ''}
+        `;
+
+        showModal('Verdiregulering', content);
+
+        document.getElementById('market-value-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const value = document.getElementById('mv-value').value;
+            const asOf = document.getElementById('mv-date').value;
+            try {
+                const result = await api.setMarketValue(id, parseFloat(value), asOf);
+                closeModal();
+                showSuccess(result.created
+                    ? `Verdiregulert ${Number(result.change) > 0 ? '+' : ''}${formatCurrency(result.change)}`
+                    : 'Kontoen sto allerede på denne verdien');
+                await this.loadAccounts();
+            } catch (error) {
+                showError(error.message);
+            }
+        });
+    }
+
+    showEditAccountModal(id, accountNumber, accountName, accountType, description, valueChangeAccountId) {
         const content = `
             <form id="edit-account-form">
                 <div class="form-group">
@@ -485,6 +560,16 @@ class App {
                         <option value="EQUITY" ${accountType === 'EQUITY' ? 'selected' : ''}>Egenkapital</option>
                         <option value="REVENUE" ${accountType === 'REVENUE' ? 'selected' : ''}>Inntekt</option>
                         <option value="EXPENSE" ${accountType === 'EXPENSE' ? 'selected' : ''}>Kostnad</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Konto for verdiendring (valgfri)</label>
+                    <select id="edit-acc-value-change">
+                        <option value="">Ingen - kontoen verdireguleres ikke</option>
+                        ${(this._accounts || [])
+                            .filter(x => x.account_type === 'REVENUE')
+                            .map(x => `<option value="${x.id}" ${x.id === valueChangeAccountId ? 'selected' : ''}>${x.account_number} ${x.account_name}</option>`)
+                            .join('')}
                     </select>
                 </div>
                 <div class="form-group">
@@ -508,13 +593,15 @@ class App {
         const name = document.getElementById('edit-acc-name').value;
         const type = document.getElementById('edit-acc-type').value;
         const description = document.getElementById('edit-acc-description').value;
+        const valueChange = document.getElementById('edit-acc-value-change').value;
 
         try {
             await api.updateAccount(id, {
                 account_number: number,
                 account_name: name,
                 account_type: type,
-                description: description || null
+                description: description || null,
+                value_change_account_id: valueChange ? parseInt(valueChange, 10) : null
             });
 
             closeModal();

@@ -252,6 +252,14 @@ class API {
         return this.post(`/accounts/${id}/toggle-visibility`, {});
     }
 
+    async setMarketValue(id, value, asOf) {
+        return this.put(`/accounts/${id}/market-value`, { value, as_of: asOf });
+    }
+
+    async getMarketValues(id) {
+        return this.get(`/accounts/${id}/market-values`);
+    }
+
     async getBankAccounts() {
         return this.get('/bank-accounts/');
     }

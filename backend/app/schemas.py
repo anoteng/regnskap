@@ -145,6 +145,7 @@ class AccountBase(BaseModel):
 
 class AccountCreate(AccountBase):
     parent_account_id: Optional[int] = None
+    value_change_account_id: Optional[int] = None
     description: Optional[str] = None
 
 
@@ -152,6 +153,7 @@ class Account(AccountBase):
     id: int
     ledger_id: int
     parent_account_id: Optional[int] = None
+    value_change_account_id: Optional[int] = None
     is_active: bool
     description: Optional[str] = None
     created_at: datetime
@@ -236,6 +238,22 @@ class Transaction(TransactionBase):
 
     class Config:
         from_attributes = True
+
+
+class MarketValueRequest(BaseModel):
+    """What the account is worth on a given date, not the change itself."""
+    value: Decimal
+    as_of: Optional[date] = None
+
+
+class MarketValueEntry(BaseModel):
+    """One dated adjustment, for showing the ups and downs over time."""
+    transaction_id: int
+    as_of: date
+    value: Decimal
+    change: Decimal
+    counter_account_number: Optional[str] = None
+    counter_account_name: Optional[str] = None
 
 
 class OpeningBalanceRequest(BaseModel):
