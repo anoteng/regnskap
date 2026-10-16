@@ -64,6 +64,14 @@ class BankTransactionImportStatus(str, enum.Enum):
     IGNORED = "IGNORED"
 
 
+class FireRole(str, enum.Enum):
+    """What part an asset account plays in the FIRE calculation."""
+    AVAILABLE = "AVAILABLE"   # Can fund spending from day one
+    LOCKED = "LOCKED"         # Pension and the like, unusable until an age
+    EXCLUDED = "EXCLUDED"     # Held in your name but not yours (a child's savings)
+    IGNORED = "IGNORED"       # Deliberately outside the model
+
+
 class TransactionSource(str, enum.Enum):
     MANUAL = "MANUAL"
     CSV_IMPORT = "CSV_IMPORT"
@@ -218,6 +226,14 @@ class Account(Base):
     # account lets separate pots — own funds, locked pension, a child's savings —
     # accumulate on separate counter-accounts.
     value_change_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
+    # How the FIRE projection treats this account. NULL means never classified;
+    # the projection reports such accounts rather than quietly skipping them.
+    fire_role = Column(SQLEnum(FireRole), nullable=True)
+    # Age at which a LOCKED account becomes spendable (IPS 62, pension 67)
+    fire_unlock_age = Column(Integer, nullable=True)
+    # Share of market value that counts towards net wealth. Equity funds are
+    # valued at 80, bank deposits at 100, a primary residence at 25.
+    wealth_valuation_percent = Column(DECIMAL(5, 2), nullable=True)
     is_active = Column(Boolean, default=True)
     description = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -763,4 +779,116 @@ class SettlementExcludedAccount(Base):
     account_id = Column(Integer, ForeignKey("accounts.id"), primary_key=True)
 
     settings = relationship("SettlementSettings", back_populates="excluded_accounts")
+    account = relationship("Account")
+
+
+class FireObligationKind(str, enum.Enum):
+    LOAN = "LOAN"
+    CHILD_SUPPORT = "CHILD_SUPPORT"
+    OTHER = "OTHER"
+
+
+class FireSettings(Base):
+    """Per-ledger assumptions behind the FIRE projection.
+
+    Rates are stored rather than hard-coded because every one of them is a
+    matter of opinion, and the Norwegian wealth tax brackets are rewritten
+    most autumns.
+    """
+    __tablename__ = "fire_settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ledger_id = Column(Integer, ForeignKey("ledgers.id"), nullable=False, unique=True)
+    is_enabled = Column(Boolean, nullable=False, default=False)
+
+    # Needed because locked capital unlocks by age, not by date
+    birth_date = Column(Date, nullable=True)
+    horizon_age = Column(Integer, nullable=False, default=95)
+    target_retirement_date = Column(Date, nullable=True)
+
+    swr_percent = Column(DECIMAL(5, 2), nullable=False, default=4.00)
+    inflation_percent = Column(DECIMAL(5, 2), nullable=False, default=2.50)
+    expected_return_percent = Column(DECIMAL(5, 2), nullable=False, default=7.00)
+    # Unused by the deterministic projection; the Monte Carlo pass will sample
+    # from these
+    return_volatility_percent = Column(DECIMAL(5, 2), nullable=False, default=15.00)
+    inflation_volatility_percent = Column(DECIMAL(5, 2), nullable=False, default=1.50)
+
+    # Spending and income are read off the ledger over this window
+    lookback_months = Column(Integer, nullable=False, default=12)
+    # Household costs usually live in a shared ledger; this is the share of it
+    # that falls on the owner of this one
+    shared_ledger_id = Column(Integer, ForeignKey("ledgers.id"), nullable=True)
+    shared_share_percent = Column(DECIMAL(5, 2), nullable=True)
+
+    wealth_tax_threshold = Column(DECIMAL(15, 2), nullable=False, default=1760000)
+    wealth_tax_rate_percent = Column(DECIMAL(6, 3), nullable=False, default=1.000)
+    wealth_tax_step2_threshold = Column(DECIMAL(15, 2), nullable=True, default=20700000)
+    wealth_tax_step2_rate_percent = Column(DECIMAL(6, 3), nullable=True, default=1.100)
+    # Brackets have historically followed wage growth; if they stop, the tax
+    # creeps down the income scale on its own
+    wealth_tax_index_threshold = Column(Boolean, nullable=False, default=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    ledger = relationship("Ledger", foreign_keys=[ledger_id])
+    shared_ledger = relationship("Ledger", foreign_keys=[shared_ledger_id])
+    obligations = relationship(
+        "FireObligation", back_populates="settings",
+        cascade="all, delete-orphan", order_by="FireObligation.id",
+    )
+    excluded_accounts = relationship(
+        "FireExcludedAccount", back_populates="settings", cascade="all, delete-orphan"
+    )
+
+
+class FireObligation(Base):
+    """A cost that stops on a known date.
+
+    These are kept apart from ordinary spending because the date they end is
+    the whole point: a loan that runs out at 58 and child support that stops
+    at 18 change what retiring at 50 costs.
+
+    A loan may be given either as a flat monthly amount with an end date, or
+    as balance plus interest, in which case the payoff date is amortised out.
+    The account link is optional and may point into another ledger — a shared
+    mortgage is still a claim on this person's income.
+    """
+    __tablename__ = "fire_obligations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    settings_id = Column(Integer, ForeignKey("fire_settings.id"), nullable=False)
+    name = Column(String(255), nullable=False)
+    kind = Column(SQLEnum(FireObligationKind), nullable=False, default=FireObligationKind.OTHER)
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
+
+    monthly_amount = Column(DECIMAL(15, 2), nullable=False, default=0)
+    balance = Column(DECIMAL(15, 2), nullable=True)
+    interest_percent = Column(DECIMAL(6, 4), nullable=True)
+    end_date = Column(Date, nullable=True)
+
+    # Child support follows the index; a fixed-term loan payment does not
+    inflation_adjusted = Column(Boolean, nullable=False, default=False)
+    # When it ends, does the money go into savings or into living better?
+    frees_up_cash = Column(Boolean, nullable=False, default=True)
+    # Counts against net wealth for the wealth tax
+    counts_as_debt = Column(Boolean, nullable=False, default=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    settings = relationship("FireSettings", back_populates="obligations")
+    account = relationship("Account")
+
+
+class FireExcludedAccount(Base):
+    """Income or expense accounts left out of the spending and income base."""
+    __tablename__ = "fire_excluded_accounts"
+
+    settings_id = Column(Integer, ForeignKey("fire_settings.id"), primary_key=True)
+    account_id = Column(Integer, ForeignKey("accounts.id"), primary_key=True)
+
+    settings = relationship("FireSettings", back_populates="excluded_accounts")
     account = relationship("Account")

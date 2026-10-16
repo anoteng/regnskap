@@ -1,15 +1,16 @@
-import auth from './auth.js?v=13';
-import api from './api.js?v=13';
-import ledgerManager from './ledgers.js?v=13';
-import transactionsManager from './transactions.js?v=13';
-import bankAccountsManager from './bank-accounts.js?v=13';
-import postingQueueManager from './posting-queue.js?v=13';
-import receiptsManager from './receipts.js?v=13';
-import reportsManager from './reports.js?v=13';
-import bankConnectionsManager from './bank-connections.js?v=13';
-import adminManager from './admin.js?v=13';
-import settlementManager from './settlement.js?v=13';
-import { formatCurrency, formatDate, getTodayDate, getFirstDayOfMonth, getLastDayOfMonth, showModal, closeModal, showError, showSuccess } from './utils.js?v=13';
+import auth from './auth.js?v=14';
+import api from './api.js?v=14';
+import ledgerManager from './ledgers.js?v=14';
+import transactionsManager from './transactions.js?v=14';
+import bankAccountsManager from './bank-accounts.js?v=14';
+import postingQueueManager from './posting-queue.js?v=14';
+import receiptsManager from './receipts.js?v=14';
+import reportsManager from './reports.js?v=14';
+import bankConnectionsManager from './bank-connections.js?v=14';
+import adminManager from './admin.js?v=14';
+import settlementManager from './settlement.js?v=14';
+import fireManager from './fire.js?v=14';
+import { formatCurrency, formatDate, getTodayDate, getFirstDayOfMonth, getLastDayOfMonth, showModal, closeModal, showError, showSuccess } from './utils.js?v=14';
 
 // Make auth available globally for passkey management
 window.auth = auth;
@@ -244,6 +245,9 @@ class App {
             case 'settlement':
                 settlementManager.init();
                 break;
+            case 'fire':
+                fireManager.init();
+                break;
             case 'ledger-settings':
                 ledgerManager.showLedgerSettings();
                 break;
@@ -362,7 +366,7 @@ class App {
                                                     Skjul konto
                                                 </button>
                                             ` : `
-                                                <button class="btn btn-sm btn-secondary" onclick="app.showEditAccountModal(${a.id}, '${a.account_number}', '${a.account_name.replace(/'/g, "\\'")}', '${a.account_type}', '${a.description || ''}', ${a.value_change_account_id || 'null'})">
+                                                <button class="btn btn-sm btn-secondary" onclick="app.showEditAccountModal(${a.id})">
                                                     Rediger
                                                 </button>
                                                 <button class="btn btn-sm btn-danger" onclick="app.deleteAccount(${a.id})">
@@ -541,7 +545,17 @@ class App {
         });
     }
 
-    showEditAccountModal(id, accountNumber, accountName, accountType, description, valueChangeAccountId) {
+    showEditAccountModal(id) {
+        const account = (this._accounts || []).find(a => a.id === id);
+        if (!account) return;
+        const accountNumber = account.account_number;
+        const accountName = account.account_name;
+        const accountType = account.account_type;
+        const description = account.description || '';
+        const valueChangeAccountId = account.value_change_account_id;
+        const fireRole = account.fire_role || '';
+        const unlockAge = account.fire_unlock_age;
+        const valuation = account.wealth_valuation_percent;
         const content = `
             <form id="edit-account-form">
                 <div class="form-group">
@@ -573,6 +587,24 @@ class App {
                     </select>
                 </div>
                 <div class="form-group">
+                    <label>Rolle i FIRE-beregningen</label>
+                    <select id="edit-acc-fire-role">
+                        <option value="" ${!fireRole ? 'selected' : ''}>Ikke klassifisert</option>
+                        <option value="AVAILABLE" ${fireRole === 'AVAILABLE' ? 'selected' : ''}>Tilgjengelig - kan brukes fra dag en</option>
+                        <option value="LOCKED" ${fireRole === 'LOCKED' ? 'selected' : ''}>Bundet - frigjores ved en alder</option>
+                        <option value="EXCLUDED" ${fireRole === 'EXCLUDED' ? 'selected' : ''}>Ekskludert - star i ditt navn, men er ikke dine</option>
+                        <option value="IGNORED" ${fireRole === 'IGNORED' ? 'selected' : ''}>Holdes utenfor</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Frigjores ved alder (bare for bundet kapital)</label>
+                    <input type="number" id="edit-acc-unlock-age" min="0" max="100" value="${unlockAge ?? ''}" placeholder="f.eks. 62 for IPS, 67 for pensjon">
+                </div>
+                <div class="form-group">
+                    <label>Verdsettelse for formuesskatt (%)</label>
+                    <input type="number" id="edit-acc-valuation" min="0" max="100" step="0.01" value="${valuation ?? ''}" placeholder="Aksjefond 80, bankinnskudd 100, IPS 0">
+                </div>
+                <div class="form-group">
                     <label>Beskrivelse (valgfri)</label>
                     <textarea id="edit-acc-description" rows="3">${description}</textarea>
                 </div>
@@ -594,6 +626,9 @@ class App {
         const type = document.getElementById('edit-acc-type').value;
         const description = document.getElementById('edit-acc-description').value;
         const valueChange = document.getElementById('edit-acc-value-change').value;
+        const fireRole = document.getElementById('edit-acc-fire-role').value;
+        const unlockAge = document.getElementById('edit-acc-unlock-age').value;
+        const valuation = document.getElementById('edit-acc-valuation').value;
 
         try {
             await api.updateAccount(id, {
@@ -601,7 +636,10 @@ class App {
                 account_name: name,
                 account_type: type,
                 description: description || null,
-                value_change_account_id: valueChange ? parseInt(valueChange, 10) : null
+                value_change_account_id: valueChange ? parseInt(valueChange, 10) : null,
+                fire_role: fireRole || null,
+                fire_unlock_age: unlockAge !== '' ? parseInt(unlockAge, 10) : null,
+                wealth_valuation_percent: valuation !== '' ? parseFloat(valuation) : null
             });
 
             closeModal();

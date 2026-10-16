@@ -1461,3 +1461,44 @@ body {
     margin-left: 0.3rem;
     font-size: 0.78rem;
 }
+
+/* FIRE */
+.fire-headline {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.fire-figure {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+}
+
+.fire-figure strong {
+    font-size: 1.6rem;
+    color: var(--primary-color);
+}
+
+.fire-figure .subtitle {
+    text-align: left;
+    margin-bottom: 0;
+    font-size: 0.85rem;
+}
+
+.fire-label {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary);
+}
+
+/* The year the available capital runs out, and the years after it */
+.table tr.fire-short td {
+    color: var(--danger-color, #c0392b);
+}
+
+.table tr.fire-off td {
+    opacity: 0.55;
+}

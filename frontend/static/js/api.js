@@ -630,6 +630,32 @@ class API {
     async getSettlementCalculation(month = null) {
         return this.get(`/settlement/calculation${month ? '?month=' + month : ''}`);
     }
+
+    // FIRE
+    async getFireSettings() {
+        return this.get('/fire/settings');
+    }
+
+    async updateFireSettings(data) {
+        return this.put('/fire/settings', data);
+    }
+
+    async createFireObligation(data) {
+        return this.post('/fire/obligations', data);
+    }
+
+    async updateFireObligation(id, data) {
+        return this.put(`/fire/obligations/${id}`, data);
+    }
+
+    async deleteFireObligation(id) {
+        return this.delete(`/fire/obligations/${id}`);
+    }
+
+    async getFireProjection(retirementDate = null) {
+        const q = retirementDate ? `?retirement_date=${retirementDate}` : '';
+        return this.get(`/fire/projection${q}`);
+    }
 }
 
 export default new API();

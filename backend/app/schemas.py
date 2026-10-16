@@ -147,6 +147,10 @@ class AccountCreate(AccountBase):
     parent_account_id: Optional[int] = None
     value_change_account_id: Optional[int] = None
     description: Optional[str] = None
+    # AVAILABLE, LOCKED, EXCLUDED or IGNORED; None means never classified
+    fire_role: Optional[str] = None
+    fire_unlock_age: Optional[int] = None
+    wealth_valuation_percent: Optional[Decimal] = None
 
 
 class Account(AccountBase):
@@ -154,6 +158,9 @@ class Account(AccountBase):
     ledger_id: int
     parent_account_id: Optional[int] = None
     value_change_account_id: Optional[int] = None
+    fire_role: Optional[str] = None
+    fire_unlock_age: Optional[int] = None
+    wealth_valuation_percent: Optional[Decimal] = None
     is_active: bool
     description: Optional[str] = None
     created_at: datetime
@@ -787,3 +794,143 @@ class OAuthInitiateResponse(BaseModel):
 
 # Rebuild models to resolve forward references
 JournalEntry.model_rebuild()
+
+
+# ---------------------------------------------------------------------------
+# FIRE
+# ---------------------------------------------------------------------------
+
+class FireObligationInput(BaseModel):
+    """A cost with an end date. Give either monthly + end_date, or, for a
+    loan, balance + interest_percent and let the payoff date be amortised."""
+    id: Optional[int] = None
+    name: str
+    kind: str = "OTHER"
+    account_id: Optional[int] = None
+    monthly_amount: Decimal = Decimal("0")
+    balance: Optional[Decimal] = None
+    interest_percent: Optional[Decimal] = None
+    end_date: Optional[date] = None
+    inflation_adjusted: bool = False
+    frees_up_cash: bool = True
+    counts_as_debt: bool = True
+    is_active: bool = True
+
+
+class FireObligationOut(FireObligationInput):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
+class FireSettingsUpdate(BaseModel):
+    is_enabled: bool = False
+    birth_date: Optional[date] = None
+    horizon_age: int = 95
+    target_retirement_date: Optional[date] = None
+    swr_percent: Decimal = Decimal("4.00")
+    inflation_percent: Decimal = Decimal("2.50")
+    expected_return_percent: Decimal = Decimal("7.00")
+    return_volatility_percent: Decimal = Decimal("15.00")
+    inflation_volatility_percent: Decimal = Decimal("1.50")
+    lookback_months: int = 12
+    shared_ledger_id: Optional[int] = None
+    shared_share_percent: Optional[Decimal] = None
+    wealth_tax_threshold: Decimal = Decimal("1760000")
+    wealth_tax_rate_percent: Decimal = Decimal("1.000")
+    wealth_tax_step2_threshold: Optional[Decimal] = Decimal("20700000")
+    wealth_tax_step2_rate_percent: Optional[Decimal] = Decimal("1.100")
+    wealth_tax_index_threshold: bool = True
+    excluded_account_ids: List[int] = []
+
+
+class FireSettingsOut(FireSettingsUpdate):
+    ledger_id: int
+    obligations: List[FireObligationOut] = []
+    updated_at: Optional[datetime] = None
+
+
+class FireBucket(BaseModel):
+    name: str
+    amount: Decimal
+    unlock_age: Optional[int] = None
+    valuation_percent: Decimal
+    excluded: bool
+
+
+class FireYearRow(BaseModel):
+    year: int
+    age: int
+    available: Decimal
+    locked: Decimal
+    excluded: Decimal
+    total: Decimal
+    debt: Decimal
+    net_wealth: Decimal
+    spending: Decimal
+    obligations: Decimal
+    wealth_tax: Decimal
+    saved: Decimal
+    withdrawn: Decimal
+    working: bool
+
+
+class FireObligationOutcome(BaseModel):
+    name: str
+    kind: str
+    monthly: Decimal
+    ends: Optional[date] = None
+    """True when the date was amortised out rather than entered."""
+    derived: bool
+    total_interest: Decimal
+    frees_up_cash: bool
+
+
+class FireProjectionOut(BaseModel):
+    retirement_date: date
+    retirement_age: int
+    success: bool
+    depleted_date: Optional[date] = None
+    bridge_low: Optional[Decimal] = None
+    bridge_low_date: Optional[date] = None
+    first_wealth_tax_year: Optional[int] = None
+    rows: List[FireYearRow]
+    obligations: List[FireObligationOutcome]
+
+
+class FireNumberOut(BaseModel):
+    perpetual_annual_spending: Decimal
+    base_capital: Decimal
+    wealth_tax_annual: Decimal
+    wealth_tax_capital: Decimal
+    """Extra capital needed to carry the costs that do end, until they do."""
+    bridge_capital: Decimal
+    total: Decimal
+
+
+class FireAssumptions(BaseModel):
+    as_of: date
+    birth_date: date
+    age: int
+    horizon_age: int
+    monthly_spending: Decimal
+    monthly_net_income: Decimal
+    monthly_obligations: Decimal
+    swr_percent: Decimal
+    inflation_percent: Decimal
+    expected_return_percent: Decimal
+    real_return_percent: Decimal
+    capital_available: Decimal
+    capital_locked: Decimal
+    capital_excluded: Decimal
+    buckets: List[FireBucket]
+
+
+class FireResult(BaseModel):
+    ledger_id: int
+    assumptions: FireAssumptions
+    fire_number: FireNumberOut
+    earliest: Optional[FireProjectionOut] = None
+    target: Optional[FireProjectionOut] = None
+    warnings: List[str] = []

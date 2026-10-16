@@ -31,6 +31,9 @@ CREATE TABLE `accounts` (
   `account_type` enum('ASSET','LIABILITY','EQUITY','REVENUE','EXPENSE') NOT NULL,
   `parent_account_id` int(11) DEFAULT NULL,
   `value_change_account_id` int(11) DEFAULT NULL,
+  `fire_role` enum('AVAILABLE','LOCKED','EXCLUDED','IGNORED') DEFAULT NULL,
+  `fire_unlock_age` int(11) DEFAULT NULL,
+  `wealth_valuation_percent` decimal(5,2) DEFAULT NULL,
   `is_active` tinyint(1) DEFAULT 1,
   `description` text DEFAULT NULL,
   `created_at` timestamp NULL DEFAULT current_timestamp(),
@@ -935,6 +938,74 @@ CREATE TABLE `webauthn_credentials` (
 ) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
+
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `fire_settings` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `ledger_id` int(11) NOT NULL,
+  `is_enabled` tinyint(1) NOT NULL DEFAULT 0,
+  `birth_date` date DEFAULT NULL,
+  `horizon_age` int(11) NOT NULL DEFAULT 95,
+  `target_retirement_date` date DEFAULT NULL,
+  `swr_percent` decimal(5,2) NOT NULL DEFAULT 4.00,
+  `inflation_percent` decimal(5,2) NOT NULL DEFAULT 2.50,
+  `expected_return_percent` decimal(5,2) NOT NULL DEFAULT 7.00,
+  `return_volatility_percent` decimal(5,2) NOT NULL DEFAULT 15.00,
+  `inflation_volatility_percent` decimal(5,2) NOT NULL DEFAULT 1.50,
+  `lookback_months` int(11) NOT NULL DEFAULT 12,
+  `shared_ledger_id` int(11) DEFAULT NULL,
+  `shared_share_percent` decimal(5,2) DEFAULT NULL,
+  `wealth_tax_threshold` decimal(15,2) NOT NULL DEFAULT 1760000.00,
+  `wealth_tax_rate_percent` decimal(6,3) NOT NULL DEFAULT 1.000,
+  `wealth_tax_step2_threshold` decimal(15,2) DEFAULT 20700000.00,
+  `wealth_tax_step2_rate_percent` decimal(6,3) DEFAULT 1.100,
+  `wealth_tax_index_threshold` tinyint(1) NOT NULL DEFAULT 1,
+  `created_at` timestamp NULL DEFAULT current_timestamp(),
+  `updated_at` timestamp NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_fire_settings_ledger` (`ledger_id`),
+  KEY `fk_fire_settings_shared` (`shared_ledger_id`),
+  CONSTRAINT `fk_fire_settings_ledger` FOREIGN KEY (`ledger_id`) REFERENCES `ledgers` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_fire_settings_shared` FOREIGN KEY (`shared_ledger_id`) REFERENCES `ledgers` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `fire_obligations` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `settings_id` int(11) NOT NULL,
+  `name` varchar(255) NOT NULL,
+  `kind` enum('LOAN','CHILD_SUPPORT','OTHER') NOT NULL DEFAULT 'OTHER',
+  `account_id` int(11) DEFAULT NULL,
+  `monthly_amount` decimal(15,2) NOT NULL DEFAULT 0.00,
+  `balance` decimal(15,2) DEFAULT NULL,
+  `interest_percent` decimal(6,4) DEFAULT NULL,
+  `end_date` date DEFAULT NULL,
+  `inflation_adjusted` tinyint(1) NOT NULL DEFAULT 0,
+  `frees_up_cash` tinyint(1) NOT NULL DEFAULT 1,
+  `counts_as_debt` tinyint(1) NOT NULL DEFAULT 1,
+  `is_active` tinyint(1) NOT NULL DEFAULT 1,
+  `created_at` timestamp NULL DEFAULT current_timestamp(),
+  `updated_at` timestamp NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `fk_fire_obligation_settings` (`settings_id`),
+  KEY `fk_fire_obligation_account` (`account_id`),
+  CONSTRAINT `fk_fire_obligation_account` FOREIGN KEY (`account_id`) REFERENCES `accounts` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_fire_obligation_settings` FOREIGN KEY (`settings_id`) REFERENCES `fire_settings` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `fire_excluded_accounts` (
+  `settings_id` int(11) NOT NULL,
+  `account_id` int(11) NOT NULL,
+  PRIMARY KEY (`settings_id`,`account_id`),
+  KEY `fk_fire_excluded_account` (`account_id`),
+  CONSTRAINT `fk_fire_excluded_account` FOREIGN KEY (`account_id`) REFERENCES `accounts` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_fire_excluded_settings` FOREIGN KEY (`settings_id`) REFERENCES `fire_settings` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 
 /*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
 /*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;
