@@ -14,7 +14,12 @@ from typing import Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 
-from backend.app.models import Transaction, JournalEntry, BankTransaction
+from backend.app.models import (
+    Transaction,
+    JournalEntry,
+    BankTransaction,
+    TransactionSource,
+)
 
 
 class TransactionDeduplicator:
@@ -82,12 +87,19 @@ class TransactionDeduplicator:
         """
         Check if transaction already exists in the system.
 
+        Only manual and imported entries are candidates. Deduplication exists to
+        stop a bank transaction from landing on top of one the user already
+        keyed in or imported from CSV — never to reconcile the bank against
+        itself, where repeated identical purchases are ordinary and the unique
+        constraint on external_id already prevents a double fetch.
+
         Searches existing transactions by:
         1. Same ledger
         2. Same bank account (via journal entries)
-        3. Similar date (±3 days for booking/value date differences)
-        4. Same amount
-        5. Matching hash (description/reference similarity)
+        3. Not itself from a bank sync
+        4. Similar date (±3 days for booking/value date differences)
+        5. Same amount
+        6. Matching hash (description/reference similarity)
 
         Args:
             db: Database session
@@ -122,6 +134,7 @@ class TransactionDeduplicator:
             and_(
                 Transaction.ledger_id == ledger_id,
                 JournalEntry.account_id == bank_account_id,
+                Transaction.source != TransactionSource.BANK_SYNC,
                 Transaction.transaction_date >= date_from,
                 Transaction.transaction_date <= date_to,
                 or_(
@@ -152,7 +165,6 @@ class TransactionDeduplicator:
         db: Session,
         bank_connection_id: int,
         external_id: str,
-        dedup_hash: str,
         reference: Optional[str] = None,
         transaction_date: Optional[date] = None,
         amount: Optional[Decimal] = None
@@ -160,18 +172,22 @@ class TransactionDeduplicator:
         """
         Check if bank transaction was already fetched.
 
-        Uses three strategies:
-        1. external_id (fastest, unique constraint)
-        2. dedup_hash (description-based)
-        3. reference + date + amount — catches Norwegian eFaktura payments that the
+        Uses two strategies:
+        1. external_id — the bank's own id, protected by a unique constraint
+        2. reference + date + amount — catches Norwegian eFaktura payments that the
            bank returns twice: once as "Betaling til ACCOUNTNO" and once as
            "eFaktura: INVOICEID/MerchantName". Same reference/KID, different description.
+
+        Deliberately does NOT match on dedup_hash. The hash is
+        date|amount|description|reference, so four identical tram tickets bought
+        on one day hash alike, and a hash lookup would silently drop three of
+        them. What the bank sends is the truth; the unique constraint on
+        external_id is what keeps a fetch from being stored twice.
 
         Args:
             db: Database session
             bank_connection_id: Bank connection ID
             external_id: External transaction ID from provider
-            dedup_hash: Deduplication hash
             reference: Optional payment reference/KID
             transaction_date: Optional transaction date
             amount: Optional transaction amount
@@ -184,17 +200,6 @@ class TransactionDeduplicator:
             and_(
                 BankTransaction.bank_connection_id == bank_connection_id,
                 BankTransaction.external_transaction_id == external_id
-            )
-        ).first()
-
-        if existing:
-            return existing
-
-        # Check by dedup_hash
-        existing = db.query(BankTransaction).filter(
-            and_(
-                BankTransaction.bank_connection_id == bank_connection_id,
-                BankTransaction.dedup_hash == dedup_hash
             )
         ).first()
 

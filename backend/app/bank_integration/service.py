@@ -684,7 +684,6 @@ class BankIntegrationService:
                         self.db,
                         bank_connection.id,
                         raw_tx['external_id'],
-                        dedup_hash,
                         reference=raw_tx.get('reference'),
                         transaction_date=raw_tx['date'],
                         amount=raw_tx['amount']
