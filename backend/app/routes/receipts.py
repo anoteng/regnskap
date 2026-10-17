@@ -544,6 +544,22 @@ def update_receipt(
     return receipt
 
 
+def _response_text(message) -> str:
+    """The model's text, whichever blocks it chose to emit.
+
+    A response may open with a thinking block, in which case content[0] has no
+    .text at all. Only the text blocks carry the answer; everything else is
+    reasoning we did not ask for and do not store.
+    """
+    parts = [
+        block.text for block in message.content
+        if getattr(block, "type", None) == "text" and getattr(block, "text", None)
+    ]
+    if not parts:
+        raise ValueError("AI-svaret inneholdt ingen tekst.")
+    return "\n".join(parts).strip()
+
+
 @router.post("/{receipt_id}/extract", response_model=ReceiptSchema)
 async def extract_receipt_ai(
     receipt_id: int,
@@ -598,6 +614,12 @@ async def extract_receipt_ai(
         prompt = (
             "Analyser dette vedlegget og ekstraher følgende informasjon som JSON:\n"
             "- vendor: leverandørens navn (string eller null)\n"
+            "- description: kort oppsummering av hva som faktisk er kjøpt, lest av\n"
+            "  varelinjene. Nevn de viktigste varene, gjerne med antall, adskilt med\n"
+            "  komma — for eksempel «Maling 10 l, pensler, maskeringsteip». Gjelder\n"
+            "  fakturaen en tjeneste eller et abonnement, beskriv perioden eller\n"
+            "  leveransen i stedet, for eksempel «Strøm september 2026, 412 kWh».\n"
+            "  Maks 200 tegn. Gjenta ikke leverandørnavnet (string eller null)\n"
             "- date: dato for kvittering/faktura i ISO-format YYYY-MM-DD (string eller null)\n"
             "- amount: beløpet kunden faktisk skal betale, inkludert mva og etter at alle\n"
             "  fradrag er trukket fra. Les det ferdige sluttbeløpet som står på vedlegget —\n"
@@ -638,14 +660,14 @@ async def extract_receipt_ai(
 
         message = client.messages.create(
             model="claude-sonnet-5",
-            max_tokens=300,
+            max_tokens=1024,
             messages=[{
                 "role": "user",
                 "content": [content_block, {"type": "text", "text": prompt}],
             }]
         )
 
-        raw = message.content[0].text.strip()
+        raw = _response_text(message)
         # Strip markdown code fences if present (```json ... ``` or ``` ... ```)
         if raw.startswith("```"):
             raw = raw.split("```", 2)[1]
@@ -655,7 +677,12 @@ async def extract_receipt_ai(
         result = json.loads(raw)
 
         receipt.ai_extracted_vendor = result.get("vendor")
-        receipt.ai_extracted_description = result.get("vendor")  # vendor as description fallback
+        # What was bought, so a purchase can be found again by what it was and
+        # not only by who sold it. Falls back to the vendor when the attachment
+        # carries no readable line items.
+        receipt.ai_extracted_description = (
+            result.get("description") or result.get("vendor")
+        )
         receipt.ai_suggested_account = result.get("suggested_account")
         receipt.ai_confidence = result.get("confidence")
         receipt.ai_processed_at = datetime.utcnow()

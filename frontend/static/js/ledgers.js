@@ -1,6 +1,6 @@
-import api from './api.js?v=14';
-import settlementManager from './settlement.js?v=14';
-import aiKeyManager from './ai-key.js?v=14';
+import api from './api.js?v=15';
+import settlementManager from './settlement.js?v=15';
+import aiKeyManager from './ai-key.js?v=15';
 
 class LedgerManager {
     constructor() {

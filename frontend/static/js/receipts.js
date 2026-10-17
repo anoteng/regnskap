@@ -1,5 +1,5 @@
-import api from './api.js?v=14';
-import { showModal, closeModal, showError, showSuccess, formatDate } from './utils.js?v=14';
+import api from './api.js?v=15';
+import { showModal, closeModal, showError, showSuccess, formatDate } from './utils.js?v=15';
 
 class ReceiptsManager {
     constructor() {
@@ -192,6 +192,17 @@ class ReceiptsManager {
             ? `<div><small>Leverandør: ${receipt.ai_extracted_vendor}</small></div>`
             : '';
 
+        // What was bought, when the AI found something beyond the vendor name
+        const aiItems = receipt.ai_extracted_description
+            && receipt.ai_extracted_description !== receipt.ai_extracted_vendor
+            ? `<div><small style="color:#4b5563;">Kjøpt: ${receipt.ai_extracted_description}</small></div>`
+            : '';
+
+        // A failed interpretation is stored but was invisible until now
+        const aiError = receipt.ai_processing_error
+            ? `<div><small style="color:#b91c1c;">AI-gjenkjenning feilet: ${receipt.ai_processing_error}</small></div>`
+            : '';
+
         const isPdf = receipt.mime_type === 'application/pdf';
 
         const aiButton = this.isPremium && !receipt.ai_extracted_vendor
@@ -223,6 +234,8 @@ class ReceiptsManager {
                     ${isInvoice && receipt.due_date ? `<div><small style="color:#b45309;">Forfall: ${formatDate(receipt.due_date)}</small></div>` : ''}
                     ${receipt.amount ? `<div><small>Beløp: ${parseFloat(receipt.amount).toFixed(2)} kr</small></div>` : ''}
                     ${aiInfo}
+                    ${aiItems}
+                    ${aiError}
                     ${receipt.description ? `<div><small>${receipt.description}</small></div>` : ''}
                     ${this.renderPlanInfo(receipt)}
 
@@ -461,6 +474,7 @@ class ReceiptsManager {
                     ${purchaseDate ? `<p>Dato: ${formatDate(purchaseDate)}</p>` : ''}
                     ${receipt.amount || receipt.ai_extracted_amount ? `<p>Beløp: ${parseFloat(receipt.amount || receipt.ai_extracted_amount).toFixed(2)} kr</p>` : ''}
                     ${receipt.ai_extracted_vendor ? `<p>Leverandør: ${receipt.ai_extracted_vendor}</p>` : ''}
+                    ${receipt.ai_extracted_description && receipt.ai_extracted_description !== receipt.ai_extracted_vendor ? `<p>Kjøpt: ${receipt.ai_extracted_description}</p>` : ''}
                     ${receipt.description ? `<p>${receipt.description}</p>` : ''}
                 </div>
                 <div>
