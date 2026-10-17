@@ -544,6 +544,55 @@ def update_receipt(
     return receipt
 
 
+SUPPORTED_IMAGE_TYPES = {
+    "image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp",
+}
+
+
+def expense_chart(db: Session, ledger_id: int) -> str:
+    """The ledger's own expense accounts, one per line.
+
+    The model must pick from this chart; a number from the generic Norwegian
+    standard chart never matches and is discarded.
+    """
+    accounts = db.query(Account).filter(
+        Account.ledger_id == ledger_id,
+        Account.account_type == AccountType.EXPENSE,
+        Account.is_active == True  # noqa: E712
+    ).order_by(Account.account_number).all()
+    return "\n".join(f"{a.account_number} {a.account_name}" for a in accounts)
+
+
+def _extraction_prompt(accounts_text: str) -> str:
+    return (
+        "Analyser dette vedlegget og ekstraher følgende informasjon som JSON:\n"
+        "- vendor: leverandørens navn (string eller null)\n"
+        "- description: kort oppsummering av hva som faktisk er kjøpt, lest av\n"
+        "  varelinjene. Nevn de viktigste varene, gjerne med antall, adskilt med\n"
+        "  komma — for eksempel «Maling 10 l, pensler, maskeringsteip». Gjelder\n"
+        "  fakturaen en tjeneste eller et abonnement, beskriv perioden eller\n"
+        "  leveransen i stedet, for eksempel «Strøm september 2026, 412 kWh».\n"
+        "  Maks 200 tegn. Gjenta ikke leverandørnavnet (string eller null)\n"
+        "- date: dato for kvittering/faktura i ISO-format YYYY-MM-DD (string eller null)\n"
+        "- amount: beløpet kunden faktisk skal betale, inkludert mva og etter at alle\n"
+        "  fradrag er trukket fra. Les det ferdige sluttbeløpet som står på vedlegget —\n"
+        "  summer aldri delsummer selv. Beløpet står ofte merket «Å betale»,\n"
+        "  «Beløp å betale», «Sum å betale», «Total», eller «Trekkes fra konto» ved\n"
+        "  AvtaleGiro. Negative linjer (strømstøtte, Norgespris, rabatt, tilgodebeløp,\n"
+        "  kreditnota, fradrag fra netteier) reduserer beløpet og skal være hensyntatt.\n"
+        "  Hvis flere totaler finnes, velg den som er kundens faktiske betaling — den er\n"
+        "  aldri større enn summen av delsummene. Tall uten valutasymbol (number eller null)\n"
+        "- due_date: forfallsdato i ISO-format YYYY-MM-DD, kun hvis dette er en faktura (string eller null)\n"
+        "- is_invoice: true hvis dette er en faktura, false hvis kvittering (boolean)\n"
+        "- suggested_account: kontonummeret som passer best fra kontoplanen nedenfor.\n"
+        "  Bruk kun et nummer som står i listen; finner du ingen som passer, svar null (string eller null)\n"
+        "- confidence: din sikkerhetsscore for ekstraksjonen, 0.0 til 1.0 (number)\n"
+        "\nKontoplan (kostnadskontoer i dette regnskapet):\n"
+        f"{accounts_text}\n"
+        "\nSvar kun med JSON, ingen forklaringstekst."
+    )
+
+
 def _response_text(message) -> str:
     """The model's text, whichever blocks it chose to emit.
 
@@ -558,6 +607,39 @@ def _response_text(message) -> str:
     if not parts:
         raise ValueError("AI-svaret inneholdt ingen tekst.")
     return "\n".join(parts).strip()
+
+
+def interpret_attachment(client, file_bytes: bytes, mime: str, accounts_text: str) -> dict:
+    """Read one attachment and return the extracted fields.
+
+    Shared by the button and by any backfill, so the two can never read the
+    same receipt by different rules.
+    """
+    file_data = base64.standard_b64encode(file_bytes).decode("utf-8")
+    source = {"type": "base64", "media_type": mime, "data": file_data}
+    content_block = (
+        {"type": "document", "source": source}
+        if mime == "application/pdf"
+        else {"type": "image", "source": source}
+    )
+
+    message = client.messages.create(
+        model="claude-sonnet-5",
+        max_tokens=1024,
+        messages=[{
+            "role": "user",
+            "content": [content_block, {"type": "text", "text": _extraction_prompt(accounts_text)}],
+        }]
+    )
+
+    raw = _response_text(message)
+    # Strip markdown code fences if present (```json ... ``` or ``` ... ```)
+    if raw.startswith("```"):
+        raw = raw.split("```", 2)[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+        raw = raw.rsplit("```", 1)[0].strip()
+    return json.loads(raw)
 
 
 @router.post("/{receipt_id}/extract", response_model=ReceiptSchema)
@@ -587,8 +669,7 @@ async def extract_receipt_ai(
         raise HTTPException(status_code=400, detail="Ingen bildefil funnet.")
 
     mime = (receipt.mime_type or "").lower()
-    supported_image_types = {"image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp"}
-    if mime not in supported_image_types and mime != "application/pdf":
+    if mime not in SUPPORTED_IMAGE_TYPES and mime != "application/pdf":
         raise HTTPException(
             status_code=400,
             detail="AI-gjenkjenning støttes for bilder (JPEG, PNG, WebP) og PDF-filer."
@@ -597,84 +678,9 @@ async def extract_receipt_ai(
     try:
         import anthropic
         client = anthropic.Anthropic(api_key=api_key)
-
-        file_data = base64.standard_b64encode(receipt.file_data).decode("utf-8")
-
-        # The model must pick from this ledger's own chart; a number from the
-        # generic Norwegian standard chart never matches and is discarded
-        expense_accounts = db.query(Account).filter(
-            Account.ledger_id == current_ledger.id,
-            Account.account_type == AccountType.EXPENSE,
-            Account.is_active == True  # noqa: E712
-        ).order_by(Account.account_number).all()
-        accounts_text = "\n".join(
-            f"{a.account_number} {a.account_name}" for a in expense_accounts
+        result = interpret_attachment(
+            client, receipt.file_data, mime, expense_chart(db, current_ledger.id)
         )
-
-        prompt = (
-            "Analyser dette vedlegget og ekstraher følgende informasjon som JSON:\n"
-            "- vendor: leverandørens navn (string eller null)\n"
-            "- description: kort oppsummering av hva som faktisk er kjøpt, lest av\n"
-            "  varelinjene. Nevn de viktigste varene, gjerne med antall, adskilt med\n"
-            "  komma — for eksempel «Maling 10 l, pensler, maskeringsteip». Gjelder\n"
-            "  fakturaen en tjeneste eller et abonnement, beskriv perioden eller\n"
-            "  leveransen i stedet, for eksempel «Strøm september 2026, 412 kWh».\n"
-            "  Maks 200 tegn. Gjenta ikke leverandørnavnet (string eller null)\n"
-            "- date: dato for kvittering/faktura i ISO-format YYYY-MM-DD (string eller null)\n"
-            "- amount: beløpet kunden faktisk skal betale, inkludert mva og etter at alle\n"
-            "  fradrag er trukket fra. Les det ferdige sluttbeløpet som står på vedlegget —\n"
-            "  summer aldri delsummer selv. Beløpet står ofte merket «Å betale»,\n"
-            "  «Beløp å betale», «Sum å betale», «Total», eller «Trekkes fra konto» ved\n"
-            "  AvtaleGiro. Negative linjer (strømstøtte, Norgespris, rabatt, tilgodebeløp,\n"
-            "  kreditnota, fradrag fra netteier) reduserer beløpet og skal være hensyntatt.\n"
-            "  Hvis flere totaler finnes, velg den som er kundens faktiske betaling — den er\n"
-            "  aldri større enn summen av delsummene. Tall uten valutasymbol (number eller null)\n"
-            "- due_date: forfallsdato i ISO-format YYYY-MM-DD, kun hvis dette er en faktura (string eller null)\n"
-            "- is_invoice: true hvis dette er en faktura, false hvis kvittering (boolean)\n"
-            "- suggested_account: kontonummeret som passer best fra kontoplanen nedenfor.\n"
-            "  Bruk kun et nummer som står i listen; finner du ingen som passer, svar null (string eller null)\n"
-            "- confidence: din sikkerhetsscore for ekstraksjonen, 0.0 til 1.0 (number)\n"
-            "\nKontoplan (kostnadskontoer i dette regnskapet):\n"
-            f"{accounts_text}\n"
-            "\nSvar kun med JSON, ingen forklaringstekst."
-        )
-
-        if mime == "application/pdf":
-            content_block = {
-                "type": "document",
-                "source": {
-                    "type": "base64",
-                    "media_type": "application/pdf",
-                    "data": file_data,
-                },
-            }
-        else:
-            content_block = {
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": mime,
-                    "data": file_data,
-                },
-            }
-
-        message = client.messages.create(
-            model="claude-sonnet-5",
-            max_tokens=1024,
-            messages=[{
-                "role": "user",
-                "content": [content_block, {"type": "text", "text": prompt}],
-            }]
-        )
-
-        raw = _response_text(message)
-        # Strip markdown code fences if present (```json ... ``` or ``` ... ```)
-        if raw.startswith("```"):
-            raw = raw.split("```", 2)[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-            raw = raw.rsplit("```", 1)[0].strip()
-        result = json.loads(raw)
 
         receipt.ai_extracted_vendor = result.get("vendor")
         # What was bought, so a purchase can be found again by what it was and
