@@ -1403,6 +1403,26 @@ body {
     color: var(--success-color);
 }
 
+.settlement-liquidity {
+    margin-bottom: 0.5rem;
+}
+
+.settlement-liquidity td {
+    padding: 0.35rem 0.5rem;
+}
+
+.settlement-liquidity-sum td {
+    border-top: 2px solid var(--border-color);
+}
+
+.settlement-warning {
+    background: color-mix(in srgb, var(--danger-color) 12%, transparent);
+    border-left: 3px solid var(--danger-color);
+    padding: 0.6rem 0.8rem;
+    border-radius: 4px;
+    margin-bottom: 0.8rem;
+}
+
 .table-responsive {
     overflow-x: auto;
 }

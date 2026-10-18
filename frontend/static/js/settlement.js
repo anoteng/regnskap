@@ -1,5 +1,5 @@
-import api from './api.js?v=17';
-import { formatCurrency, formatDate, showError, showSuccess } from './utils.js?v=17';
+import api from './api.js?v=18';
+import { formatCurrency, formatDate, showError, showSuccess } from './utils.js?v=18';
 
 function currentMonth() {
     const d = new Date();
@@ -101,14 +101,19 @@ class SettlementManager {
 
         const memberRows = data.members.map(m => {
             const transfer = parseFloat(m.recommended_transfer);
+            const carry = parseFloat(m.carry_in || 0);
             const cls = transfer > 0 ? 'settlement-due' : 'settlement-ahead';
             const hint = transfer > 0 ? 'å overføre' : 'til gode';
+            const carryCell = carry === 0
+                ? '<span class="subtitle">–</span>'
+                : `<span class="${carry > 0 ? 'settlement-ahead' : 'settlement-due'}">${formatCurrency(Math.abs(carry))}<br><small>${carry > 0 ? 'til gode' : 'skyldig'}</small></span>`;
             return `
                 <tr>
                     <td><strong>${escapeHtml(m.full_name)}</strong><br><small class="subtitle">${parseFloat(m.share_percent).toLocaleString('nb-NO')} % andel</small></td>
                     <td class="num">${formatCurrency(m.share_amount)}</td>
                     <td class="num">${formatCurrency(m.own_withdrawals)}</td>
                     <td class="num">${formatCurrency(m.contributed)}</td>
+                    <td class="num">${carryCell}</td>
                     <td class="num ${cls}"><strong>${formatCurrency(Math.abs(transfer))}</strong><br><small>${hint}</small></td>
                 </tr>`;
         }).join('');
@@ -136,9 +141,21 @@ class SettlementManager {
                (${formatCurrency(t.excluded_booked)} bokført denne måneden)</p>`
             : '';
 
+        const carryNote = data.carry_from
+            ? ` Over- og underbetaling regnes fra ${formatDate(data.carry_from)}.`
+            : ' Overføring mellom måneder er ikke slått på.';
+
         const liq = data.liquidity;
         const cards = liq.credit_cards.map(c =>
             `<div><span class="subtitle">${escapeHtml(c.name)}:</span> ${formatCurrency(c.owed)} utestående</div>`).join('');
+
+        const available = liq.expected_available != null ? parseFloat(liq.expected_available) : null;
+        // The warning is only honest once the outstanding contributions are
+        // counted in. A card the account cannot cover today is normal on the
+        // 3rd and a problem on the 14th.
+        const shortfall = liq.covers_card === false
+            ? `<div class="settlement-warning">Felleskontoen dekker ikke kortregningen som forfaller den ${liq.card_due_day}., selv om alle betaler sin andel. Det mangler ${formatCurrency(parseFloat(liq.credit_card_owed_total) - parseFloat(liq.operating_balance) - parseFloat(liq.outstanding_contributions))}.</div>`
+            : '';
 
         return `
             <p class="subtitle">${status}</p>
@@ -157,7 +174,7 @@ class SettlementManager {
                 <div class="card">
                     <h3>Prognose for måneden</h3>
                     <p class="amount">${formatCurrency(t.forecast_total)}</p>
-                    <small class="subtitle">Typisk variabelt per måned: ${formatCurrency(t.typical_variable_month)}</small>
+                    <small class="subtitle">Inntekt − ${formatCurrency(t.income_booked)} · avdrag + ${formatCurrency(t.debt_principal)} · typisk variabelt ${formatCurrency(t.typical_variable_month)}</small>
                 </div>
             </div>
 
@@ -171,13 +188,14 @@ class SettlementManager {
                                 <th class="num">Andel av prognose</th>
                                 <th class="num">Egne uttak</th>
                                 <th class="num">Innbetalt</th>
+                                <th class="num">Overført fra før</th>
                                 <th class="num">Anbefalt nå</th>
                             </tr>
                         </thead>
                         <tbody>${memberRows}</tbody>
                     </table>
                 </div>
-                <p class="subtitle" style="margin-top: 0.75rem;">Anbefalt = andel + egne uttak fra driftskontoen − innbetalt denne måneden.</p>
+                <p class="subtitle" style="margin-top: 0.75rem;">Anbefalt = andel + egne uttak fra driftskontoen − innbetalt denne måneden − det som er til gode fra før.${carryNote}</p>
                 ${excluded}
             </div>
 
@@ -200,8 +218,21 @@ class SettlementManager {
 
             <div class="card">
                 <h2>Likviditet</h2>
-                <div><span class="subtitle">Driftskonto:</span> ${liq.operating_balance != null ? formatCurrency(liq.operating_balance) : '–'}</div>
+                ${shortfall}
+                <table class="table settlement-liquidity">
+                    <tbody>
+                        <tr><td>Driftskonto</td><td class="num">${liq.operating_balance != null ? formatCurrency(liq.operating_balance) : '–'}</td></tr>
+                        <tr><td>Utestående bidrag</td><td class="num">+ ${formatCurrency(liq.outstanding_contributions)}</td></tr>
+                        <tr><td>Kortgjeld <small class="subtitle">(forfall den ${liq.card_due_day}.)</small></td><td class="num">− ${formatCurrency(liq.credit_card_owed_total)}</td></tr>
+                        <tr><td>Registrerte fakturaer</td><td class="num">− ${formatCurrency(liq.open_invoices)}</td></tr>
+                        <tr class="settlement-liquidity-sum">
+                            <td><strong>Disponibelt</strong></td>
+                            <td class="num ${available != null && available < 0 ? 'settlement-due' : 'settlement-ahead'}"><strong>${available != null ? formatCurrency(available) : '–'}</strong></td>
+                        </tr>
+                    </tbody>
+                </table>
                 ${cards}
+                <p class="subtitle" style="margin-top: 0.5rem;">Disponibelt forutsetter at alle betaler sin andel. Anslått variabelt forbruk resten av måneden er ikke trukket fra.</p>
             </div>
         `;
     }
@@ -278,6 +309,18 @@ class SettlementManager {
                 <input type="number" id="settlement-lookback" min="1" max="24" value="${settings.variable_lookback_months}" style="width: 6rem;" ${dis}>
             </div>
 
+            <div class="form-group">
+                <label for="settlement-carry-start">Overfør over- og underbetaling fra</label>
+                <input type="date" id="settlement-carry-start" value="${settings.carry_start || ''}" ${dis}>
+                <small class="subtitle">Avvik før denne datoen regnes som oppgjort mellom deltakerne. Tom = ingen overføring mellom måneder.</small>
+            </div>
+
+            <div class="form-group">
+                <label for="settlement-card-due-day">Forfallsdag for kortregningen</label>
+                <input type="number" id="settlement-card-due-day" min="1" max="28" value="${settings.card_due_day}" style="width: 6rem;" ${dis}>
+                <small class="subtitle">Kjøpene er allerede fordelt måneden de ble gjort; dagen brukes bare til å varsle om pengene er på plass i tide.</small>
+            </div>
+
             <h3>Deltakere</h3>
             <div class="table-responsive">
                 <table class="table">
@@ -315,6 +358,8 @@ class SettlementManager {
             is_enabled: document.getElementById('settlement-enabled').checked,
             operating_account_id: parseInt(document.getElementById('settlement-operating-account').value, 10) || null,
             variable_lookback_months: parseInt(document.getElementById('settlement-lookback').value, 10) || 3,
+            carry_start: document.getElementById('settlement-carry-start').value || null,
+            card_due_day: parseInt(document.getElementById('settlement-card-due-day').value, 10) || 15,
             members,
             excluded_account_ids: [...document.querySelectorAll('.settlement-exclude:checked')].map(cb => parseInt(cb.value, 10)),
         };

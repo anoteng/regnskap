@@ -753,6 +753,15 @@ class SettlementSettings(Base):
     operating_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
     # Months of history used to estimate variable spending
     variable_lookback_months = Column(Integer, nullable=False, default=3)
+    # First month whose over- or underpayment is carried forward. Anything
+    # before it is taken to be settled between the members already, so the
+    # running balance starts from zero here instead of from the ledger's
+    # first day. NULL switches the carry off.
+    carry_start = Column(Date, nullable=True)
+    # Day of the month the credit card invoice falls due. The purchases were
+    # charged to the members a month earlier, so this is only about whether
+    # the cash is in the account in time.
+    card_due_day = Column(Integer, nullable=False, default=15)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

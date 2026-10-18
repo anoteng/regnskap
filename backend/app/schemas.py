@@ -490,6 +490,8 @@ class SettlementSettingsUpdate(BaseModel):
     is_enabled: bool = False
     operating_account_id: Optional[int] = None
     variable_lookback_months: int = 3
+    carry_start: Optional[date] = None
+    card_due_day: int = 15
     members: List[SettlementMemberInput] = []
     excluded_account_ids: List[int] = []
 
@@ -507,6 +509,8 @@ class SettlementSettingsOut(BaseModel):
     is_enabled: bool
     operating_account_id: Optional[int] = None
     variable_lookback_months: int
+    carry_start: Optional[date] = None
+    card_due_day: int = 15
     members: List[SettlementMemberOut]
     excluded_account_ids: List[int]
     updated_at: Optional[datetime] = None
@@ -521,6 +525,10 @@ class SettlementTotals(BaseModel):
     recurring_remaining: Decimal
     variable_remaining: Decimal
     typical_variable_month: Decimal
+    # Netted off the split: the shared account earned these itself
+    income_booked: Decimal = Decimal("0")
+    # Added to the split: not a cost, but cash that has to leave the account
+    debt_principal: Decimal = Decimal("0")
     forecast_total: Decimal
 
 
@@ -549,6 +557,9 @@ class SettlementMemberResult(BaseModel):
     share_amount: Decimal
     own_withdrawals: Decimal
     contributed: Decimal
+    # Running over- or underpayment from closed months; positive means the
+    # member is ahead and owes less now
+    carry_in: Decimal = Decimal("0")
     recommended_transfer: Decimal
 
 
@@ -563,6 +574,12 @@ class SettlementLiquidity(BaseModel):
     operating_balance: Optional[Decimal] = None
     credit_cards: List[SettlementCreditCard]
     credit_card_owed_total: Decimal
+    open_invoices: Decimal = Decimal("0")
+    outstanding_contributions: Decimal = Decimal("0")
+    # Balance plus what is still to come in, less the card and the invoices
+    expected_available: Optional[Decimal] = None
+    covers_card: Optional[bool] = None
+    card_due_day: int = 15
 
 
 class SettlementCalculation(BaseModel):
@@ -573,6 +590,7 @@ class SettlementCalculation(BaseModel):
     month_complete: bool
     operating_account_id: Optional[int] = None
     excluded_account_ids: List[int]
+    carry_from: Optional[date] = None
     totals: SettlementTotals
     planned: List[SettlementPlannedLine]
     recurring: List[SettlementRecurringLine]

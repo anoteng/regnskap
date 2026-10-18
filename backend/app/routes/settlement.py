@@ -45,6 +45,8 @@ def _to_out(ledger_id: int, settings: SettlementSettings | None) -> SettlementSe
             is_enabled=False,
             operating_account_id=None,
             variable_lookback_months=3,
+            carry_start=None,
+            card_due_day=15,
             members=[],
             excluded_account_ids=[],
             updated_at=None,
@@ -54,6 +56,8 @@ def _to_out(ledger_id: int, settings: SettlementSettings | None) -> SettlementSe
         is_enabled=settings.is_enabled,
         operating_account_id=settings.operating_account_id,
         variable_lookback_months=settings.variable_lookback_months,
+        carry_start=settings.carry_start,
+        card_due_day=settings.card_due_day,
         members=[
             {
                 "user_id": m.user_id,
@@ -100,6 +104,8 @@ def update_settlement_settings(
     settings.is_enabled = payload.is_enabled
     settings.operating_account_id = payload.operating_account_id
     settings.variable_lookback_months = payload.variable_lookback_months
+    settings.carry_start = payload.carry_start
+    settings.card_due_day = payload.card_due_day
 
     # Delete old rows before inserting replacements so the unique
     # (settings_id, user_id) key is not hit mid-flush
@@ -125,6 +131,8 @@ def update_settlement_settings(
 
 
 def _validate(db: Session, ledger_id: int, payload: SettlementSettingsUpdate) -> None:
+    if not 1 <= payload.card_due_day <= 28:
+        raise HTTPException(status_code=400, detail="Forfallsdag må være mellom 1 og 28")
     if not 1 <= payload.variable_lookback_months <= 24:
         raise HTTPException(status_code=400, detail="Historikk for variable kostnader må være 1–24 måneder")
 

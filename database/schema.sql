@@ -718,6 +718,8 @@ CREATE TABLE `settlement_settings` (
   `is_enabled` tinyint(1) NOT NULL DEFAULT 0,
   `operating_account_id` int(11) DEFAULT NULL,
   `variable_lookback_months` int(11) NOT NULL DEFAULT 3,
+  `carry_start` date DEFAULT NULL,
+  `card_due_day` int(11) NOT NULL DEFAULT 15,
   `created_at` timestamp NULL DEFAULT current_timestamp(),
   `updated_at` timestamp NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),

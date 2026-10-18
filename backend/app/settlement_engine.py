@@ -9,9 +9,22 @@ Forecast for the month = booked expenses so far
                        + recurring bills recognised from history, not yet seen
                          this month and not covered by a planned transaction
                        + pro-rated estimate of variable spending
+                       - income the shared account earned itself
+                       + principal repaid on shared debt
 
 Expenses are counted when booked (accrual view), so credit card purchases count
-in the month they happen and the card settlement itself is never counted.
+in the month they happen and the card settlement itself is never counted. That
+is deliberate: a purchase made in May is charged to the members in May and the
+invoice falls due in the middle of June, which leaves a month of slack for the
+money to arrive. Billing on the cash date would put the contribution and the
+due date in the same month and remove it.
+
+Two things that are not expenses still belong in the split. Money the shared
+account earns on its own - sales, cashback - reduces what the members have to
+put in. Principal repaid on a shared loan is not a cost in the accounting
+sense, but it is cash that has to leave the account, and the point of the
+calculation is to get enough money in there. Repaying the credit card is
+excluded from that, since those purchases were already counted as expenses.
 """
 import calendar
 import re
@@ -110,6 +123,171 @@ class _KeyStats:
 
 class SettlementDisabled(Exception):
     pass
+
+
+def _card_account_ids(db: Session, ledger_id: int) -> set[int]:
+    """GL accounts backed by a credit card.
+
+    Paying the card down is not a shared outlay: the purchases behind it were
+    counted as expenses when they were made. Every other liability is.
+    """
+    return {
+        account_id for (account_id,) in db.query(BankAccount.account_id).filter(
+            BankAccount.ledger_id == ledger_id,
+            BankAccount.account_type == BankAccountType.CREDIT_CARD,
+            BankAccount.account_id.isnot(None),
+        )
+    }
+
+
+def _side_flows(
+    db: Session,
+    ledger_id: int,
+    since: date,
+    until: date,
+    skip: set[int],
+    card_ids: set[int],
+) -> tuple[dict[int, Decimal], dict[int, Decimal]]:
+    """Income earned and loan principal repaid, per month index.
+
+    Both sit outside the expense accounts the forecast is built from, and both
+    change what the members owe: income downwards, principal upwards.
+    """
+    income: dict[int, Decimal] = defaultdict(lambda: ZERO)
+    principal: dict[int, Decimal] = defaultdict(lambda: ZERO)
+
+    # A repayment one member funds out of their own pocket is booked against
+    # equity, not against the shared account, so it is not a shared outlay
+    # however much it reduces the shared debt. The ordinary instalment never
+    # touches equity, which is what tells the two apart.
+    equity_tx = {
+        tx_id for (tx_id,) in db.query(JournalEntry.transaction_id)
+        .join(Transaction, Transaction.id == JournalEntry.transaction_id)
+        .join(Account, Account.id == JournalEntry.account_id)
+        .filter(
+            Transaction.ledger_id == ledger_id,
+            Transaction.transaction_date >= since,
+            Transaction.transaction_date <= until,
+            Account.account_type == AccountType.EQUITY,
+        )
+    }
+
+    rows = (
+        db.query(
+            Transaction.id,
+            Transaction.transaction_date,
+            Account.account_type,
+            JournalEntry.account_id,
+            JournalEntry.debit,
+            JournalEntry.credit,
+        )
+        .join(JournalEntry, JournalEntry.transaction_id == Transaction.id)
+        .join(Account, Account.id == JournalEntry.account_id)
+        .filter(
+            Transaction.ledger_id == ledger_id,
+            Transaction.status.in_(BOOKED_STATUSES),
+            Transaction.transaction_date >= since,
+            Transaction.transaction_date <= until,
+            Account.account_type.in_((AccountType.REVENUE, AccountType.LIABILITY)),
+        )
+        .all()
+    )
+    for tx_id, tx_date, acc_type, account_id, debit, credit in rows:
+        if account_id in skip:
+            continue
+        idx = _month_index(tx_date)
+        if acc_type == AccountType.REVENUE:
+            income[idx] += Decimal(credit or 0) - Decimal(debit or 0)
+        elif account_id not in card_ids and tx_id not in equity_tx:
+            principal[idx] += Decimal(debit or 0) - Decimal(credit or 0)
+    return income, principal
+
+
+def _carry(
+    db: Session,
+    settings: SettlementSettings,
+    target_idx: int,
+    excluded_ids: set[int],
+    deposit_ids: set[int],
+    card_ids: set[int],
+) -> tuple[dict[int, Decimal], Optional[date]]:
+    """Each member's running over- or underpayment, in closed months.
+
+    A member who paid 1 000 too little in September owes it in October; the
+    month is not a clean slate. Only months that have closed are counted, and
+    only from the configured start - what happened before that is taken to be
+    settled between the members already.
+
+    Positive means the member has paid more than their share and the next
+    recommendation is reduced by it.
+    """
+    start = settings.carry_start
+    if start is None:
+        return {m.user_id: ZERO for m in settings.members}, None
+
+    start_idx = _month_index(start)
+    if start_idx >= target_idx:
+        return {m.user_id: ZERO for m in settings.members}, start
+
+    # Closed months only: the target month is still being forecast
+    last_end = _month_bounds(*_month_from_index(target_idx - 1))[1]
+    skip = excluded_ids | deposit_ids
+
+    expenses: dict[int, Decimal] = defaultdict(lambda: ZERO)
+    rows = (
+        db.query(
+            Transaction.transaction_date,
+            (JournalEntry.debit - JournalEntry.credit).label("amount"),
+        )
+        .join(JournalEntry, JournalEntry.transaction_id == Transaction.id)
+        .join(Account, Account.id == JournalEntry.account_id)
+        .filter(
+            Transaction.ledger_id == settings.ledger_id,
+            Transaction.status.in_(BOOKED_STATUSES),
+            Transaction.transaction_date >= start,
+            Transaction.transaction_date <= last_end,
+            Account.account_type == AccountType.EXPENSE,
+            JournalEntry.account_id.notin_(excluded_ids) if excluded_ids else True,
+        )
+        .all()
+    )
+    for tx_date, amount in rows:
+        expenses[_month_index(tx_date)] += Decimal(amount or 0)
+
+    income, principal = _side_flows(
+        db, settings.ledger_id, start, last_end, skip, card_ids,
+    )
+
+    net_cost = {
+        idx: expenses.get(idx, ZERO) - income.get(idx, ZERO) + principal.get(idx, ZERO)
+        for idx in range(start_idx, target_idx)
+    }
+
+    out: dict[int, Decimal] = {}
+    for m in settings.members:
+        owed = sum(
+            (cost * Decimal(m.share_percent) / Decimal(100) for cost in net_cost.values()),
+            ZERO,
+        )
+        paid = ZERO
+        if m.deposit_account_id:
+            row = (
+                db.query(
+                    func.coalesce(func.sum(JournalEntry.credit), 0),
+                    func.coalesce(func.sum(JournalEntry.debit), 0),
+                )
+                .join(Transaction, Transaction.id == JournalEntry.transaction_id)
+                .filter(
+                    JournalEntry.account_id == m.deposit_account_id,
+                    Transaction.status.in_(BOOKED_STATUSES),
+                    Transaction.transaction_date >= start,
+                    Transaction.transaction_date <= last_end,
+                )
+                .one()
+            )
+            paid = Decimal(row[0]) - Decimal(row[1])
+        out[m.user_id] = _q(paid - owed)
+    return out, start
 
 
 def calculate_settlement(
@@ -331,7 +509,38 @@ def calculate_settlement(
         typical_variable * Decimal(days_remaining) / Decimal(days_in_month)
     )
 
-    forecast_total = _q(booked_total + planned_total + recurring_total + variable_remaining)
+    # ------------------------------------------------------------------
+    # Income and loan principal: outside the expense accounts, inside the split
+    # ------------------------------------------------------------------
+    deposit_ids = {m.deposit_account_id for m in settings.members if m.deposit_account_id}
+    card_ids = _card_account_ids(db, ledger_id)
+    side_income, side_principal = _side_flows(
+        db, ledger_id, history_start, month_end,
+        excluded_ids | deposit_ids, card_ids,
+    )
+    income_booked = _q(side_income.get(target_idx, ZERO))
+    principal_booked = _q(side_principal.get(target_idx, ZERO))
+
+    # An instalment not yet seen this month is still coming. It is the most
+    # regular payment there is, so the recent median is a safe stand-in.
+    principal_remaining = ZERO
+    if not month_complete and principal_booked <= ZERO:
+        recent = [
+            float(side_principal.get(target_idx - i, ZERO))
+            for i in range(1, 4)
+        ]
+        recent = [v for v in recent if v > 0]
+        if recent:
+            principal_remaining = _q(statistics.median(recent))
+
+    forecast_total = _q(
+        booked_total + planned_total + recurring_total + variable_remaining
+        - income_booked + principal_booked + principal_remaining
+    )
+
+    carry_by_user, carry_from = _carry(
+        db, settings, target_idx, excluded_ids, deposit_ids, card_ids,
+    )
 
     # ------------------------------------------------------------------
     # Members: share of forecast, adjusted for own withdrawals and deposits
@@ -357,6 +566,7 @@ def calculate_settlement(
                 .one()
             )
             withdrawals, contributed = _q(row[0]), _q(row[1])
+        carry = carry_by_user.get(m.user_id, ZERO)
         members_out.append({
             "user_id": m.user_id,
             "full_name": m.user.full_name,
@@ -365,7 +575,8 @@ def calculate_settlement(
             "share_amount": share,
             "own_withdrawals": withdrawals,
             "contributed": contributed,
-            "recommended_transfer": _q(share + withdrawals - contributed),
+            "carry_in": carry,
+            "recommended_transfer": _q(share + withdrawals - contributed - carry),
         })
 
     return {
@@ -376,6 +587,7 @@ def calculate_settlement(
         "month_complete": month_complete,
         "operating_account_id": settings.operating_account_id,
         "excluded_account_ids": sorted(excluded_ids),
+        "carry_from": carry_from,
         "totals": {
             "booked": booked_total,
             "booked_fixed": booked_fixed,
@@ -385,12 +597,14 @@ def calculate_settlement(
             "recurring_remaining": recurring_total,
             "variable_remaining": variable_remaining,
             "typical_variable_month": typical_variable,
+            "income_booked": income_booked,
+            "debt_principal": _q(principal_booked + principal_remaining),
             "forecast_total": forecast_total,
         },
         "planned": planned_lines,
         "recurring": recurring_lines,
         "members": members_out,
-        "liquidity": _liquidity(db, settings),
+        "liquidity": _liquidity(db, settings, members_out, planned_total),
     }
 
 
@@ -423,7 +637,20 @@ def _covered_by_planned(key: str, amount: Decimal, planned_lines: list, planned_
     return False
 
 
-def _liquidity(db: Session, settings: SettlementSettings) -> dict:
+def _liquidity(
+    db: Session,
+    settings: SettlementSettings,
+    members_out: list,
+    open_invoices: Decimal,
+) -> dict:
+    """Cash position, read on the assumption that everyone pays their share.
+
+    The bank balance on its own answers the wrong question. Part of it is owed
+    to the credit card company in the middle of next month and part of it is
+    spoken for by invoices already registered, while the contributions still
+    outstanding are money that is going to arrive. What is left over when all
+    three are accounted for is the only figure that is free to spend.
+    """
     def balance(account_id: int) -> Decimal:
         row = (
             db.query(
@@ -454,8 +681,24 @@ def _liquidity(db: Session, settings: SettlementSettings) -> dict:
             "owed": _q(-balance(ba.account_id)),
         })
 
+    card_total = _q(sum((c["owed"] for c in cards), ZERO))
+    outstanding = _q(sum(
+        (m["recommended_transfer"] for m in members_out
+         if m["recommended_transfer"] > 0), ZERO,
+    ))
+    expected = None
+    covers_card = None
+    if operating_balance is not None:
+        expected = _q(operating_balance + outstanding - card_total - open_invoices)
+        covers_card = operating_balance + outstanding >= card_total
+
     return {
         "operating_balance": operating_balance,
         "credit_cards": cards,
-        "credit_card_owed_total": _q(sum((c["owed"] for c in cards), ZERO)),
+        "credit_card_owed_total": card_total,
+        "open_invoices": _q(open_invoices),
+        "outstanding_contributions": outstanding,
+        "expected_available": expected,
+        "covers_card": covers_card,
+        "card_due_day": settings.card_due_day,
     }
