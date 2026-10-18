@@ -1502,3 +1502,42 @@ body {
 .table tr.fire-off td {
     opacity: 0.55;
 }
+
+/* The accumulation chart. The SVG carries its own viewBox and scales to the
+   card, so the only job here is to let it breathe and to stop a narrow phone
+   squeezing it into a strip. */
+.fire-chart {
+    width: 100%;
+    overflow-x: auto;
+}
+
+.fire-chart svg {
+    display: block;
+    width: 100%;
+    min-width: 520px;
+    height: auto;
+}
+
+.fire-legend {
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 1.25rem;
+    margin: 0.75rem 0 0;
+    padding: 0;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+.fire-legend li {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+}
+
+.fire-legend span {
+    width: 1.1rem;
+    height: 0.2rem;
+    border-radius: 1px;
+    flex: none;
+}

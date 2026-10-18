@@ -1,16 +1,16 @@
-import auth from './auth.js?v=15';
-import api from './api.js?v=15';
-import ledgerManager from './ledgers.js?v=15';
-import transactionsManager from './transactions.js?v=15';
-import bankAccountsManager from './bank-accounts.js?v=15';
-import postingQueueManager from './posting-queue.js?v=15';
-import receiptsManager from './receipts.js?v=15';
-import reportsManager from './reports.js?v=15';
-import bankConnectionsManager from './bank-connections.js?v=15';
-import adminManager from './admin.js?v=15';
-import settlementManager from './settlement.js?v=15';
-import fireManager from './fire.js?v=15';
-import { formatCurrency, formatDate, getTodayDate, getFirstDayOfMonth, getLastDayOfMonth, showModal, closeModal, showError, showSuccess } from './utils.js?v=15';
+import auth from './auth.js?v=16';
+import api from './api.js?v=16';
+import ledgerManager from './ledgers.js?v=16';
+import transactionsManager from './transactions.js?v=16';
+import bankAccountsManager from './bank-accounts.js?v=16';
+import postingQueueManager from './posting-queue.js?v=16';
+import receiptsManager from './receipts.js?v=16';
+import reportsManager from './reports.js?v=16';
+import bankConnectionsManager from './bank-connections.js?v=16';
+import adminManager from './admin.js?v=16';
+import settlementManager from './settlement.js?v=16';
+import fireManager from './fire.js?v=16';
+import { formatCurrency, formatDate, getTodayDate, getFirstDayOfMonth, getLastDayOfMonth, showModal, closeModal, showError, showSuccess } from './utils.js?v=16';
 
 // Make auth available globally for passkey management
 window.auth = auth;
@@ -555,6 +555,7 @@ class App {
         const valueChangeAccountId = account.value_change_account_id;
         const fireRole = account.fire_role || '';
         const unlockAge = account.fire_unlock_age;
+        const payoutYears = account.fire_payout_years;
         const valuation = account.wealth_valuation_percent;
         const content = `
             <form id="edit-account-form">
@@ -601,6 +602,10 @@ class App {
                     <input type="number" id="edit-acc-unlock-age" min="0" max="100" value="${unlockAge ?? ''}" placeholder="f.eks. 62 for IPS, 67 for pensjon">
                 </div>
                 <div class="form-group">
+                    <label>Utbetales over antall ar (bare for pensjonskapital)</label>
+                    <input type="number" id="edit-acc-payout-years" min="1" max="40" value="${payoutYears ?? ''}" placeholder="IPS og pensjonskapitalbevis minst 10; tomt = hele belopet pa en gang">
+                </div>
+                <div class="form-group">
                     <label>Verdsettelse for formuesskatt (%)</label>
                     <input type="number" id="edit-acc-valuation" min="0" max="100" step="0.01" value="${valuation ?? ''}" placeholder="Aksjefond 80, bankinnskudd 100, IPS 0">
                 </div>
@@ -628,6 +633,7 @@ class App {
         const valueChange = document.getElementById('edit-acc-value-change').value;
         const fireRole = document.getElementById('edit-acc-fire-role').value;
         const unlockAge = document.getElementById('edit-acc-unlock-age').value;
+        const payoutYears = document.getElementById('edit-acc-payout-years').value;
         const valuation = document.getElementById('edit-acc-valuation').value;
 
         try {
@@ -639,6 +645,7 @@ class App {
                 value_change_account_id: valueChange ? parseInt(valueChange, 10) : null,
                 fire_role: fireRole || null,
                 fire_unlock_age: unlockAge !== '' ? parseInt(unlockAge, 10) : null,
+                fire_payout_years: payoutYears !== '' ? parseInt(payoutYears, 10) : null,
                 wealth_valuation_percent: valuation !== '' ? parseFloat(valuation) : null
             });
 

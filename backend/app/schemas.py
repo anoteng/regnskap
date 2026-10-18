@@ -150,6 +150,8 @@ class AccountCreate(AccountBase):
     # AVAILABLE, LOCKED, EXCLUDED or IGNORED; None means never classified
     fire_role: Optional[str] = None
     fire_unlock_age: Optional[int] = None
+    # Years a pension pot is paid out over from the unlock age; None is a lump
+    fire_payout_years: Optional[int] = None
     wealth_valuation_percent: Optional[Decimal] = None
 
 
@@ -160,6 +162,8 @@ class Account(AccountBase):
     value_change_account_id: Optional[int] = None
     fire_role: Optional[str] = None
     fire_unlock_age: Optional[int] = None
+    # Years a pension pot is paid out over from the unlock age; None is a lump
+    fire_payout_years: Optional[int] = None
     wealth_valuation_percent: Optional[Decimal] = None
     is_active: bool
     description: Optional[str] = None
@@ -806,7 +810,10 @@ class FireObligationInput(BaseModel):
     id: Optional[int] = None
     name: str
     kind: str = "OTHER"
+    """Where the remaining balance is read from, for a loan."""
     account_id: Optional[int] = None
+    """Where the cost is already booked, and so left out of the spending base."""
+    cost_account_id: Optional[int] = None
     monthly_amount: Decimal = Decimal("0")
     balance: Optional[Decimal] = None
     interest_percent: Optional[Decimal] = None
@@ -845,9 +852,41 @@ class FireSettingsUpdate(BaseModel):
     excluded_account_ids: List[int] = []
 
 
+class FireCostAccount(BaseModel):
+    """An expense account an obligation may already be booked on.
+
+    Carries its ledger because the one that matters most — the interest on a
+    shared mortgage — lives in the household's ledger, not the owner's.
+    """
+    id: int
+    ledger_id: int
+    ledger_name: str
+    account_number: str
+    account_name: str
+
+
+class FireIncomeStreamInput(BaseModel):
+    """A pension paid as income from an age: folketrygd, tjenestepensjon."""
+    id: Optional[int] = None
+    name: str
+    monthly_amount: Decimal = Decimal("0")
+    start_age: int
+    end_age: Optional[int] = None
+    inflation_adjusted: bool = True
+    is_active: bool = True
+
+
+class FireIncomeStreamOut(FireIncomeStreamInput):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
 class FireSettingsOut(FireSettingsUpdate):
     ledger_id: int
     obligations: List[FireObligationOut] = []
+    income_streams: List[FireIncomeStreamOut] = []
     updated_at: Optional[datetime] = None
 
 
@@ -855,6 +894,7 @@ class FireBucket(BaseModel):
     name: str
     amount: Decimal
     unlock_age: Optional[int] = None
+    payout_years: Optional[int] = None
     valuation_percent: Decimal
     excluded: bool
 
@@ -874,6 +914,39 @@ class FireYearRow(BaseModel):
     saved: Decimal
     withdrawn: Decimal
     working: bool
+    pension_income: Decimal = Decimal("0")
+    """Months the row covers; the first and last of a plan are part-years."""
+    months: int = 12
+
+
+class FireChartPoint(BaseModel):
+    """One year on the chart. Capital on the left axis, the rest on the right."""
+    year: int
+    age: int
+    """What the pots hold if the saving carries on as it does now."""
+    capital_saving: Decimal
+    """What they hold if nothing is ever added — only the return."""
+    capital_no_deposits: Decimal
+    """Spending plus the obligations still running plus the wealth tax."""
+    annual_cost: Decimal
+    """The same, less the pensions. What the capital itself has to raise."""
+    annual_need: Decimal
+    pension_income: Decimal
+
+
+class FireChart(BaseModel):
+    """The accumulation picture: two capital paths against what a year costs.
+
+    The right-hand axis is the left-hand one times the withdrawal rate, so
+    the capital curve read on the right *is* the four per cent line and the
+    crossing with the cost curve is real rather than an artefact of scaling
+    two axes independently.
+    """
+    swr_percent: Decimal
+    points: List[FireChartPoint]
+    """First year a four per cent withdrawal covers the year's need."""
+    crossing_year: Optional[int] = None
+    crossing_age: Optional[int] = None
 
 
 class FireObligationOutcome(BaseModel):
@@ -902,6 +975,7 @@ class FireProjectionOut(BaseModel):
 class FireNumberOut(BaseModel):
     perpetual_annual_spending: Decimal
     base_capital: Decimal
+    pension_capital: Decimal = Decimal("0")
     wealth_tax_annual: Decimal
     wealth_tax_capital: Decimal
     """Extra capital needed to carry the costs that do end, until they do."""
@@ -933,4 +1007,5 @@ class FireResult(BaseModel):
     fire_number: FireNumberOut
     earliest: Optional[FireProjectionOut] = None
     target: Optional[FireProjectionOut] = None
+    chart: Optional[FireChart] = None
     warnings: List[str] = []

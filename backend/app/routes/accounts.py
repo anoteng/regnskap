@@ -76,6 +76,7 @@ def create_account(
         value_change_account_id=account.value_change_account_id,
         fire_role=account.fire_role,
         fire_unlock_age=account.fire_unlock_age,
+        fire_payout_years=account.fire_payout_years,
         wealth_valuation_percent=account.wealth_valuation_percent,
         description=account.description,
         is_active=True
@@ -142,6 +143,7 @@ def update_account(
     account.value_change_account_id = account_update.value_change_account_id
     account.fire_role = account_update.fire_role
     account.fire_unlock_age = account_update.fire_unlock_age
+    account.fire_payout_years = account_update.fire_payout_years
     account.wealth_valuation_percent = account_update.wealth_valuation_percent
     account.description = account_update.description
 

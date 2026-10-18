@@ -231,6 +231,10 @@ class Account(Base):
     fire_role = Column(SQLEnum(FireRole), nullable=True)
     # Age at which a LOCKED account becomes spendable (IPS 62, pension 67)
     fire_unlock_age = Column(Integer, nullable=True)
+    # Pension capital cannot be emptied at will: IPS and a pensjonskapitalbevis
+    # are paid out in equal instalments over a fixed number of years. NULL means
+    # the whole balance is spendable the moment it unlocks.
+    fire_payout_years = Column(Integer, nullable=True)
     # Share of market value that counts towards net wealth. Equity funds are
     # valued at 80, bank deposits at 100, a primary residence at 25.
     wealth_valuation_percent = Column(DECIMAL(5, 2), nullable=True)
@@ -841,6 +845,10 @@ class FireSettings(Base):
     excluded_accounts = relationship(
         "FireExcludedAccount", back_populates="settings", cascade="all, delete-orphan"
     )
+    income_streams = relationship(
+        "FireIncomeStream", back_populates="settings",
+        cascade="all, delete-orphan", order_by="FireIncomeStream.start_age",
+    )
 
 
 class FireObligation(Base):
@@ -852,8 +860,19 @@ class FireObligation(Base):
 
     A loan may be given either as a flat monthly amount with an end date, or
     as balance plus interest, in which case the payoff date is amortised out.
-    The account link is optional and may point into another ledger — a shared
-    mortgage is still a claim on this person's income.
+
+    The two account links do different jobs and neither implies the other:
+
+      * `account_id` is where the remaining balance is read from, so a loan
+        tracks the ledger instead of a figure typed in once and forgotten.
+      * `cost_account_id` is where the cost is *already booked*. Whatever the
+        obligation pays for shows up in the ledger too — a mortgage as interest
+        on 7101, child support as an expense of its own — and counting both the
+        obligation and the booking would charge the same krone twice. The
+        spending base leaves that account out.
+
+    Either may point into another ledger. A shared mortgage is booked in the
+    household's ledger and is still a claim on this person's income.
     """
     __tablename__ = "fire_obligations"
 
@@ -862,6 +881,7 @@ class FireObligation(Base):
     name = Column(String(255), nullable=False)
     kind = Column(SQLEnum(FireObligationKind), nullable=False, default=FireObligationKind.OTHER)
     account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
+    cost_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
 
     monthly_amount = Column(DECIMAL(15, 2), nullable=False, default=0)
     balance = Column(DECIMAL(15, 2), nullable=True)
@@ -880,7 +900,41 @@ class FireObligation(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     settings = relationship("FireSettings", back_populates="obligations")
-    account = relationship("Account")
+    account = relationship("Account", foreign_keys=[account_id])
+    cost_account = relationship("Account", foreign_keys=[cost_account_id])
+
+
+class FireIncomeStream(Base):
+    """A pension that arrives as income rather than as a balance you hold.
+
+    Folketrygd and a public tjenestepensjon have no account in the ledger —
+    there is nothing to draw down, only a payment that starts on a birthday
+    and, for most of them, never stops. Modelling them as capital would be
+    wrong twice over: they cannot be spent early, and they are not taxed as
+    wealth.
+
+    Kept apart from FireObligation because the sign is not the only
+    difference: an obligation ends on a date and may amortise, a stream
+    starts at an age and usually runs for life.
+    """
+    __tablename__ = "fire_income_streams"
+
+    id = Column(Integer, primary_key=True, index=True)
+    settings_id = Column(Integer, ForeignKey("fire_settings.id"), nullable=False)
+    name = Column(String(255), nullable=False)
+    # Today's kroner, net of tax, the way spending and income are
+    monthly_amount = Column(DECIMAL(15, 2), nullable=False, default=0)
+    start_age = Column(Integer, nullable=False)
+    # NULL means for life
+    end_age = Column(Integer, nullable=True)
+    # Folketrygd follows G; a fixed annuity does not
+    inflation_adjusted = Column(Boolean, nullable=False, default=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    settings = relationship("FireSettings", back_populates="income_streams")
 
 
 class FireExcludedAccount(Base):

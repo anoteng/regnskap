@@ -652,6 +652,22 @@ class API {
         return this.delete(`/fire/obligations/${id}`);
     }
 
+    async getFireCostAccounts() {
+        return this.get('/fire/cost-accounts');
+    }
+
+    async createFireIncomeStream(data) {
+        return this.post('/fire/income-streams', data);
+    }
+
+    async updateFireIncomeStream(id, data) {
+        return this.put(`/fire/income-streams/${id}`, data);
+    }
+
+    async deleteFireIncomeStream(id) {
+        return this.delete(`/fire/income-streams/${id}`);
+    }
+
     async getFireProjection(retirementDate = null) {
         const q = retirementDate ? `?retirement_date=${retirementDate}` : '';
         return this.get(`/fire/projection${q}`);

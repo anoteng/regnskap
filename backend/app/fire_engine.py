@@ -1,6 +1,6 @@
 """FIRE projection: when the capital covers the spending, and for how long.
 
-Three things make this more than dividing a pile of money by four percent:
+Five things make this more than dividing a pile of money by four percent:
 
   * **Locked capital.** Pension savings cannot pay for the years before they
     unlock. Retiring at 45 with most of the money tied up until 67 means the
@@ -13,7 +13,18 @@ Three things make this more than dividing a pile of money by four percent:
     years they still run. They are carried as dated obligations and amortised.
 
   * **Wealth tax.** It is charged on net wealth, so paying off debt brings it
-    closer, and it is funded out of the same capital it is charged on.
+    closer, and it is funded out of the same capital it is charged on. Which
+    pot a krone is drawn from therefore matters: bank deposits count at full
+    value, share savings at eighty per cent, pension capital at nothing, so
+    withdrawals take the most heavily taxed money first and leave the rest
+    compounding. See `_draw_order`.
+
+  * **Pensions.** Folketrygd and a tjenestepensjon are not capital at all —
+    they are an income that starts on a birthday — while IPS and a
+    pensjonskapitalbevis are capital that cannot be emptied at will but is
+    paid out over a fixed number of years. Both reduce what the capital has
+    to raise, neither can be spent early, and treating either as an ordinary
+    pot would answer the wrong question.
 
 Everything runs in today's kroner. Spending then stays flat, growth is the
 real return, and a nominal loan payment shrinks year by year the way it
@@ -61,6 +72,25 @@ class Bucket:
     valuation_percent: float = 100.0
     # Legally yours, in practice a child's. Never spent, still taxed.
     excluded: bool = False
+    # Pension capital is not released as a lump. IPS and a pensjonskapitalbevis
+    # pay out over a fixed number of years from the unlock age; the rest keeps
+    # growing meanwhile. None means the whole balance is spendable at once.
+    payout_years: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class IncomeStream:
+    """A pension that arrives as income, not as a balance to draw down.
+
+    Folketrygd and a public tjenestepensjon start on a birthday and run for
+    life. They cannot be spent early and they are not taxed as wealth, so
+    they belong in the cash flow rather than among the buckets.
+    """
+    name: str
+    monthly: float
+    start_age: int
+    end_age: Optional[int] = None
+    inflation_adjusted: bool = True
 
 
 @dataclass(frozen=True)
@@ -120,6 +150,7 @@ class FireInputs:
     monthly_net_income: float
     buckets: Sequence[Bucket]
     obligations: Sequence[Obligation]
+    income_streams: Sequence[IncomeStream]
     swr: float
     inflation: float
     nominal_return: float
@@ -186,6 +217,12 @@ class YearRow:
     saved: float
     withdrawn: float
     working: bool
+    # Pensions received this year: income streams plus instalments from a
+    # pension pot being paid out. What the capital does NOT have to cover.
+    pension_income: float = 0.0
+    # Months this row actually covers. The first and last are part-years, and
+    # a chart that plots their totals as if they were whole ones lies.
+    months: int = MONTHS_PER_YEAR
 
 
 @dataclass
@@ -240,39 +277,130 @@ def age_on(birth_date: date, when: date) -> int:
 # Projection
 # ---------------------------------------------------------------------------
 
+class _Pot:
+    """One pot of capital as the month-by-month loop carries it.
+
+    A frozen `Bucket` says what the account is; this says what has happened
+    to it so far. They are kept apart so the same inputs can be run through
+    the loop many times over, which is what Monte Carlo will need.
+    """
+
+    __slots__ = (
+        "name", "amount", "valuation", "unlock_age", "payout_years",
+        "excluded", "payout_months_left", "unlocked",
+    )
+
+    def __init__(self, bucket: Bucket):
+        self.name = bucket.name
+        self.amount = bucket.amount
+        self.valuation = bucket.valuation_percent / 100.0
+        self.unlock_age = bucket.unlock_age
+        self.payout_years = bucket.payout_years
+        self.excluded = bucket.excluded
+        self.payout_months_left: Optional[int] = None
+        self.unlocked = bucket.unlock_age is None
+
+    @property
+    def spendable(self) -> bool:
+        """Free to draw on this month.
+
+        A pot being paid out in instalments is not: the instalment arrives as
+        income on its own schedule and the rest cannot be touched.
+        """
+        return self.unlocked and not self.excluded and self.payout_years is None
+
+    @property
+    def taxable(self) -> float:
+        return self.amount * self.valuation
+
+
+def _draw_order(pots: Sequence["_Pot"]) -> list["_Pot"]:
+    """Spendable pots, most heavily taxed first.
+
+    Which pot a krone comes out of is free money or a free loss. Bank deposits
+    count at full value towards net wealth, share savings accounts at eighty
+    per cent, pension capital at nothing. Spending the taxed money first
+    leaves the untaxed money compounding for longer and shrinks every future
+    wealth tax assessment along the way.
+
+    It costs nothing to get right and nothing in the ledger has to change for
+    it, which is why the order is derived rather than configured.
+    """
+    return sorted(
+        (p for p in pots if p.spendable),
+        key=lambda p: p.valuation, reverse=True,
+    )
+
+
+def _apply_cash(pots: Sequence["_Pot"], delta: float) -> None:
+    """Put money into the pots, or take it out, one month's worth.
+
+    Money going in covers an overdraft first and then follows the mix already
+    held, because that is where a standing order actually sends it. Money
+    coming out follows the draw order. If every pot is empty the shortfall is
+    left on the most heavily taxed one, which is what makes the plan visibly
+    fail rather than quietly balance.
+    """
+    order = _draw_order(pots)
+    if not order:
+        return
+
+    if delta >= 0:
+        for pot in order:
+            if delta <= 0:
+                break
+            if pot.amount < 0:
+                covered = min(delta, -pot.amount)
+                pot.amount += covered
+                delta -= covered
+        if delta <= 0:
+            return
+        positive = [p for p in order if p.amount > 0]
+        total = sum(p.amount for p in positive)
+        if total <= 0:
+            order[0].amount += delta
+            return
+        for pot in positive:
+            pot.amount += delta * pot.amount / total
+        return
+
+    short = -delta
+    for pot in order:
+        if short <= 0:
+            break
+        if pot.amount <= 0:
+            continue
+        taken = min(short, pot.amount)
+        pot.amount -= taken
+        short -= taken
+    if short > 0:
+        order[0].amount -= short
+
+
 def project(
     inputs: FireInputs,
     returns: ReturnModel,
     retirement_month: int,
+    growth_only: bool = False,
 ) -> Projection:
     """Run the plan month by month from `inputs.start` to the horizon.
 
-    `retirement_month` is the month index at which earned income stops.
+    `retirement_month` is the month index at which earned income stops. Pass
+    the horizon to ask what happens if the work never does.
+
+    `growth_only` drops every cash flow and lets the pots compound on their
+    own. It answers a different question — what today's capital becomes if
+    nothing is ever added to it — and is drawn alongside the real projection
+    so the two can be compared.
     """
     horizon = inputs.horizon_months
     retirement_month = max(0, min(retirement_month, horizon))
 
-    # Each pot carries its own taxable value alongside its market value. One
-    # blended rate would not survive a pension account worth nothing for
-    # wealth tax merging into a fund portfolio valued at eighty per cent.
-    available = available_taxable = 0.0
-    locked: dict[int, float] = {}
-    locked_taxable: dict[int, float] = {}
-    excluded = excluded_taxable = 0.0
-    for b in inputs.buckets:
-        taxable = b.amount * b.valuation_percent / 100.0
-        if b.excluded:
-            excluded += b.amount
-            excluded_taxable += taxable
-        elif b.unlock_age is None:
-            available += b.amount
-            available_taxable += taxable
-        else:
-            locked[b.unlock_age] = locked.get(b.unlock_age, 0.0) + b.amount
-            locked_taxable[b.unlock_age] = locked_taxable.get(b.unlock_age, 0.0) + taxable
+    # Each pot carries its own taxable value. One blended rate would not
+    # survive a pension account worth nothing for wealth tax sitting beside a
+    # fund portfolio valued at eighty per cent.
+    pots = [_Pot(b) for b in inputs.buckets]
 
-    # New savings go into what is already held
-    contribution_valuation = _spendable_valuation(inputs.buckets)
     loan_balance = [ob.balance for ob in inputs.obligations]
     interest_paid = [0.0 for _ in inputs.obligations]
     payoff_month: list[Optional[int]] = [None for _ in inputs.obligations]
@@ -283,126 +411,134 @@ def project(
     depleted_month: Optional[int] = None
     bridge_low: Optional[float] = None
     bridge_low_month: Optional[int] = None
-    unlocks_remaining = bool(locked)
 
     rows: list[YearRow] = []
-    year_spending = year_obligations = year_tax = year_saved = year_withdrawn = 0.0
+    year_months = 0
+    year_spending = year_obligations = year_tax = 0.0
+    year_saved = year_withdrawn = year_pension = 0.0
 
     # The first assessment is on today's wealth, debt included, so year one is
     # neither tax-free nor taxed on a gross figure
-    opening_debt = sum(ob.balance for ob in inputs.obligations if ob.counts_as_debt)
-    wealth_tax_monthly = inputs.wealth_tax.on(
-        _net_wealth(
-            available_taxable + sum(locked_taxable.values()) + excluded_taxable,
-            opening_debt,
-        ),
-        1.0,
-    ) / MONTHS_PER_YEAR
+    if not growth_only:
+        opening_debt = sum(ob.balance for ob in inputs.obligations if ob.counts_as_debt)
+        wealth_tax_monthly = inputs.wealth_tax.on(
+            _net_wealth(sum(p.taxable for p in pots), opening_debt), 1.0,
+        ) / MONTHS_PER_YEAR
 
     for month in range(horizon):
         when = add_months(inputs.start, month)
         age = age_on(inputs.birth_date, when)
-        working = month < retirement_month
+        working = month < retirement_month and not growth_only
 
-        if unlocks_remaining:
-            matured = [a for a in locked if age >= a]
-            for a in matured:
-                available += locked.pop(a)
-                available_taxable += locked_taxable.pop(a, 0.0)
-            unlocks_remaining = bool(locked)
+        for pot in pots:
+            if not pot.unlocked and pot.unlock_age is not None and age >= pot.unlock_age:
+                pot.unlocked = True
+                if pot.payout_years:
+                    pot.payout_months_left = pot.payout_years * MONTHS_PER_YEAR
 
-        obligation_cost = 0.0
+        pension = 0.0
         debt = 0.0
-        for i, ob in enumerate(inputs.obligations):
-            cost_nominal = 0.0
-            running = ob.end_month is None or month < ob.end_month
-            if ob.is_loan:
-                if loan_balance[i] > PAID_OFF and running:
-                    interest = loan_balance[i] * ob.annual_rate / MONTHS_PER_YEAR
-                    payment = min(ob.monthly, loan_balance[i] + interest)
-                    loan_balance[i] += interest - payment
-                    interest_paid[i] += interest
-                    cost_nominal = payment
-                    if loan_balance[i] <= PAID_OFF:
-                        loan_balance[i] = 0.0
-                        payoff_month[i] = month
-                elif loan_balance[i] > PAID_OFF and not running:
-                    # End date reached with principal left: the rest is due
-                    payoff_month[i] = payoff_month[i] or month
-                    loan_balance[i] = 0.0
-            elif running:
-                cost_nominal = ob.monthly
-            elif payoff_month[i] is None and ob.end_month is not None:
-                payoff_month[i] = ob.end_month
-
-            if cost_nominal:
-                obligation_cost += (
-                    cost_nominal if ob.inflation_adjusted
-                    else cost_nominal / inflation_factor
-                )
-            if ob.counts_as_debt:
-                debt += loan_balance[i] / inflation_factor
-
-        spending = inputs.monthly_spending
-        outgoing = spending + obligation_cost + wealth_tax_monthly
-
+        obligation_cost = 0.0
+        spending = 0.0
         saved = withdrawn = 0.0
-        if working:
-            saved = inputs.monthly_net_income - outgoing
-            delta = saved
-        else:
-            withdrawn = outgoing
-            delta = -withdrawn
 
-        if delta >= 0:
-            available += delta
-            available_taxable += delta * contribution_valuation
-        else:
-            # Taking money out leaves the mix of what remains unchanged
-            before = available
-            available += delta
-            available_taxable = (
-                available_taxable * max(0.0, available) / before if before > 0 else 0.0
-            )
+        if not growth_only:
+            # Pension capital being paid out: the instalment is recomputed
+            # every month so returns earned during the payout are shared out
+            # too, instead of being stranded in the final month.
+            for pot in pots:
+                if pot.payout_months_left:
+                    instalment = pot.amount / pot.payout_months_left
+                    pot.amount -= instalment
+                    pot.payout_months_left -= 1
+                    pension += instalment
 
-        if available < 0 and depleted_month is None:
-            depleted_month = month
+            for stream in inputs.income_streams:
+                if age < stream.start_age:
+                    continue
+                if stream.end_age is not None and age >= stream.end_age:
+                    continue
+                pension += (
+                    stream.monthly if stream.inflation_adjusted
+                    else stream.monthly / inflation_factor
+                )
+
+            for i, ob in enumerate(inputs.obligations):
+                cost_nominal = 0.0
+                running = ob.end_month is None or month < ob.end_month
+                if ob.is_loan:
+                    if loan_balance[i] > PAID_OFF and running:
+                        interest = loan_balance[i] * ob.annual_rate / MONTHS_PER_YEAR
+                        payment = min(ob.monthly, loan_balance[i] + interest)
+                        loan_balance[i] += interest - payment
+                        interest_paid[i] += interest
+                        cost_nominal = payment
+                        if loan_balance[i] <= PAID_OFF:
+                            loan_balance[i] = 0.0
+                            payoff_month[i] = month
+                    elif loan_balance[i] > PAID_OFF and not running:
+                        # End date reached with principal left: the rest is due
+                        payoff_month[i] = payoff_month[i] or month
+                        loan_balance[i] = 0.0
+                elif running:
+                    cost_nominal = ob.monthly
+                elif payoff_month[i] is None and ob.end_month is not None:
+                    payoff_month[i] = ob.end_month
+
+                if cost_nominal:
+                    obligation_cost += (
+                        cost_nominal if ob.inflation_adjusted
+                        else cost_nominal / inflation_factor
+                    )
+                if ob.counts_as_debt:
+                    debt += loan_balance[i] / inflation_factor
+
+            spending = inputs.monthly_spending
+            outgoing = spending + obligation_cost + wealth_tax_monthly
+            earned = inputs.monthly_net_income if working else 0.0
+            delta = earned + pension - outgoing
+            saved = max(0.0, delta)
+            withdrawn = max(0.0, -delta)
+            _apply_cash(pots, delta)
+
+            if sum(p.amount for p in pots if p.spendable) < 0 and depleted_month is None:
+                depleted_month = month
 
         growth = 1.0 + returns.monthly_real_return(month)
-        if available > 0:
-            available *= growth
-            available_taxable *= growth
-        for a in list(locked):
-            locked[a] *= growth
-            locked_taxable[a] *= growth
-        excluded *= growth
-        excluded_taxable *= growth
+        for pot in pots:
+            if pot.amount > 0:
+                pot.amount *= growth
         inflation_factor *= 1.0 + returns.monthly_inflation(month)
+
+        available = sum(p.amount for p in pots if p.spendable)
+        locked_total = sum(
+            p.amount for p in pots if not p.excluded and not p.spendable
+        )
+        excluded_total = sum(p.amount for p in pots if p.excluded)
 
         # The bridge is only a question once the income stops: how low the
         # spendable pot gets while the rest is still locked away
-        if locked and not working and (bridge_low is None or available < bridge_low):
-            bridge_low, bridge_low_month = available, month
+        if locked_total and not working and not growth_only:
+            if bridge_low is None or available < bridge_low:
+                bridge_low, bridge_low_month = available, month
 
+        year_months += 1
         year_spending += spending
         year_obligations += obligation_cost
         year_tax += wealth_tax_monthly
         year_saved += saved
         year_withdrawn += withdrawn
+        year_pension += pension
 
         if when.month == 12 or month == horizon - 1:
-            locked_total = sum(locked.values())
-            net_wealth = _net_wealth(
-                available_taxable + sum(locked_taxable.values()) + excluded_taxable,
-                debt,
-            )
+            net_wealth = _net_wealth(sum(p.taxable for p in pots), debt)
             rows.append(YearRow(
                 year=when.year,
                 age=age,
                 available=available,
                 locked=locked_total,
-                excluded=excluded,
-                total=available + locked_total + excluded,
+                excluded=excluded_total,
+                total=available + locked_total + excluded_total,
                 debt=debt,
                 net_wealth=net_wealth,
                 spending=year_spending,
@@ -411,12 +547,16 @@ def project(
                 saved=year_saved,
                 withdrawn=year_withdrawn,
                 working=working,
+                pension_income=year_pension,
+                months=year_months,
             ))
             if year_tax > 0 and first_wealth_tax_year is None:
                 first_wealth_tax_year = when.year
-            year_spending = year_obligations = year_tax = year_saved = year_withdrawn = 0.0
+            year_months = 0
+            year_spending = year_obligations = year_tax = 0.0
+            year_saved = year_withdrawn = year_pension = 0.0
 
-            if when.month == 12:
+            if when.month == 12 and not growth_only:
                 # Assessed on 31 December, paid over the year that follows
                 annual = inputs.wealth_tax.on(net_wealth, inflation_factor)
                 wealth_tax_monthly = annual / MONTHS_PER_YEAR
@@ -480,6 +620,8 @@ class FireNumber:
     wealth_tax_annual: float
     wealth_tax_capital: float
     bridge_capital: float
+    # Present value of the pensions, which the capital does not have to raise
+    pension_capital: float
     total: float
 
 
@@ -492,6 +634,10 @@ def fire_number(inputs: FireInputs) -> FireNumber:
 
     The wealth tax is charged on the capital it is paid from, which makes the
     answer its own input. A few rounds of substitution settle it.
+
+    Pensions still to come are subtracted at their present value, the mirror
+    of how costs that end are added. Both are bounded by the horizon, so a
+    pension paid for life counts only as far as the plan runs.
     """
     perpetual_monthly = inputs.monthly_spending + sum(
         ob.monthly for ob in inputs.obligations
@@ -517,6 +663,10 @@ def fire_number(inputs: FireInputs) -> FireNumber:
         for ob in inputs.obligations
         if ob.end_month is not None or ob.is_loan
     )
+    pension = sum(
+        _stream_present_value(st, inputs, real_monthly)
+        for st in inputs.income_streams
+    )
 
     return FireNumber(
         perpetual_annual_spending=perpetual_annual,
@@ -524,7 +674,8 @@ def fire_number(inputs: FireInputs) -> FireNumber:
         wealth_tax_annual=tax,
         wealth_tax_capital=capital - base,
         bridge_capital=bridge,
-        total=capital + bridge,
+        pension_capital=pension,
+        total=max(0.0, capital + bridge - pension),
     )
 
 
@@ -554,6 +705,37 @@ def _present_value(ob: Obligation, inputs: FireInputs, real_monthly: float) -> f
             payment = ob.monthly
         real = payment if ob.inflation_adjusted else payment / inflation_factor
         total += real / discount
+        inflation_factor *= 1.0 + inflation_monthly
+        discount *= 1.0 + real_monthly
+    return total
+
+
+def _stream_present_value(
+    stream: IncomeStream, inputs: FireInputs, real_monthly: float
+) -> float:
+    """What a pension still to come is worth today, in today's kroner.
+
+    The mirror of `_present_value`: an obligation is money leaving, a stream
+    is money arriving, and both are bounded by the horizon. A pension paid
+    for life is counted only as far as the plan runs, which is the same
+    convention every other figure here follows.
+    """
+    horizon = inputs.horizon_months
+    inflation_monthly = (1.0 + inputs.inflation) ** (1.0 / MONTHS_PER_YEAR) - 1.0
+    inflation_factor = 1.0
+    discount = 1.0
+    total = 0.0
+    for month in range(horizon):
+        age = age_on(inputs.birth_date, add_months(inputs.start, month))
+        running = age >= stream.start_age and (
+            stream.end_age is None or age < stream.end_age
+        )
+        if running:
+            real = (
+                stream.monthly if stream.inflation_adjusted
+                else stream.monthly / inflation_factor
+            )
+            total += real / discount
         inflation_factor *= 1.0 + inflation_monthly
         discount *= 1.0 + real_monthly
     return total
@@ -641,9 +823,14 @@ def build_inputs(db, settings, as_of: Optional[date] = None) -> FireInputs:
         row[0] for row in db.query(Account.value_change_account_id)
         .filter(Account.value_change_account_id.isnot(None)).distinct()
     }
+    # Where an obligation's cost is already booked. Counting both the
+    # obligation and the booking would charge the same krone twice: a
+    # mortgage pays interest onto 7101 every month and child support onto an
+    # expense account of its own. The balance account, if there is one, is a
+    # different link and must not be confused with this.
     obligation_account_ids = {
-        ob.account_id for ob in settings.obligations
-        if ob.is_active and ob.account_id
+        ob.cost_account_id for ob in settings.obligations
+        if ob.is_active and ob.cost_account_id
     }
 
     def balance(account_id: int) -> float:
@@ -701,6 +888,9 @@ def build_inputs(db, settings, as_of: Optional[date] = None) -> FireInputs:
             unlock_age=account.fire_unlock_age if role == FireRole.LOCKED else None,
             valuation_percent=valuation,
             excluded=role == FireRole.EXCLUDED,
+            payout_years=(
+                account.fire_payout_years if role == FireRole.LOCKED else None
+            ),
         ))
         if role == FireRole.LOCKED and account.fire_unlock_age is None:
             warnings.append(
@@ -790,6 +980,32 @@ def build_inputs(db, settings, as_of: Optional[date] = None) -> FireInputs:
                 f"for tidlig."
             )
 
+    # --- pensions that arrive as income ------------------------------------
+    income_streams: list[IncomeStream] = []
+    for st in settings.income_streams:
+        if not st.is_active:
+            continue
+        income_streams.append(IncomeStream(
+            name=st.name,
+            monthly=float(st.monthly_amount or 0),
+            start_age=st.start_age,
+            end_age=st.end_age,
+            inflation_adjusted=bool(st.inflation_adjusted),
+        ))
+        if st.start_age > settings.horizon_age:
+            warnings.append(
+                f"{st.name} starter ved {st.start_age} år, etter at beregningen "
+                f"slutter ved {settings.horizon_age}. Den teller ikke med."
+            )
+
+    for bucket in buckets:
+        if bucket.unlock_age is not None and bucket.unlock_age >= settings.horizon_age:
+            warnings.append(
+                f"{bucket.name} frigjøres ved {bucket.unlock_age} år, samtidig med "
+                f"eller etter at beregningen slutter ved {settings.horizon_age}. "
+                f"Den blir stående urørt."
+            )
+
     return FireInputs(
         start=start,
         birth_date=settings.birth_date,
@@ -798,6 +1014,7 @@ def build_inputs(db, settings, as_of: Optional[date] = None) -> FireInputs:
         monthly_net_income=monthly_income,
         buckets=buckets,
         obligations=obligations,
+        income_streams=income_streams,
         swr=float(settings.swr_percent) / 100.0,
         inflation=float(settings.inflation_percent) / 100.0,
         nominal_return=float(settings.expected_return_percent) / 100.0,

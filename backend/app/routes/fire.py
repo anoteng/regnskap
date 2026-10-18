@@ -15,7 +15,9 @@ from sqlalchemy.orm import Session, joinedload
 from backend.database import get_db
 from ..models import (
     Account,
+    AccountType,
     FireExcludedAccount,
+    FireIncomeStream,
     FireObligation,
     FireObligationKind,
     FireSettings,
@@ -26,6 +28,11 @@ from ..models import (
 from ..schemas import (
     FireAssumptions,
     FireBucket,
+    FireChart,
+    FireChartPoint,
+    FireCostAccount,
+    FireIncomeStreamInput,
+    FireIncomeStreamOut,
     FireNumberOut,
     FireObligationInput,
     FireObligationOut,
@@ -38,6 +45,7 @@ from ..schemas import (
 )
 from ..auth import get_current_active_user, get_current_ledger
 from ..fire_engine import (
+    MONTHS_PER_YEAR,
     ConstantReturns,
     FireDisabled,
     age_on,
@@ -60,6 +68,7 @@ def _load(db: Session, ledger_id: int) -> Optional[FireSettings]:
         .options(
             joinedload(FireSettings.obligations),
             joinedload(FireSettings.excluded_accounts),
+            joinedload(FireSettings.income_streams),
         )
         .filter(FireSettings.ledger_id == ledger_id)
         .first()
@@ -90,6 +99,9 @@ def _to_out(ledger_id: int, settings: Optional[FireSettings]) -> FireSettingsOut
         wealth_tax_index_threshold=settings.wealth_tax_index_threshold,
         excluded_account_ids=sorted(e.account_id for e in settings.excluded_accounts),
         obligations=[FireObligationOut.model_validate(ob) for ob in settings.obligations],
+        income_streams=[
+            FireIncomeStreamOut.model_validate(st) for st in settings.income_streams
+        ],
         updated_at=settings.updated_at,
     )
 
@@ -217,6 +229,120 @@ def delete_obligation(
     return {"message": "Forpliktelsen er slettet"}
 
 
+@router.get("/cost-accounts", response_model=List[FireCostAccount])
+def list_cost_accounts(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    current_ledger: Ledger = Depends(get_current_ledger),
+):
+    """Expense accounts an obligation may already be booked on.
+
+    The shared ledger is included, and that is the point: a household
+    mortgage pays its interest there, not here, and without it the one
+    account that causes the double count could not be picked at all.
+    """
+    settings = _load(db, current_ledger.id)
+    ledger_ids = [current_ledger.id]
+    if settings and settings.shared_ledger_id:
+        ledger_ids.append(settings.shared_ledger_id)
+
+    names = {
+        row.id: row.name for row in
+        db.query(Ledger).filter(Ledger.id.in_(ledger_ids)).all()
+    }
+    accounts = db.query(Account).filter(
+        Account.ledger_id.in_(ledger_ids),
+        Account.account_type == AccountType.EXPENSE,
+        Account.is_active.is_(True),
+    ).order_by(Account.ledger_id, Account.account_number).all()
+
+    return [
+        FireCostAccount(
+            id=a.id,
+            ledger_id=a.ledger_id,
+            ledger_name=names.get(a.ledger_id, ""),
+            account_number=a.account_number,
+            account_name=a.account_name,
+        )
+        for a in accounts
+    ]
+
+
+@router.post("/income-streams", response_model=FireIncomeStreamOut)
+def create_income_stream(
+    payload: FireIncomeStreamInput,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    current_ledger: Ledger = Depends(get_current_ledger),
+):
+    """Register a pension paid as income: folketrygd, tjenestepensjon."""
+    settings = _require_settings(db, current_ledger.id)
+    stream = FireIncomeStream(settings_id=settings.id)
+    _apply_stream(stream, payload)
+    db.add(stream)
+    db.commit()
+    db.refresh(stream)
+    return FireIncomeStreamOut.model_validate(stream)
+
+
+@router.put("/income-streams/{stream_id}", response_model=FireIncomeStreamOut)
+def update_income_stream(
+    stream_id: int,
+    payload: FireIncomeStreamInput,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    current_ledger: Ledger = Depends(get_current_ledger),
+):
+    settings = _require_settings(db, current_ledger.id)
+    stream = db.query(FireIncomeStream).filter(
+        FireIncomeStream.id == stream_id,
+        FireIncomeStream.settings_id == settings.id,
+    ).first()
+    if not stream:
+        raise HTTPException(status_code=404, detail="Inntektsstrømmen finnes ikke")
+    _apply_stream(stream, payload)
+    db.commit()
+    db.refresh(stream)
+    return FireIncomeStreamOut.model_validate(stream)
+
+
+@router.delete("/income-streams/{stream_id}")
+def delete_income_stream(
+    stream_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    current_ledger: Ledger = Depends(get_current_ledger),
+):
+    settings = _require_settings(db, current_ledger.id)
+    stream = db.query(FireIncomeStream).filter(
+        FireIncomeStream.id == stream_id,
+        FireIncomeStream.settings_id == settings.id,
+    ).first()
+    if not stream:
+        raise HTTPException(status_code=404, detail="Inntektsstrømmen finnes ikke")
+    db.delete(stream)
+    db.commit()
+    return {"status": "deleted"}
+
+
+def _apply_stream(stream: FireIncomeStream, payload: FireIncomeStreamInput) -> None:
+    if not payload.name.strip():
+        raise HTTPException(status_code=400, detail="Inntektsstrømmen må ha et navn")
+    if payload.monthly_amount is not None and payload.monthly_amount < 0:
+        raise HTTPException(status_code=400, detail="Beløpet kan ikke være negativt")
+    if payload.end_age is not None and payload.end_age <= payload.start_age:
+        raise HTTPException(
+            status_code=400,
+            detail="Sluttalderen må være høyere enn startalderen",
+        )
+    stream.name = payload.name.strip()
+    stream.monthly_amount = payload.monthly_amount or Decimal("0")
+    stream.start_age = payload.start_age
+    stream.end_age = payload.end_age
+    stream.inflation_adjusted = payload.inflation_adjusted
+    stream.is_active = payload.is_active
+
+
 def _apply(obligation: FireObligation, payload: FireObligationInput) -> None:
     try:
         kind = FireObligationKind(payload.kind)
@@ -235,6 +361,7 @@ def _apply(obligation: FireObligation, payload: FireObligationInput) -> None:
     obligation.name = payload.name.strip()
     obligation.kind = kind
     obligation.account_id = payload.account_id
+    obligation.cost_account_id = payload.cost_account_id
     obligation.monthly_amount = payload.monthly_amount or Decimal("0")
     obligation.balance = payload.balance
     obligation.interest_percent = payload.interest_percent
@@ -300,6 +427,7 @@ def get_projection(
                     name=b.name,
                     amount=_d(b.amount),
                     unlock_age=b.unlock_age,
+                    payout_years=b.payout_years,
                     valuation_percent=_d(b.valuation_percent, "0.01"),
                     excluded=b.excluded,
                 )
@@ -309,6 +437,7 @@ def get_projection(
         fire_number=FireNumberOut(
             perpetual_annual_spending=_d(number.perpetual_annual_spending),
             base_capital=_d(number.base_capital),
+            pension_capital=_d(number.pension_capital),
             wealth_tax_annual=_d(number.wealth_tax_annual),
             wealth_tax_capital=_d(number.wealth_tax_capital),
             bridge_capital=_d(number.bridge_capital),
@@ -316,7 +445,59 @@ def get_projection(
         ),
         earliest=_projection_out(earliest, inputs) if earliest else None,
         target=_projection_out(target, inputs) if target else None,
+        chart=_chart(inputs, returns, settings),
         warnings=list(inputs.warnings),
+    )
+
+
+def _chart(inputs, returns, settings) -> FireChart:
+    """The accumulation picture: two capital paths against what a year costs.
+
+    Both paths run to the horizon with the work never stopping, because the
+    question the chart answers is when you *could* stop, not what happens
+    after you have. The second path adds nothing at all and shows what the
+    pots become on returns alone.
+
+    Only spendable capital is plotted. Four per cent of a pension you cannot
+    touch for another fifteen years will not pay this year's bills, so
+    counting it would move the crossing to a date that does not exist.
+    """
+    horizon = inputs.horizon_months
+    saving = project(inputs, returns, horizon)
+    untouched = project(inputs, returns, horizon, growth_only=True)
+    swr = float(settings.swr_percent) / 100.0
+
+    by_year = {row.year: row for row in untouched.rows}
+    points: list[FireChartPoint] = []
+    crossing_year = crossing_age = None
+
+    for row in saving.rows:
+        # The first and last rows are part-years. Scaling them up is what
+        # makes a cost line comparable with a withdrawal rate, which is
+        # annual by definition.
+        scale = MONTHS_PER_YEAR / row.months if row.months else 1.0
+        cost = (row.spending + row.obligations + row.wealth_tax) * scale
+        need = max(0.0, cost - row.pension_income * scale)
+        other = by_year.get(row.year)
+
+        if crossing_year is None and need > 0 and row.available * swr >= need:
+            crossing_year, crossing_age = row.year, row.age
+
+        points.append(FireChartPoint(
+            year=row.year,
+            age=row.age,
+            capital_saving=_d(row.available),
+            capital_no_deposits=_d(other.available if other else 0.0),
+            annual_cost=_d(cost),
+            annual_need=_d(need),
+            pension_income=_d(row.pension_income * scale),
+        ))
+
+    return FireChart(
+        swr_percent=settings.swr_percent,
+        points=points,
+        crossing_year=crossing_year,
+        crossing_age=crossing_age,
     )
 
 
@@ -338,6 +519,7 @@ def _projection_out(p, inputs) -> FireProjectionOut:
                 spending=_d(r.spending), obligations=_d(r.obligations),
                 wealth_tax=_d(r.wealth_tax), saved=_d(r.saved),
                 withdrawn=_d(r.withdrawn), working=r.working,
+                pension_income=_d(r.pension_income), months=r.months,
             )
             for r in p.rows
         ],

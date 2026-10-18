@@ -33,6 +33,7 @@ CREATE TABLE `accounts` (
   `value_change_account_id` int(11) DEFAULT NULL,
   `fire_role` enum('AVAILABLE','LOCKED','EXCLUDED','IGNORED') DEFAULT NULL,
   `fire_unlock_age` int(11) DEFAULT NULL,
+  `fire_payout_years` int(11) DEFAULT NULL,
   `wealth_valuation_percent` decimal(5,2) DEFAULT NULL,
   `is_active` tinyint(1) DEFAULT 1,
   `description` text DEFAULT NULL,
@@ -978,6 +979,7 @@ CREATE TABLE `fire_obligations` (
   `name` varchar(255) NOT NULL,
   `kind` enum('LOAN','CHILD_SUPPORT','OTHER') NOT NULL DEFAULT 'OTHER',
   `account_id` int(11) DEFAULT NULL,
+  `cost_account_id` int(11) DEFAULT NULL,
   `monthly_amount` decimal(15,2) NOT NULL DEFAULT 0.00,
   `balance` decimal(15,2) DEFAULT NULL,
   `interest_percent` decimal(6,4) DEFAULT NULL,
@@ -991,8 +993,28 @@ CREATE TABLE `fire_obligations` (
   PRIMARY KEY (`id`),
   KEY `fk_fire_obligation_settings` (`settings_id`),
   KEY `fk_fire_obligation_account` (`account_id`),
+  KEY `fk_fire_obligation_cost_account` (`cost_account_id`),
   CONSTRAINT `fk_fire_obligation_account` FOREIGN KEY (`account_id`) REFERENCES `accounts` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_fire_obligation_cost_account` FOREIGN KEY (`cost_account_id`) REFERENCES `accounts` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_fire_obligation_settings` FOREIGN KEY (`settings_id`) REFERENCES `fire_settings` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `fire_income_streams` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `settings_id` int(11) NOT NULL,
+  `name` varchar(255) NOT NULL,
+  `monthly_amount` decimal(15,2) NOT NULL DEFAULT 0.00,
+  `start_age` int(11) NOT NULL,
+  `end_age` int(11) DEFAULT NULL,
+  `inflation_adjusted` tinyint(1) NOT NULL DEFAULT 1,
+  `is_active` tinyint(1) NOT NULL DEFAULT 1,
+  `created_at` timestamp NULL DEFAULT current_timestamp(),
+  `updated_at` timestamp NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `fk_fire_income_stream_settings` (`settings_id`),
+  CONSTRAINT `fk_fire_income_stream_settings` FOREIGN KEY (`settings_id`) REFERENCES `fire_settings` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
