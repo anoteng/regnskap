@@ -152,6 +152,8 @@ class AccountCreate(AccountBase):
     fire_unlock_age: Optional[int] = None
     # Years a pension pot is paid out over from the unlock age; None is a lump
     fire_payout_years: Optional[int] = None
+    # Earmarked yearly deposit, taken out of the general savings rate
+    fire_annual_contribution: Optional[Decimal] = None
     wealth_valuation_percent: Optional[Decimal] = None
 
 
@@ -164,6 +166,8 @@ class Account(AccountBase):
     fire_unlock_age: Optional[int] = None
     # Years a pension pot is paid out over from the unlock age; None is a lump
     fire_payout_years: Optional[int] = None
+    # Earmarked yearly deposit, taken out of the general savings rate
+    fire_annual_contribution: Optional[Decimal] = None
     wealth_valuation_percent: Optional[Decimal] = None
     is_active: bool
     description: Optional[str] = None
@@ -895,6 +899,7 @@ class FireBucket(BaseModel):
     amount: Decimal
     unlock_age: Optional[int] = None
     payout_years: Optional[int] = None
+    annual_contribution: Decimal = Decimal("0")
     valuation_percent: Decimal
     excluded: bool
 

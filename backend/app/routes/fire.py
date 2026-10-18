@@ -428,6 +428,7 @@ def get_projection(
                     amount=_d(b.amount),
                     unlock_age=b.unlock_age,
                     payout_years=b.payout_years,
+                    annual_contribution=_d(b.annual_contribution),
                     valuation_percent=_d(b.valuation_percent, "0.01"),
                     excluded=b.excluded,
                 )

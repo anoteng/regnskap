@@ -235,6 +235,11 @@ class Account(Base):
     # are paid out in equal instalments over a fixed number of years. NULL means
     # the whole balance is spendable the moment it unlocks.
     fire_payout_years = Column(Integer, nullable=True)
+    # Earmarked yearly deposit into this pot, in today's kroner. An IPS takes a
+    # capped annual contribution, and that money is not extra: the general
+    # savings rate has to give it up. The krone is the same krone, it just
+    # lands somewhere unreachable until the unlock age.
+    fire_annual_contribution = Column(DECIMAL(15, 2), nullable=True)
     # Share of market value that counts towards net wealth. Equity funds are
     # valued at 80, bank deposits at 100, a primary residence at 25.
     wealth_valuation_percent = Column(DECIMAL(5, 2), nullable=True)

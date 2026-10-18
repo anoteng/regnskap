@@ -34,6 +34,7 @@ CREATE TABLE `accounts` (
   `fire_role` enum('AVAILABLE','LOCKED','EXCLUDED','IGNORED') DEFAULT NULL,
   `fire_unlock_age` int(11) DEFAULT NULL,
   `fire_payout_years` int(11) DEFAULT NULL,
+  `fire_annual_contribution` decimal(15,2) DEFAULT NULL,
   `wealth_valuation_percent` decimal(5,2) DEFAULT NULL,
   `is_active` tinyint(1) DEFAULT 1,
   `description` text DEFAULT NULL,

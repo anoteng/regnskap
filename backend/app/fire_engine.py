@@ -76,6 +76,10 @@ class Bucket:
     # pay out over a fixed number of years from the unlock age; the rest keeps
     # growing meanwhile. None means the whole balance is spendable at once.
     payout_years: Optional[int] = None
+    # Earmarked yearly deposit, in today's kroner. It is taken out of the same
+    # surplus everything else is saved from, so a pot that fills this way is
+    # not a pot that grows for free: it grows at the bridge's expense.
+    annual_contribution: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -287,7 +291,7 @@ class _Pot:
 
     __slots__ = (
         "name", "amount", "valuation", "unlock_age", "payout_years",
-        "excluded", "payout_months_left", "unlocked",
+        "annual_contribution", "excluded", "payout_months_left", "unlocked",
     )
 
     def __init__(self, bucket: Bucket):
@@ -296,6 +300,7 @@ class _Pot:
         self.valuation = bucket.valuation_percent / 100.0
         self.unlock_age = bucket.unlock_age
         self.payout_years = bucket.payout_years
+        self.annual_contribution = bucket.annual_contribution
         self.excluded = bucket.excluded
         self.payout_months_left: Optional[int] = None
         self.unlocked = bucket.unlock_age is None
@@ -497,8 +502,23 @@ def project(
             outgoing = spending + obligation_cost + wealth_tax_monthly
             earned = inputs.monthly_net_income if working else 0.0
             delta = earned + pension - outgoing
+            # Saved is what the month did not consume, whichever pot it lands
+            # in, so an earmarked deposit still reads as saving and not as a
+            # cost. What it changes is reach, not size.
             saved = max(0.0, delta)
             withdrawn = max(0.0, -delta)
+
+            # Earmarked deposits come off the top. They only run while there
+            # is a wage to deduct them from and only until the pot unlocks:
+            # you cannot pay into an IPS that has started paying out, and
+            # selling shares to fund one buys nothing but a longer bridge.
+            if working:
+                for pot in pots:
+                    if pot.annual_contribution and not pot.unlocked:
+                        deposit = pot.annual_contribution / MONTHS_PER_YEAR
+                        pot.amount += deposit
+                        delta -= deposit
+
             _apply_cash(pots, delta)
 
             if sum(p.amount for p in pots if p.spendable) < 0 and depleted_month is None:
@@ -891,11 +911,21 @@ def build_inputs(db, settings, as_of: Optional[date] = None) -> FireInputs:
             payout_years=(
                 account.fire_payout_years if role == FireRole.LOCKED else None
             ),
+            annual_contribution=(
+                float(account.fire_annual_contribution)
+                if account.fire_annual_contribution else 0.0
+            ),
         ))
         if role == FireRole.LOCKED and account.fire_unlock_age is None:
             warnings.append(
                 f"{account.account_number} {account.account_name} er merket bundet "
                 f"uten frigivelsesalder, og regnes som tilgjengelig."
+            )
+        if account.fire_annual_contribution and role != FireRole.LOCKED:
+            warnings.append(
+                f"{account.account_number} {account.account_name} har et øremerket "
+                f"innskudd, men er ikke bundet. Innskuddet endrer ingenting, siden "
+                f"kontoen allerede deler pott med den frie sparingen."
             )
 
     # --- what a month costs and earns --------------------------------------

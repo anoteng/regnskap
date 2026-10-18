@@ -77,6 +77,7 @@ def create_account(
         fire_role=account.fire_role,
         fire_unlock_age=account.fire_unlock_age,
         fire_payout_years=account.fire_payout_years,
+        fire_annual_contribution=account.fire_annual_contribution,
         wealth_valuation_percent=account.wealth_valuation_percent,
         description=account.description,
         is_active=True
@@ -144,6 +145,7 @@ def update_account(
     account.fire_role = account_update.fire_role
     account.fire_unlock_age = account_update.fire_unlock_age
     account.fire_payout_years = account_update.fire_payout_years
+    account.fire_annual_contribution = account_update.fire_annual_contribution
     account.wealth_valuation_percent = account_update.wealth_valuation_percent
     account.description = account_update.description
 
