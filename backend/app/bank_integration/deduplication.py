@@ -12,7 +12,7 @@ from decimal import Decimal
 from datetime import date, timedelta
 from typing import Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, or_, func
 
 from backend.app.models import (
     Transaction,
@@ -161,6 +161,45 @@ class TransactionDeduplicator:
         return None
 
     @staticmethod
+    def count_existing_by_hash(
+        db: Session,
+        bank_connection_id: int,
+        hashes: "set[str]"
+    ) -> "dict[str, int]":
+        """How many times we already hold each hash on this connection.
+
+        The id some banks return is not an identifier. SpareBank 1 sends an
+        encrypted entry reference that is salted per request, so the same
+        purchase arrives with a new id every night and the unique constraint
+        on external_transaction_id never fires.
+
+        Counting is what tells a repeated purchase apart from a repeated
+        fetch. Four identical tram tickets bought on one day arrive as four
+        records in every fetch; we keep four. The next night's fetch reports
+        the same four and we already have four, so none is imported. Buy a
+        fifth and the fetch reports five against our four, and exactly one
+        is new.
+
+        A hash covers date|amount|description|reference, so every row sharing
+        one also shares its date. A sliding fetch window therefore cannot
+        split a hash across days and throw the count off.
+        """
+        if not hashes:
+            return {}
+
+        rows = db.query(
+            BankTransaction.dedup_hash,
+            func.count(BankTransaction.id)
+        ).filter(
+            and_(
+                BankTransaction.bank_connection_id == bank_connection_id,
+                BankTransaction.dedup_hash.in_(hashes)
+            )
+        ).group_by(BankTransaction.dedup_hash).all()
+
+        return {h: n for h, n in rows}
+
+    @staticmethod
     def check_duplicate_bank_transaction(
         db: Session,
         bank_connection_id: int,
@@ -178,11 +217,12 @@ class TransactionDeduplicator:
            bank returns twice: once as "Betaling til ACCOUNTNO" and once as
            "eFaktura: INVOICEID/MerchantName". Same reference/KID, different description.
 
-        Deliberately does NOT match on dedup_hash. The hash is
+        Deliberately does NOT match on dedup_hash on its own. The hash is
         date|amount|description|reference, so four identical tram tickets bought
-        on one day hash alike, and a hash lookup would silently drop three of
-        them. What the bank sends is the truth; the unique constraint on
-        external_id is what keeps a fetch from being stored twice.
+        on one day hash alike, and a plain hash lookup would silently drop three
+        of them. Repeated fetches are caught by counting instead, in
+        count_existing_by_hash, which the sync applies across the whole batch
+        before it reaches this check.
 
         Args:
             db: Database session

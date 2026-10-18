@@ -11,6 +11,7 @@ Main orchestration service that handles:
 
 import secrets
 import logging
+from collections import Counter
 from typing import Dict, Any, Optional, Tuple
 from datetime import datetime, timedelta, date
 from decimal import Decimal
@@ -657,6 +658,37 @@ class BankIntegrationService:
             sync_log.transactions_fetched = len(raw_transactions)
             print(f"[DEBUG] Fetched {len(raw_transactions)} transactions")
 
+            # Work out the hash of everything in this batch up front, so a
+            # repeated purchase can be told apart from a repeated fetch.
+            # Some banks hand back an id that changes between fetches, which
+            # makes the unique constraint on external_transaction_id useless;
+            # what does hold is how many times the bank reports a given
+            # transaction in one batch against how many we already hold.
+            for raw_tx in raw_transactions:
+                if raw_tx.get('date'):
+                    raw_tx['_dedup_hash'] = TransactionDeduplicator.generate_hash(
+                        transaction_date=raw_tx['date'],
+                        amount=raw_tx['amount'],
+                        description=raw_tx['description'],
+                        reference=raw_tx['reference']
+                    )
+
+            batch_counts = Counter(
+                raw_tx['_dedup_hash'] for raw_tx in raw_transactions
+                if raw_tx.get('_dedup_hash')
+            )
+            held_counts = TransactionDeduplicator.count_existing_by_hash(
+                self.db, bank_connection.id, set(batch_counts)
+            )
+            # How many of each hash this batch may still store
+            quota = {
+                h: max(0, n - held_counts.get(h, 0))
+                for h, n in batch_counts.items()
+            }
+            refetched = sum(batch_counts[h] - quota[h] for h in batch_counts)
+            if refetched:
+                print(f"[DEBUG] {refetched} transactions already held, skipping")
+
             # Process each transaction
             imported_count = 0
             duplicate_count = 0
@@ -671,13 +703,13 @@ class BankIntegrationService:
                         errors.append(f"Transaction {raw_tx.get('external_id')}: No date available")
                         continue
 
-                    # Generate deduplication hash
-                    dedup_hash = TransactionDeduplicator.generate_hash(
-                        transaction_date=raw_tx['date'],
-                        amount=raw_tx['amount'],
-                        description=raw_tx['description'],
-                        reference=raw_tx['reference']
-                    )
+                    dedup_hash = raw_tx['_dedup_hash']
+
+                    # Already hold as many of this one as the bank reports
+                    if quota.get(dedup_hash, 0) <= 0:
+                        duplicate_count += 1
+                        continue
+                    quota[dedup_hash] -= 1
 
                     # Check if already fetched
                     existing_bank_tx = TransactionDeduplicator.check_duplicate_bank_transaction(
