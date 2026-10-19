@@ -8,6 +8,7 @@ Handles detection of duplicate transactions using multi-level strategy:
 """
 
 import hashlib
+import re
 from decimal import Decimal
 from datetime import date, timedelta
 from typing import Optional
@@ -20,6 +21,36 @@ from backend.app.models import (
     BankTransaction,
     TransactionSource,
 )
+
+
+# An id shaped like 2026-02-05-0: a date and a place in that day's list.
+# Enable Banking falls back to it when the bank supplies no reference of its
+# own. A position is not an identity — insert an earlier entry and every
+# number after it shifts.
+_POSITIONAL_ID = re.compile(r"^\d{4}-\d{2}-\d{2}-\d+$")
+
+# SpareBank 1 encrypts its entry reference and documents the consequence in
+# its own API specification: "Encrypted transaction id. The id is not
+# persistent, and may change over sessions." Measured, it is worse than that:
+# two fetches two seconds apart returned 17 transactions with 17 new ids, all
+# 176 bytes, sharing nothing but the prefix.
+_ENCRYPTED_ID_PREFIX = "enc!!"
+
+
+def id_survives_a_refetch(external_id: Optional[str]) -> bool:
+    """Whether the bank's id still names the same transaction tomorrow.
+
+    Bank Norwegian's does: a plain sequence number, verified against eight
+    months of stored rows and two consecutive live fetches, 58 of 58 alike.
+    SpareBank 1's does not, by the bank's own documentation.
+
+    A missing id is treated as volatile, since nothing can be keyed on it.
+    """
+    if not external_id:
+        return False
+    if external_id.startswith(_ENCRYPTED_ID_PREFIX):
+        return False
+    return not _POSITIONAL_ID.match(external_id)
 
 
 class TransactionDeduplicator:
@@ -168,12 +199,12 @@ class TransactionDeduplicator:
     ) -> "dict[str, int]":
         """How many times we already hold each hash on this connection.
 
-        The id some banks return is not an identifier. SpareBank 1 sends an
-        encrypted entry reference that is salted per request, so the same
-        purchase arrives with a new id every night and the unique constraint
-        on external_transaction_id never fires.
+        For a bank whose id does not survive a refetch — see
+        id_survives_a_refetch — the unique constraint on
+        external_transaction_id never fires, and the same purchase is
+        imported again every night.
 
-        Counting is what tells a repeated purchase apart from a repeated
+        Counting is what then tells a repeated purchase apart from a repeated
         fetch. Four identical tram tickets bought on one day arrive as four
         records in every fetch; we keep four. The next night's fetch reports
         the same four and we already have four, so none is imported. Buy a
@@ -183,6 +214,10 @@ class TransactionDeduplicator:
         A hash covers date|amount|description|reference, so every row sharing
         one also shares its date. A sliding fetch window therefore cannot
         split a hash across days and throw the count off.
+
+        This is a fallback, not the normal path. Where the id holds, the sync
+        leaves counting alone and lets the unique constraint do the work,
+        which is exact per transaction rather than per hash.
         """
         if not hashes:
             return {}
@@ -220,9 +255,9 @@ class TransactionDeduplicator:
         Deliberately does NOT match on dedup_hash on its own. The hash is
         date|amount|description|reference, so four identical tram tickets bought
         on one day hash alike, and a plain hash lookup would silently drop three
-        of them. Repeated fetches are caught by counting instead, in
-        count_existing_by_hash, which the sync applies across the whole batch
-        before it reaches this check.
+        of them. Where the bank's id is volatile, repeated fetches are caught by
+        counting instead, in count_existing_by_hash, which the sync applies
+        across the whole batch before it reaches this check.
 
         Args:
             db: Database session

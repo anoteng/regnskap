@@ -28,7 +28,7 @@ from backend.app.models import (
 from .providers.base import BaseBankProvider
 from .providers.enable_banking import EnableBankingProvider, SessionExpiredError
 from .encryption import TokenEncryption
-from .deduplication import TransactionDeduplicator
+from .deduplication import TransactionDeduplicator, id_survives_a_refetch
 from ..planned_transactions import find_and_match_for_bank_transaction
 
 # How far back an ongoing sync re-reads. Banks book reserved transactions days
@@ -658,12 +658,6 @@ class BankIntegrationService:
             sync_log.transactions_fetched = len(raw_transactions)
             print(f"[DEBUG] Fetched {len(raw_transactions)} transactions")
 
-            # Work out the hash of everything in this batch up front, so a
-            # repeated purchase can be told apart from a repeated fetch.
-            # Some banks hand back an id that changes between fetches, which
-            # makes the unique constraint on external_transaction_id useless;
-            # what does hold is how many times the bank reports a given
-            # transaction in one batch against how many we already hold.
             for raw_tx in raw_transactions:
                 if raw_tx.get('date'):
                     raw_tx['_dedup_hash'] = TransactionDeduplicator.generate_hash(
@@ -673,21 +667,34 @@ class BankIntegrationService:
                         reference=raw_tx['reference']
                     )
 
-            batch_counts = Counter(
-                raw_tx['_dedup_hash'] for raw_tx in raw_transactions
-                if raw_tx.get('_dedup_hash')
-            )
-            held_counts = TransactionDeduplicator.count_existing_by_hash(
-                self.db, bank_connection.id, set(batch_counts)
-            )
-            # How many of each hash this batch may still store
-            quota = {
-                h: max(0, n - held_counts.get(h, 0))
-                for h, n in batch_counts.items()
-            }
-            refetched = sum(batch_counts[h] - quota[h] for h in batch_counts)
-            if refetched:
-                print(f"[DEBUG] {refetched} transactions already held, skipping")
+            # Counting by hash is the fallback for banks whose id does not
+            # survive a refetch. It is coarser than the unique constraint:
+            # four identical tram tickets share one hash, so the batch can
+            # only say how many of that hash are new, never which. Where the
+            # id holds — Bank Norwegian's plain sequence number — we leave it
+            # alone and let the constraint answer per transaction.
+            #
+            # One volatile id in the batch is enough to switch over. A bank
+            # does not mint its ids two ways at once, and if it did, the
+            # cautious reading is the right one.
+            quota = None
+            if any(not id_survives_a_refetch(raw_tx.get('external_id'))
+                   for raw_tx in raw_transactions):
+                batch_counts = Counter(
+                    raw_tx['_dedup_hash'] for raw_tx in raw_transactions
+                    if raw_tx.get('_dedup_hash')
+                )
+                held_counts = TransactionDeduplicator.count_existing_by_hash(
+                    self.db, bank_connection.id, set(batch_counts)
+                )
+                # How many of each hash this batch may still store
+                quota = {
+                    h: max(0, n - held_counts.get(h, 0))
+                    for h, n in batch_counts.items()
+                }
+                refetched = sum(batch_counts[h] - quota[h] for h in batch_counts)
+                if refetched:
+                    print(f"[DEBUG] {refetched} transactions already held, skipping")
 
             # Process each transaction
             imported_count = 0
@@ -705,11 +712,13 @@ class BankIntegrationService:
 
                     dedup_hash = raw_tx['_dedup_hash']
 
-                    # Already hold as many of this one as the bank reports
-                    if quota.get(dedup_hash, 0) <= 0:
-                        duplicate_count += 1
-                        continue
-                    quota[dedup_hash] -= 1
+                    # Already hold as many of this one as the bank reports.
+                    # Only consulted when the bank's id cannot be trusted.
+                    if quota is not None:
+                        if quota.get(dedup_hash, 0) <= 0:
+                            duplicate_count += 1
+                            continue
+                        quota[dedup_hash] -= 1
 
                     # Check if already fetched
                     existing_bank_tx = TransactionDeduplicator.check_duplicate_bank_transaction(
