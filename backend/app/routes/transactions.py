@@ -1,12 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from typing import List, Optional
 from datetime import date, datetime
 from decimal import Decimal
 import csv
 import io
 import json
+import re
 
 from backend.database import get_db
 from ..models import Transaction, JournalEntry, User, Ledger, BankAccount, Account, TransactionCategory, Receipt, ImportLog, CSVMapping, TransactionStatus, TransactionSource, BankTransaction, BankConnection, BankTransactionImportStatus
@@ -18,6 +19,21 @@ from ..posting_suggestions import suggestions_for_drafts
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
 
+def _as_amount(text: str) -> Optional[Decimal]:
+    """The search term read as a money amount, or None if it is not one.
+
+    Accepts what a Norwegian keyboard produces: "1400", "1 400,50", "1400.50".
+    Thousand separators are dropped, the decimal comma becomes a point.
+    """
+    cleaned = text.strip().replace(" ", "").replace("\u00a0", "").replace(",", ".")
+    if not cleaned or not re.fullmatch(r"-?\d+(\.\d+)?", cleaned):
+        return None
+    try:
+        return Decimal(cleaned)
+    except Exception:
+        return None
+
+
 @router.get("/", response_model=List[TransactionSchema])
 def get_transactions(
     skip: int = 0,
@@ -25,6 +41,7 @@ def get_transactions(
     start_date: date = None,
     end_date: date = None,
     account_id: Optional[int] = None,
+    q: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
     current_ledger: Ledger = Depends(get_current_ledger)
@@ -41,6 +58,33 @@ def get_transactions(
         query = query.filter(
             Transaction.journal_entries.any(JournalEntry.account_id == account_id)
         )
+
+    if q:
+        # A transaction hides its identity in several places: the bank's own
+        # text, a reference, the wording on a single posting line, the account
+        # it landed on. Searching only the top-level description finds the
+        # first and misses the rest, so look everywhere a human would.
+        like = f"%{q.strip()}%"
+        terms = [
+            Transaction.description.ilike(like),
+            Transaction.reference.ilike(like),
+            Transaction.journal_entries.any(JournalEntry.description.ilike(like)),
+            Transaction.journal_entries.any(
+                JournalEntry.account.has(
+                    or_(Account.account_name.ilike(like),
+                        Account.account_number.ilike(like))
+                )
+            ),
+        ]
+        # A bare number is almost always an amount being looked for - the one
+        # 1 400 charge, not every description containing "1400". Match it on
+        # either side of the entry, since the caller does not know which.
+        amount = _as_amount(q)
+        if amount is not None:
+            terms.append(Transaction.journal_entries.any(
+                or_(JournalEntry.debit == amount, JournalEntry.credit == amount)
+            ))
+        query = query.filter(or_(*terms))
 
     transactions = query.order_by(Transaction.transaction_date.desc()).offset(skip).limit(limit).all()
     return transactions

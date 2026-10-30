@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -57,6 +58,7 @@ fun DashboardScreen(
     onOpenSettlement: () -> Unit = {},
     onSetUpSettlement: () -> Unit = {},
     onCreateLedger: () -> Unit = {},
+    onSearchTransactions: () -> Unit = {},
     viewModel: DashboardViewModel = hiltViewModel()
 ) {
     // Reload when the settlement setup screen has saved something
@@ -85,6 +87,9 @@ fun DashboardScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = onSearchTransactions) {
+                        Icon(Icons.Default.Search, contentDescription = "Søk i transaksjoner")
+                    }
                     IconButton(onClick = { viewModel.loadTransactions() }) {
                         Icon(Icons.Default.Refresh, contentDescription = "Last på nytt")
                     }

@@ -1,11 +1,12 @@
-import api from './api.js?v=18';
-import { formatCurrency, formatDate, showModal, closeModal, showError, showSuccess } from './utils.js?v=18';
+import api from './api.js?v=19';
+import { formatCurrency, formatDate, showModal, closeModal, showError, showSuccess } from './utils.js?v=19';
 
 class TransactionsManager {
     constructor() {
         this.accounts = [];
         this.categories = [];
         this.bankAccounts = [];
+        this.pageLimit = 100;
         this._listenersAttached = false;
     }
 
@@ -122,27 +123,44 @@ class TransactionsManager {
         document.getElementById('import-csv-btn').addEventListener('click', () => {
             this.showImportCSVModal();
         });
+
+        const search = document.getElementById('filter-search');
+        search?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') this.loadTransactions();
+        });
+        // The x button clears the field without a keystroke, and an emptied
+        // search should bring the full list straight back rather than wait
+        // for an Enter on an empty box.
+        search?.addEventListener('input', (e) => {
+            if (e.target.value === '') this.loadTransactions();
+        });
     }
 
     async loadTransactions() {
         const startDate = document.getElementById('filter-start-date').value;
         const endDate = document.getElementById('filter-end-date').value;
         const accountId = document.getElementById('filter-account')?.value;
+        const query = document.getElementById('filter-search')?.value.trim();
 
-        const filters = {};
+        const filters = { limit: this.pageLimit };
         if (startDate) filters.start_date = startDate;
         if (endDate) filters.end_date = endDate;
         if (accountId) filters.account_id = accountId;
+        if (query) filters.q = query;
 
         const transactions = await api.getTransactions(filters);
-        this.renderTransactions(transactions);
+        this.renderTransactions(transactions, { hasDateFilter: !!(startDate || endDate) });
     }
 
-    renderTransactions(transactions) {
+    renderTransactions(transactions, { hasDateFilter = false } = {}) {
         const list = document.getElementById('transactions-list');
 
         if (transactions.length === 0) {
-            list.innerHTML = '<p>Ingen transaksjoner funnet.</p>';
+            // A search that looks empty is usually a period filter still set
+            // from last time, not an absent transaction. Say which.
+            list.innerHTML = hasDateFilter
+                ? '<p>Ingen transaksjoner funnet i valgt periode.</p>'
+                : '<p>Ingen transaksjoner funnet.</p>';
             return;
         }
 
@@ -164,6 +182,10 @@ class TransactionsManager {
                     ${transactions.map(t => this.renderTransactionRow(t)).join('')}
                 </tbody>
             </table>
+            ${transactions.length >= this.pageLimit ? `
+                <p class="text-muted" style="margin-top: 0.5rem;">
+                    Viser de ${this.pageLimit} nyeste treffene. Snevre inn søket eller velg en periode for å se flere.
+                </p>` : ''}
         `;
 
         list.innerHTML = html;

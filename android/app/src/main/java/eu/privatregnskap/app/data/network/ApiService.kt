@@ -109,7 +109,8 @@ interface ApiService {
     suspend fun getTransactions(
         @Header("X-Ledger-ID") ledgerId: Int? = null,
         @Query("skip") skip: Int = 0,
-        @Query("limit") limit: Int = 50
+        @Query("limit") limit: Int = 50,
+        @Query("q") search: String? = null
     ): List<TransactionResponse>
 
     @GET("transactions/queue")
