@@ -12,6 +12,8 @@ interface TransactionRepository {
         limit: Int = 50,
         search: String? = null
     ): Result<List<TransactionResponse>>
+
+    suspend fun getTransaction(id: Int, ledgerId: Int? = null): Result<TransactionResponse>
 }
 
 @Singleton
@@ -33,6 +35,14 @@ class TransactionRepositoryImpl @Inject constructor(
                 search = search?.ifBlank { null }
             )
             Result.success(transactions)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun getTransaction(id: Int, ledgerId: Int?): Result<TransactionResponse> {
+        return try {
+            Result.success(apiService.getTransaction(ledgerId = ledgerId, id = id))
         } catch (e: Exception) {
             Result.failure(e)
         }

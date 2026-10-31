@@ -44,7 +44,9 @@ data class JournalEntryResponse(
     @Json(name = "account_id") val accountId: Int,
     val account: AccountInEntryDto?,
     val debit: Double?,
-    val credit: Double?
+    val credit: Double?,
+    /** Per-line note, which often carries the reason the voucher exists */
+    val description: String? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -56,6 +58,8 @@ data class TransactionResponse(
     val status: String,
     val source: String?,
     @Json(name = "is_reconciled") val isReconciled: Boolean,
+    @Json(name = "source_reference") val sourceReference: String? = null,
+    @Json(name = "created_at") val createdAt: String? = null,
     @Json(name = "journal_entries") val journalEntries: List<JournalEntryResponse> = emptyList()
 )
 

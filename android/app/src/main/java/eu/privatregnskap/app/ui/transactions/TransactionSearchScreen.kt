@@ -1,5 +1,6 @@
 package eu.privatregnskap.app.ui.transactions
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -46,24 +47,13 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.privatregnskap.app.data.network.dto.TransactionResponse
 import eu.privatregnskap.app.ui.auth.UiState
-import java.text.NumberFormat
-import java.util.Locale
-
-private val NB = Locale.forLanguageTag("nb-NO")
-
-private fun formatAmount(value: Double): String {
-    val nf = NumberFormat.getNumberInstance(NB).apply {
-        minimumFractionDigits = 2
-        maximumFractionDigits = 2
-    }
-    return "${nf.format(value)} kr"
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TransactionSearchScreen(
     innerPadding: PaddingValues = PaddingValues(),
     onBack: () -> Unit = {},
+    onOpenTransaction: (Int) -> Unit = {},
     viewModel: TransactionSearchViewModel = hiltViewModel()
 ) {
     val query by viewModel.query.collectAsStateWithLifecycle()
@@ -137,7 +127,12 @@ fun TransactionSearchScreen(
                             Hint("Ingen treff på \"$query\".")
                         } else {
                             LazyColumn(modifier = Modifier.fillMaxSize()) {
-                                items(hits) { SearchResultItem(it) }
+                                items(hits) { hit ->
+                                    SearchResultItem(
+                                        transaction = hit,
+                                        onClick = { onOpenTransaction(hit.id) }
+                                    )
+                                }
                                 if (hits.size >= SEARCH_LIMIT) {
                                     item {
                                         Text(
@@ -173,7 +168,7 @@ private fun Hint(text: String) {
 }
 
 @Composable
-private fun SearchResultItem(transaction: TransactionResponse) {
+private fun SearchResultItem(transaction: TransactionResponse, onClick: () -> Unit) {
     // A voucher balances, so the debit side alone is the amount it moved
     val amount = transaction.journalEntries.sumOf { it.debit ?: 0.0 }
     val accounts = transaction.journalEntries
@@ -183,7 +178,8 @@ private fun SearchResultItem(transaction: TransactionResponse) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .clickable(onClick = onClick),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
@@ -210,12 +206,12 @@ private fun SearchResultItem(transaction: TransactionResponse) {
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    text = transaction.transactionDate,
+                    text = formatDate(transaction.transactionDate),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    text = transaction.status,
+                    text = statusLabel(transaction.status),
                     style = MaterialTheme.typography.labelSmall,
                     color = when (transaction.status) {
                         "POSTED" -> MaterialTheme.colorScheme.primary

@@ -47,6 +47,8 @@ import eu.privatregnskap.app.ui.common.LedgerPickerSheet
 import eu.privatregnskap.app.ui.settlement.MemberCard
 import eu.privatregnskap.app.ui.settlement.formatKr
 import eu.privatregnskap.app.ui.settlement.monthLabel
+import eu.privatregnskap.app.ui.transactions.formatDate
+import eu.privatregnskap.app.ui.transactions.statusLabel
 import java.time.YearMonth
 import eu.privatregnskap.app.ui.auth.UiState
 
@@ -59,6 +61,7 @@ fun DashboardScreen(
     onSetUpSettlement: () -> Unit = {},
     onCreateLedger: () -> Unit = {},
     onSearchTransactions: () -> Unit = {},
+    onOpenTransaction: (Int) -> Unit = {},
     viewModel: DashboardViewModel = hiltViewModel()
 ) {
     // Reload when the settlement setup screen has saved something
@@ -163,7 +166,10 @@ fun DashboardScreen(
                             }
                         } else {
                             items(transactions) { transaction ->
-                                TransactionItem(transaction)
+                                TransactionItem(
+                                    transaction = transaction,
+                                    onClick = { onOpenTransaction(transaction.id) }
+                                )
                             }
                         }
                     }
@@ -249,11 +255,12 @@ private fun SettlementSummaryCard(calc: SettlementCalculationResponse, onClick: 
 }
 
 @Composable
-private fun TransactionItem(transaction: TransactionResponse) {
+private fun TransactionItem(transaction: TransactionResponse, onClick: () -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .clickable(onClick = onClick),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
         ),
@@ -271,14 +278,14 @@ private fun TransactionItem(transaction: TransactionResponse) {
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Text(
-                    text = transaction.transactionDate,
+                    text = formatDate(transaction.transactionDate),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = transaction.status,
+                text = statusLabel(transaction.status),
                 style = MaterialTheme.typography.labelSmall,
                 color = when (transaction.status) {
                     "POSTED" -> MaterialTheme.colorScheme.primary

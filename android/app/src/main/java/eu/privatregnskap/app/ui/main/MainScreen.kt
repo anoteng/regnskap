@@ -36,6 +36,7 @@ import eu.privatregnskap.app.ui.ledger.CreateLedgerScreen
 import eu.privatregnskap.app.ui.profile.ProfileScreen
 import eu.privatregnskap.app.ui.settlement.SettlementScreen
 import eu.privatregnskap.app.ui.settlement.SettlementSetupScreen
+import eu.privatregnskap.app.ui.transactions.TransactionDetailScreen
 import eu.privatregnskap.app.ui.transactions.TransactionSearchScreen
 
 private sealed class Tab(val route: String, val label: String, val icon: ImageVector) {
@@ -53,6 +54,7 @@ private const val SETTLEMENT_SETUP_ROUTE = "settlement/setup"
 private const val NEW_LEDGER_ROUTE = "ledger/new"
 private const val CSV_IMPORT_ROUTE = "transactions/import-csv"
 private const val TRANSACTION_SEARCH_ROUTE = "transactions/search"
+private const val TRANSACTION_DETAIL_ROUTE = "transactions/detail"
 
 @Composable
 fun MainScreen(
@@ -119,11 +121,23 @@ fun MainScreen(
                     onSetUpSettlement = { navController.navigate(SETTLEMENT_SETUP_ROUTE) { launchSingleTop = true } },
                     onSearchTransactions = {
                         navController.navigate(TRANSACTION_SEARCH_ROUTE) { launchSingleTop = true }
+                    },
+                    onOpenTransaction = { id ->
+                        navController.navigate("$TRANSACTION_DETAIL_ROUTE/$id") { launchSingleTop = true }
                     }
                 )
             }
             composable(TRANSACTION_SEARCH_ROUTE) {
                 TransactionSearchScreen(
+                    innerPadding = padding,
+                    onBack = { navController.popBackStack() },
+                    onOpenTransaction = { id ->
+                        navController.navigate("$TRANSACTION_DETAIL_ROUTE/$id") { launchSingleTop = true }
+                    }
+                )
+            }
+            composable("$TRANSACTION_DETAIL_ROUTE/{id}") {
+                TransactionDetailScreen(
                     innerPadding = padding,
                     onBack = { navController.popBackStack() }
                 )

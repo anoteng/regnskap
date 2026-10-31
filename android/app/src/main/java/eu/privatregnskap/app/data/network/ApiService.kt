@@ -113,6 +113,12 @@ interface ApiService {
         @Query("q") search: String? = null
     ): List<TransactionResponse>
 
+    @GET("transactions/{id}")
+    suspend fun getTransaction(
+        @Header("X-Ledger-ID") ledgerId: Int? = null,
+        @Path("id") id: Int
+    ): TransactionResponse
+
     @GET("transactions/queue")
     suspend fun getPostingQueue(
         @Header("X-Ledger-ID") ledgerId: Int? = null,
