@@ -21,6 +21,7 @@ from ..planned_transactions import (
 )
 from ..models import PlannedTransaction, PlannedTransactionStatus
 from ..models import BankAccount, BankAccountType
+from ..posting_suggestions import suggestions_for_vendor
 from backend.config import get_settings
 
 router = APIRouter(prefix="/receipts", tags=["receipts"])
@@ -748,7 +749,18 @@ async def extract_receipt_ai(
         receipt.ai_extracted_description = (
             result.get("description") or result.get("vendor")
         )
-        receipt.ai_suggested_account = result.get("suggested_account")
+        # The model only sees this one attachment. When it cannot place the
+        # account, the ledger's own history often can: the same counterparty
+        # has been posted somewhere before, 24 months back, and the most used
+        # account is a better guess than nothing. The model's own answer is
+        # never overridden -- it has read the chart, including the notes the
+        # user wrote on each account.
+        suggested = result.get("suggested_account")
+        if not suggested and result.get("vendor"):
+            history = suggestions_for_vendor(db, current_ledger.id, result["vendor"])
+            if history:
+                suggested = history[0]["account_number"]
+        receipt.ai_suggested_account = suggested
         receipt.ai_confidence = result.get("confidence")
         receipt.ai_processed_at = datetime.utcnow()
         receipt.ai_processing_error = None

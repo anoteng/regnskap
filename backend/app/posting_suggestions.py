@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from .models import (
     Account,
     BankAccount,
+    BankAccountType,
     JournalEntry,
     Transaction,
     TransactionStatus,
@@ -35,32 +36,21 @@ def _prefix(key: str) -> str:
     return " ".join(key.split()[:PREFIX_TOKENS])
 
 
-def suggestions_for_drafts(
+def _ranked_by_key(
     db: Session,
     ledger_id: int,
-    drafts: Iterable[Transaction],
-) -> Dict[int, List[dict]]:
-    """Ranked counter-account suggestions per draft transaction id.
+    wanted: set,
+    skip_account_ids: set,
+) -> Dict[str, List[dict]]:
+    """Ranked counter-accounts per vendor key, from one pass over history.
 
-    Built from one pass over the ledger's history rather than a query per
-    draft, so a full queue costs the same as a single item.
+    One pass rather than a query per key, so a full posting queue costs the
+    same as a single lookup.
     """
-    drafts = list(drafts)
-    if not drafts:
-        return {}
-
-    wanted = {normalize_key(d.description) for d in drafts}
-    wanted.discard("")
     if not wanted:
         return {}
     wanted_prefixes = {_prefix(k) for k in wanted}
-
-    # Accounts the bank sync itself posts to are never the answer
-    bank_linked = {
-        account_id for (account_id,) in db.query(BankAccount.account_id).filter(
-            BankAccount.ledger_id == ledger_id
-        )
-    }
+    bank_linked = skip_account_ids
 
     today = date.today()
     month_index = today.year * 12 + (today.month - 1) - HISTORY_MONTHS
@@ -109,9 +99,8 @@ def suggestions_for_drafts(
         if prefix in wanted_prefixes:
             record(prefix_tally[prefix], account_id, tx_date, number, name)
 
-    result: Dict[int, List[dict]] = {}
-    for draft in drafts:
-        key = normalize_key(draft.description)
+    result: Dict[str, List[dict]] = {}
+    for key in wanted:
         candidates = tally.get(key) or prefix_tally.get(_prefix(key))
         if not candidates:
             continue
@@ -121,7 +110,7 @@ def suggestions_for_drafts(
             key=lambda item: (item[1][0], item[1][1]),
             reverse=True,
         )[:MAX_SUGGESTIONS]
-        result[draft.id] = [
+        result[key] = [
             {
                 "account_id": account_id,
                 "account_number": number,
@@ -132,3 +121,55 @@ def suggestions_for_drafts(
             for account_id, (count, last_used, number, name) in ranked
         ]
     return result
+
+
+def suggestions_for_drafts(
+    db: Session,
+    ledger_id: int,
+    drafts: Iterable[Transaction],
+) -> Dict[int, List[dict]]:
+    """Ranked counter-account suggestions per draft transaction id."""
+    drafts = list(drafts)
+    if not drafts:
+        return {}
+
+    wanted = {normalize_key(d.description) for d in drafts}
+    wanted.discard("")
+
+    # Accounts the bank sync itself posts to are never the answer: the sync
+    # books that side already
+    bank_linked = {
+        account_id for (account_id,) in db.query(BankAccount.account_id).filter(
+            BankAccount.ledger_id == ledger_id
+        )
+    }
+
+    ranked = _ranked_by_key(db, ledger_id, wanted, bank_linked)
+    result: Dict[int, List[dict]] = {}
+    for draft in drafts:
+        hit = ranked.get(normalize_key(draft.description))
+        if hit:
+            result[draft.id] = hit
+    return result
+
+
+def suggestions_for_vendor(db: Session, ledger_id: int, vendor: str) -> List[dict]:
+    """Ranked counter-accounts for one vendor name off an attachment.
+
+    Same history, different exclusion. For a bank-synced draft the account the
+    money moved on is booked by the sync and never the answer. An attachment
+    carries no bank side at all, and a credit card statement is paid from the
+    bank account *to* the card, so the card account is exactly the answer. Only
+    the accounts money is paid from are held back.
+    """
+    key = normalize_key(vendor or "")
+    if not key:
+        return []
+    payment_accounts = {
+        account_id for (account_id,) in db.query(BankAccount.account_id).filter(
+            BankAccount.ledger_id == ledger_id,
+            BankAccount.account_id.isnot(None),
+            BankAccount.account_type != BankAccountType.CREDIT_CARD,
+        )
+    }
+    return _ranked_by_key(db, ledger_id, {key}, payment_accounts).get(key, [])

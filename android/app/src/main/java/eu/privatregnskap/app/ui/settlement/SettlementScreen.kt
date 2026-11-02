@@ -289,13 +289,9 @@ private fun SettlementContent(calc: SettlementCalculationResponse) {
                 }
                 // The balance holds purchases made since the statement closed,
                 // so it is larger than what actually leaves on the due date
-                val invoiced = calc.liquidity.cardInvoiced?.toDoubleOrNull() ?: 0.0
-                if (invoiced > 0.0) {
-                    KeyValueRow(
-                        "  fakturert, forfaller snart",
-                        formatKr(calc.liquidity.cardInvoiced!!),
-                        muted = true
-                    )
+                val invoiced = calc.liquidity.cardInvoiced
+                if (invoiced != null && (invoiced.toDoubleOrNull() ?: 0.0) > 0.0) {
+                    KeyValueRow("  fakturert, forfaller snart", formatKr(invoiced), muted = true)
                 }
             }
         }
