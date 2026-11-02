@@ -541,6 +541,14 @@ class SettlementPlannedLine(BaseModel):
     overdue: bool
 
 
+class SettlementCardStatement(SettlementPlannedLine):
+    """A registered credit card invoice, held out of the cost base.
+
+    Same shape as a planned line, reported separately so the figure is visible
+    rather than silently dropped.
+    """
+
+
 class SettlementRecurringLine(BaseModel):
     key: str
     description: str
@@ -574,6 +582,9 @@ class SettlementLiquidity(BaseModel):
     operating_balance: Optional[Decimal] = None
     credit_cards: List[SettlementCreditCard]
     credit_card_owed_total: Decimal
+    # What the card company has invoiced, when a statement is registered; the
+    # owed total above also holds purchases made since the statement closed
+    card_invoiced: Decimal = Decimal("0")
     open_invoices: Decimal = Decimal("0")
     outstanding_contributions: Decimal = Decimal("0")
     # Balance plus what is still to come in, less the card and the invoices
@@ -593,6 +604,7 @@ class SettlementCalculation(BaseModel):
     carry_from: Optional[date] = None
     totals: SettlementTotals
     planned: List[SettlementPlannedLine]
+    card_statements: List[SettlementCardStatement] = []
     recurring: List[SettlementRecurringLine]
     members: List[SettlementMemberResult]
     liquidity: SettlementLiquidity

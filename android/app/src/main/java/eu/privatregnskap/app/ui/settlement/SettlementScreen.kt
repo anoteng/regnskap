@@ -248,6 +248,26 @@ private fun SettlementContent(calc: SettlementCalculationResponse) {
             }
         }
 
+        if (calc.cardStatements.isNotEmpty()) {
+            item { SectionTitle("Kredittkortfaktura") }
+            items(calc.cardStatements, key = { "c${it.plannedTransactionId}" }) { line ->
+                LineRow(
+                    primary = line.description,
+                    secondary = "Forfall ${formatDay(line.expectedDate)}",
+                    amount = formatKr(line.amount)
+                )
+            }
+            item {
+                Text(
+                    text = "Holdt utenfor grunnlaget — kjøpene er kostnadsført hver " +
+                        "for seg da de ble gjort.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
+            }
+        }
+
         if (calc.recurring.isNotEmpty()) {
             item { SectionTitle("Forventede faste trekk") }
             items(calc.recurring, key = { "r${it.key}" }) { line ->
@@ -266,6 +286,16 @@ private fun SettlementContent(calc: SettlementCalculationResponse) {
                 KeyValueRow("Driftskonto", calc.liquidity.operatingBalance?.let { formatKr(it) } ?: "–")
                 calc.liquidity.creditCards.forEach { card ->
                     KeyValueRow("${card.name} utestående", formatKr(card.owed))
+                }
+                // The balance holds purchases made since the statement closed,
+                // so it is larger than what actually leaves on the due date
+                val invoiced = calc.liquidity.cardInvoiced?.toDoubleOrNull() ?: 0.0
+                if (invoiced > 0.0) {
+                    KeyValueRow(
+                        "  fakturert, forfaller snart",
+                        formatKr(calc.liquidity.cardInvoiced!!),
+                        muted = true
+                    )
                 }
             }
         }

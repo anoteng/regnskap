@@ -24,7 +24,9 @@ account earns on its own - sales, cashback - reduces what the members have to
 put in. Principal repaid on a shared loan is not a cost in the accounting
 sense, but it is cash that has to leave the account, and the point of the
 calculation is to get enough money in there. Repaying the credit card is
-excluded from that, since those purchases were already counted as expenses.
+excluded from that, since those purchases were already counted as expenses. A
+registered card statement is held out of the forecast for the same reason, and
+reported on its own: it is the invoiced figure, not a new cost.
 """
 import calendar
 import re
@@ -436,7 +438,9 @@ def calculate_settlement(
         .order_by(PlannedTransaction.expected_date)
         .all()
     )
+    card_ids = _card_account_ids(db, ledger_id)
     planned_lines = []
+    card_statement_lines = []
     for p in open_plans:
         if p.suggested_account_id in excluded_ids:
             continue
@@ -444,15 +448,26 @@ def calculate_settlement(
             # Nothing more will be paid in a closed month; unmatched plans
             # there are stale, not upcoming
             continue
-        planned_lines.append({
+        line = {
             "planned_transaction_id": p.id,
             "receipt_id": p.receipt_id,
             "description": p.description,
             "expected_date": p.expected_date,
             "amount": _q(p.amount),
             "overdue": p.expected_date < effective_as_of,
-        })
+        }
+        # A card statement is not a cost of its own. The purchases behind it
+        # were counted as expenses when they were made, in the month they were
+        # made, so counting the statement too would charge the members twice:
+        # once in the month of the purchase and again in the month the invoice
+        # falls due. It is also already in the liquidity figure as the card
+        # balance, so leaving it in open_invoices would subtract it twice over.
+        if p.suggested_account_id in card_ids:
+            card_statement_lines.append(line)
+        else:
+            planned_lines.append(line)
     planned_total = _q(sum((l["amount"] for l in planned_lines), ZERO))
+    card_invoiced = _q(sum((l["amount"] for l in card_statement_lines), ZERO))
 
     # ------------------------------------------------------------------
     # Recurring bills still expected this month
@@ -602,9 +617,10 @@ def calculate_settlement(
             "forecast_total": forecast_total,
         },
         "planned": planned_lines,
+        "card_statements": card_statement_lines,
         "recurring": recurring_lines,
         "members": members_out,
-        "liquidity": _liquidity(db, settings, members_out, planned_total),
+        "liquidity": _liquidity(db, settings, members_out, planned_total, card_invoiced),
     }
 
 
@@ -642,6 +658,7 @@ def _liquidity(
     settings: SettlementSettings,
     members_out: list,
     open_invoices: Decimal,
+    card_invoiced: Decimal = ZERO,
 ) -> dict:
     """Cash position, read on the assumption that everyone pays their share.
 
@@ -696,6 +713,11 @@ def _liquidity(
         "operating_balance": operating_balance,
         "credit_cards": cards,
         "credit_card_owed_total": card_total,
+        # What the card company has actually invoiced, when a statement is
+        # registered. The balance above is larger: it also holds the purchases
+        # made since the statement closed, which fall due a month later. The
+        # figures below keep using the balance, which is the conservative read.
+        "card_invoiced": _q(card_invoiced),
         "open_invoices": _q(open_invoices),
         "outstanding_contributions": outstanding,
         "expected_available": expected,

@@ -294,7 +294,10 @@ data class SettlementCreditCard(
 data class SettlementLiquidity(
     @Json(name = "operating_balance") val operatingBalance: String? = null,
     @Json(name = "credit_cards") val creditCards: List<SettlementCreditCard>,
-    @Json(name = "credit_card_owed_total") val creditCardOwedTotal: String
+    @Json(name = "credit_card_owed_total") val creditCardOwedTotal: String,
+    /** What the card company has invoiced; the owed total also holds purchases
+     *  made since the statement closed, which fall due a month later. */
+    @Json(name = "card_invoiced") val cardInvoiced: String? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -308,6 +311,9 @@ data class SettlementCalculationResponse(
     @Json(name = "excluded_account_ids") val excludedAccountIds: List<Int>,
     val totals: SettlementTotals,
     val planned: List<SettlementPlannedLine>,
+    /** Card statements, held out of the cost base but reported so the figure
+     *  is visible rather than silently dropped. */
+    @Json(name = "card_statements") val cardStatements: List<SettlementPlannedLine> = emptyList(),
     val recurring: List<SettlementRecurringLine>,
     val members: List<SettlementMemberResult>,
     val liquidity: SettlementLiquidity

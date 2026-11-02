@@ -1,5 +1,5 @@
-import api from './api.js?v=20';
-import { formatCurrency, formatDate, showError, showSuccess } from './utils.js?v=20';
+import api from './api.js?v=21';
+import { formatCurrency, formatDate, showError, showSuccess } from './utils.js?v=21';
 
 function currentMonth() {
     const d = new Date();
@@ -127,6 +127,16 @@ class SettlementManager {
                 </tr>`).join('')
             : '<tr><td colspan="3" class="subtitle">Ingen registrerte fakturaer med forfall resten av måneden.</td></tr>';
 
+        // Shown, not silently dropped: the purchases behind a card statement
+        // were charged to the members in the month they were made, so counting
+        // the invoice too would bill them twice
+        const cardStatements = (data.card_statements || []);
+        const cardStatementNote = cardStatements.length
+            ? `<p class="subtitle">${cardStatements.map(c =>
+                `Kredittkortfaktura ${escapeHtml(c.description)} · forfall ${formatDate(c.expected_date)} · ${formatCurrency(c.amount)}`
+              ).join('<br>')}<br>Holdt utenfor grunnlaget — kjøpene er kostnadsført hver for seg da de ble gjort.</p>`
+            : '';
+
         const recurringRows = data.recurring.length
             ? data.recurring.map(r => `
                 <tr>
@@ -148,6 +158,14 @@ class SettlementManager {
         const liq = data.liquidity;
         const cards = liq.credit_cards.map(c =>
             `<div><span class="subtitle">${escapeHtml(c.name)}:</span> ${formatCurrency(c.owed)} utestående</div>`).join('');
+
+        // The balance is the conservative figure and the one the sum uses. The
+        // invoiced amount is what actually leaves on the due date; the gap is
+        // what has been charged since the statement closed.
+        const cardInvoiced = parseFloat(liq.card_invoiced || 0);
+        const cardInvoicedNote = cardInvoiced > 0
+            ? `<br><small class="subtitle">Fakturert ${formatCurrency(cardInvoiced)}; resten er belastet etter at terminen ble avsluttet</small>`
+            : '';
 
         const available = liq.expected_available != null ? parseFloat(liq.expected_available) : null;
         // The warning is only honest once the outstanding contributions are
@@ -206,6 +224,7 @@ class SettlementManager {
                         <thead><tr><th>Forfall</th><th>Beskrivelse</th><th class="num">Beløp</th></tr></thead>
                         <tbody>${plannedRows}</tbody>
                     </table>
+                    ${cardStatementNote}
                 </div>
                 <div class="card">
                     <h2>Forventede faste trekk</h2>
@@ -223,7 +242,7 @@ class SettlementManager {
                     <tbody>
                         <tr><td>Driftskonto</td><td class="num">${liq.operating_balance != null ? formatCurrency(liq.operating_balance) : '–'}</td></tr>
                         <tr><td>Utestående bidrag</td><td class="num">+ ${formatCurrency(liq.outstanding_contributions)}</td></tr>
-                        <tr><td>Kortgjeld <small class="subtitle">(forfall den ${liq.card_due_day}.)</small></td><td class="num">− ${formatCurrency(liq.credit_card_owed_total)}</td></tr>
+                        <tr><td>Kortgjeld <small class="subtitle">(forfall den ${liq.card_due_day}.)</small>${cardInvoicedNote}</td><td class="num">− ${formatCurrency(liq.credit_card_owed_total)}</td></tr>
                         <tr><td>Registrerte fakturaer</td><td class="num">− ${formatCurrency(liq.open_invoices)}</td></tr>
                         <tr class="settlement-liquidity-sum">
                             <td><strong>Disponibelt</strong></td>
