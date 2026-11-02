@@ -7,11 +7,15 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import eu.privatregnskap.app.BuildConfig
+import eu.privatregnskap.app.data.network.dto.AccountResponse
 import eu.privatregnskap.app.data.network.dto.AttachmentResponse
 import eu.privatregnskap.app.data.network.dto.MatchSuggestionResponse
+import eu.privatregnskap.app.data.network.dto.PlannedTransactionResponse
+import eu.privatregnskap.app.data.network.dto.ReceiptUpdateRequest
 import eu.privatregnskap.app.data.network.dto.TransactionResponse
 import eu.privatregnskap.app.data.repository.AttachmentRepository
 import eu.privatregnskap.app.data.repository.LedgerSelectionRepository
+import eu.privatregnskap.app.data.repository.PostingQueueRepository
 import eu.privatregnskap.app.data.repository.TokenRepository
 import eu.privatregnskap.app.data.repository.TransactionRepository
 import kotlinx.coroutines.Dispatchers
@@ -34,10 +38,18 @@ data class AttachmentsUiState(
     val requiresSubscription: Boolean = false
 )
 
+/** Account types an attachment may be posted against; see the web chart. */
+val POSTING_ACCOUNT_GROUPS = listOf(
+    "EXPENSE" to "Kostnad",
+    "ASSET" to "Eiendel",
+    "LIABILITY" to "Gjeld",
+)
+
 @HiltViewModel
 class AttachmentsViewModel @Inject constructor(
     private val repository: AttachmentRepository,
     private val transactionRepository: TransactionRepository,
+    private val postingQueueRepository: PostingQueueRepository,
     private val ledgerSelection: LedgerSelectionRepository,
     private val tokenRepository: TokenRepository
 ) : ViewModel() {
@@ -50,6 +62,15 @@ class AttachmentsViewModel @Inject constructor(
 
     private val _suggestedMatches = MutableStateFlow<List<MatchSuggestionResponse>>(emptyList())
     val suggestedMatches: StateFlow<List<MatchSuggestionResponse>> = _suggestedMatches.asStateFlow()
+
+    // Accounts an invoice may be posted against, for the edit sheet
+    private val _accounts = MutableStateFlow<List<AccountResponse>>(emptyList())
+    val accounts: StateFlow<List<AccountResponse>> = _accounts.asStateFlow()
+
+    // The plan an invoice produced, keyed by receipt id. It carries the
+    // expected counter-account, which lives on the plan and not on the receipt.
+    private val _plansByReceipt = MutableStateFlow<Map<Int, PlannedTransactionResponse>>(emptyMap())
+    val plansByReceipt: StateFlow<Map<Int, PlannedTransactionResponse>> = _plansByReceipt.asStateFlow()
 
     private val _message = MutableSharedFlow<String>()
     val message = _message.asSharedFlow()
@@ -77,6 +98,10 @@ class AttachmentsViewModel @Inject constructor(
             }
             ledgerSelection.selectedLedgerId.collect { id ->
                 currentLedgerId = id
+                // Another ledger has another chart; keeping the old one would
+                // offer accounts that do not exist here
+                _accounts.value = emptyList()
+                _plansByReceipt.value = emptyMap()
                 loadAll()
             }
         }
@@ -97,6 +122,7 @@ class AttachmentsViewModel @Inject constructor(
             repository.getAttachments(currentLedgerId, statusFilter, search?.ifBlank { null }).fold(
                 onSuccess = { list ->
                     _uiState.value = AttachmentsUiState(attachments = list)
+                    loadPlans()
                 },
                 onFailure = { e ->
                     if (e.message?.contains("403") == true) {
@@ -258,6 +284,74 @@ class AttachmentsViewModel @Inject constructor(
             repository.deleteAttachment(currentLedgerId, id).fold(
                 onSuccess = { _message.emit("Vedlegg slettet"); loadAll() },
                 onFailure = { _message.emit("Kunne ikke slette: ${it.message}") }
+            )
+        }
+    }
+
+    private suspend fun loadPlans() {
+        repository.getPlannedTransactions(currentLedgerId).onSuccess { plans ->
+            _plansByReceipt.value = plans
+                .filter { it.receiptId != null }
+                .associateBy { it.receiptId!! }
+        }
+    }
+
+    /** Loaded on demand: only the edit sheet needs the chart of accounts. */
+    fun ensureAccounts() {
+        if (_accounts.value.isNotEmpty()) return
+        viewModelScope.launch {
+            postingQueueRepository.getAccounts(currentLedgerId).onSuccess { all ->
+                val wanted = POSTING_ACCOUNT_GROUPS.map { it.first }.toSet()
+                _accounts.value = all.filter { it.accountType in wanted }
+            }
+        }
+    }
+
+    /**
+     * Save the attachment's own fields, then the expected counter-account.
+     *
+     * The account lives on the planned transaction, which the receipt update
+     * may have only just created, so the plans are re-read in between. A
+     * matched plan is left alone; the backend refuses to change it anyway.
+     */
+    fun saveEdit(
+        id: Int,
+        attachmentType: String,
+        receiptDate: String?,
+        dueDate: String?,
+        amount: String?,
+        description: String?,
+        expectedAccountId: Int?
+    ) {
+        viewModelScope.launch {
+            val result = repository.updateAttachment(
+                currentLedgerId,
+                id,
+                ReceiptUpdateRequest(
+                    attachmentType = attachmentType,
+                    receiptDate = receiptDate,
+                    dueDate = if (attachmentType == "INVOICE") dueDate else null,
+                    amount = amount,
+                    description = description
+                )
+            )
+            result.fold(
+                onSuccess = { updated ->
+                    val list = _uiState.value.attachments.map { if (it.id == id) updated else it }
+                    _uiState.value = _uiState.value.copy(attachments = list)
+                    if (attachmentType == "INVOICE") {
+                        loadPlans()
+                        val plan = _plansByReceipt.value[id]
+                        if (plan != null && plan.status != "MATCHED" &&
+                            plan.suggestedAccountId != expectedAccountId
+                        ) {
+                            repository.setPlannedAccount(currentLedgerId, plan.id, expectedAccountId)
+                            loadPlans()
+                        }
+                    }
+                    _message.emit("Vedlegg lagret")
+                },
+                onFailure = { e -> _message.emit("Kunne ikke lagre: ${e.message}") }
             )
         }
     }

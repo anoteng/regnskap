@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Link
@@ -82,6 +83,7 @@ import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
+import eu.privatregnskap.app.data.network.dto.AccountResponse
 import eu.privatregnskap.app.data.network.dto.AttachmentResponse
 import eu.privatregnskap.app.data.network.dto.MatchSuggestionResponse
 import eu.privatregnskap.app.data.network.dto.TransactionResponse
@@ -100,6 +102,8 @@ fun AttachmentsScreen(
     val transactions by viewModel.transactions.collectAsStateWithLifecycle()
     val pdfFile by viewModel.pdfFile.collectAsStateWithLifecycle()
     val suggestedMatches by viewModel.suggestedMatches.collectAsStateWithLifecycle()
+    val accounts by viewModel.accounts.collectAsStateWithLifecycle()
+    val plansByReceipt by viewModel.plansByReceipt.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
 
@@ -109,7 +113,19 @@ fun AttachmentsScreen(
     var deletingId by remember { mutableStateOf<Int?>(null) }
     var matchingAttachmentId by remember { mutableStateOf<Int?>(null) }
     var viewingAttachment by remember { mutableStateOf<AttachmentResponse?>(null) }
+    var editingAttachment by remember { mutableStateOf<AttachmentResponse?>(null) }
     var fullScreenImageUrl by remember { mutableStateOf<String?>(null) }
+
+    // Both sheets hold a snapshot, so a save or a fresh interpretation has to
+    // be pushed back into them or they keep showing the values from before
+    LaunchedEffect(uiState.attachments) {
+        viewingAttachment = viewingAttachment?.let { shown ->
+            uiState.attachments.firstOrNull { it.id == shown.id } ?: shown
+        }
+        editingAttachment = editingAttachment?.let { shown ->
+            uiState.attachments.firstOrNull { it.id == shown.id } ?: shown
+        }
+    }
 
     LaunchedEffect(Unit) {
         viewModel.message.collect { snackbarHostState.showSnackbar(it) }
@@ -299,7 +315,7 @@ fun AttachmentsScreen(
                                 attachment = attachment,
                                 imageUrl = viewModel.imageUrl(attachment.id),
                                 isExtracting = uiState.extractingId == attachment.id,
-                                onTap = { viewingAttachment = attachment },
+                                onTap = { viewingAttachment = attachment; viewModel.ensureAccounts() },
                                 onDelete = { deletingId = attachment.id },
                                 onExtractAI = { viewModel.extractAI(attachment.id) },
                                 onMatch = {
@@ -344,7 +360,11 @@ fun AttachmentsScreen(
             attachment = att,
             imageUrl = viewModel.imageUrl(att.id),
             isExtracting = uiState.extractingId == att.id,
+            expectedAccountLabel = plansByReceipt[att.id]?.suggestedAccountId
+                ?.let { id -> accounts.firstOrNull { it.id == id } }
+                ?.let { "${it.accountNumber} ${it.accountName}" },
             onExtractAI = { viewModel.extractAI(att.id) },
+            onEdit = { editingAttachment = att; viewModel.ensureAccounts() },
             onMatch = {
                 viewingAttachment = null
                 matchingAttachmentId = att.id
@@ -358,6 +378,21 @@ fun AttachmentsScreen(
             onCropEdit = { viewingAttachment = null; viewModel.prepareCropEdit(att, context) },
             onImageTap = { fullScreenImageUrl = viewModel.imageUrl(att.id) },
             onDismiss = { viewingAttachment = null }
+        )
+    }
+
+    // Receipt edit sheet
+    editingAttachment?.let { att ->
+        ReceiptEditSheet(
+            attachment = att,
+            accounts = accounts,
+            expectedAccountId = plansByReceipt[att.id]?.suggestedAccountId,
+            accountLocked = plansByReceipt[att.id]?.status == "MATCHED",
+            onSave = { type, date, dueDate, amount, desc, accountId ->
+                viewModel.saveEdit(att.id, type, date, dueDate, amount, desc, accountId)
+                editingAttachment = null
+            },
+            onDismiss = { editingAttachment = null }
         )
     }
 
@@ -549,17 +584,17 @@ private fun AttachmentCard(
 
                 // Actions
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    if (attachment.aiExtractedVendor == null) {
-                        OutlinedButton(
-                            onClick = onExtractAI,
-                            enabled = !isExtracting,
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                        ) {
-                            if (isExtracting) {
-                                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
-                            } else {
-                                Text("AI", style = MaterialTheme.typography.labelSmall)
-                            }
+                    // Offered whether or not it has run before: a first reading
+                    // that got the amount wrong is exactly when you need a second
+                    OutlinedButton(
+                        onClick = onExtractAI,
+                        enabled = !isExtracting,
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        if (isExtracting) {
+                            CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                        } else {
+                            Text("AI", style = MaterialTheme.typography.labelSmall)
                         }
                     }
                     if (attachment.status == "MATCHED") {
@@ -619,7 +654,9 @@ private fun ReceiptDetailSheet(
     attachment: AttachmentResponse,
     imageUrl: String,
     isExtracting: Boolean,
+    expectedAccountLabel: String?,
     onExtractAI: () -> Unit,
+    onEdit: () -> Unit,
     onMatch: () -> Unit,
     onUnmatch: () -> Unit,
     onDelete: () -> Unit,
@@ -726,7 +763,10 @@ private fun ReceiptDetailSheet(
                     DetailRow("Beskrivelse", attachment.description)
 
                 if (attachment.aiSuggestedAccount != null)
-                    DetailRow("Foreslått konto", attachment.aiSuggestedAccount)
+                    DetailRow("AI foreslo konto", attachment.aiSuggestedAccount)
+
+                if (isInvoice)
+                    DetailRow("Forventet motkonto", expectedAccountLabel ?: "ikke valgt")
 
                 val conf = attachment.aiConfidence
                 if (conf != null)
@@ -742,18 +782,21 @@ private fun ReceiptDetailSheet(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    if (attachment.aiExtractedVendor == null) {
-                        OutlinedButton(
-                            onClick = onExtractAI,
-                            enabled = !isExtracting,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            if (isExtracting) {
-                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                            } else {
-                                Text("AI-gjenkjenning")
-                            }
+                    OutlinedButton(
+                        onClick = onExtractAI,
+                        enabled = !isExtracting,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        if (isExtracting) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        } else {
+                            Text(if (attachment.aiProcessedAt != null) "Tolk på nytt" else "AI-gjenkjenning")
                         }
+                    }
+                    OutlinedButton(onClick = onEdit, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Rediger")
                     }
                     if (attachment.status == "MATCHED") {
                         OutlinedButton(onClick = onUnmatch, modifier = Modifier.weight(1f)) {
@@ -1118,4 +1161,279 @@ private fun SubscriptionRequiredMessage() {
             )
         }
     }
+}
+
+// ─── Receipt edit sheet ───────────────────────────────────────────────────────
+
+/**
+ * Edit what the interpretation produced.
+ *
+ * The AI writes its reading to its own fields and only fills a confirmed value
+ * when that value is still empty, so a first pass that got the amount wrong
+ * could never be corrected from the app. Here both numbers are on screen: the
+ * stored one in the field, the interpretation beside it with one tap to accept.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ReceiptEditSheet(
+    attachment: AttachmentResponse,
+    accounts: List<AccountResponse>,
+    expectedAccountId: Int?,
+    accountLocked: Boolean,
+    onSave: (type: String, date: String?, dueDate: String?, amount: String?, desc: String?, accountId: Int?) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var attachmentType by remember(attachment.id) {
+        mutableStateOf(attachment.attachmentType)
+    }
+    var receiptDate by remember(attachment.id) {
+        mutableStateOf(attachment.receiptDate ?: "")
+    }
+    var dueDate by remember(attachment.id) { mutableStateOf(attachment.dueDate ?: "") }
+    var amount by remember(attachment.id) {
+        mutableStateOf(attachment.amount?.let { trimAmount(it) } ?: "")
+    }
+    var description by remember(attachment.id) {
+        mutableStateOf(attachment.description ?: "")
+    }
+    var accountId by remember(attachment.id) { mutableStateOf(expectedAccountId) }
+    var showAccountPicker by remember { mutableStateOf(false) }
+
+    val isInvoice = attachmentType == "INVOICE"
+    val selected = accounts.firstOrNull { it.id == accountId }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text("Rediger vedlegg", style = MaterialTheme.typography.titleLarge)
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = !isInvoice,
+                    onClick = { attachmentType = "RECEIPT" },
+                    label = { Text("Kvittering") }
+                )
+                FilterChip(
+                    selected = isInvoice,
+                    onClick = { attachmentType = "INVOICE" },
+                    label = { Text("Faktura") }
+                )
+            }
+
+            OutlinedTextField(
+                value = receiptDate,
+                onValueChange = { receiptDate = it },
+                label = { Text(if (isInvoice) "Fakturadato" else "Dato") },
+                placeholder = { Text("ÅÅÅÅ-MM-DD") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            AiHint("dato", attachment.aiExtractedDate, receiptDate) { receiptDate = it }
+
+            if (isInvoice) {
+                OutlinedTextField(
+                    value = dueDate,
+                    onValueChange = { dueDate = it },
+                    label = { Text("Forfallsdato") },
+                    placeholder = { Text("ÅÅÅÅ-MM-DD") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+            }
+
+            OutlinedTextField(
+                value = amount,
+                onValueChange = { amount = it },
+                label = { Text("Beløp") },
+                placeholder = { Text("0.00") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            AiHint("beløp", attachment.aiExtractedAmount?.let { trimAmount(it) }, amount) { amount = it }
+
+            OutlinedTextField(
+                value = description,
+                onValueChange = { description = it },
+                label = { Text("Beskrivelse") },
+                modifier = Modifier.fillMaxWidth()
+            )
+            AiHint(
+                "beskrivelse",
+                attachment.aiExtractedDescription,
+                description
+            ) { description = it }
+
+            if (isInvoice) {
+                OutlinedButton(
+                    onClick = { showAccountPicker = true },
+                    enabled = !accountLocked,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = selected
+                            ?.let { "Motkonto: ${it.accountNumber} ${it.accountName}" }
+                            ?: "Velg forventet motkonto",
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Text(
+                    text = if (accountLocked) {
+                        "Betalingen er registrert, så motkontoen er låst."
+                    } else {
+                        "Månedsavregningen bruker denne. En kredittkortfaktura " +
+                            "hører på kortkontoen, ikke på en kostnadskonto."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                // The model answers with a number, the plan stores an id, so the
+                // suggestion is matched up by number before it is offered
+                val aiAccount = attachment.aiSuggestedAccount
+                    ?.let { number -> accounts.firstOrNull { it.accountNumber == number } }
+                if (!accountLocked && aiAccount != null && aiAccount.id != accountId) {
+                    AiSuggestionRow(
+                        label = "AI foreslo ${aiAccount.accountNumber} ${aiAccount.accountName}",
+                        onUse = { accountId = aiAccount.id }
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
+                    Text("Avbryt")
+                }
+                Button(
+                    onClick = {
+                        onSave(
+                            attachmentType,
+                            receiptDate.ifBlank { null },
+                            dueDate.ifBlank { null },
+                            amount.ifBlank { null },
+                            description.ifBlank { null },
+                            accountId
+                        )
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Lagre")
+                }
+            }
+        }
+    }
+
+    if (showAccountPicker) {
+        AccountPickerDialog(
+            accounts = accounts,
+            selectedId = accountId,
+            onPick = { accountId = it; showAccountPicker = false },
+            onDismiss = { showAccountPicker = false }
+        )
+    }
+}
+
+/** The interpretation for one field, shown only when it differs from what is stored. */
+@Composable
+private fun AiHint(name: String, aiValue: String?, current: String, onUse: (String) -> Unit) {
+    if (aiValue.isNullOrBlank() || aiValue == current) return
+    AiSuggestionRow(label = "AI leste $name: $aiValue", onUse = { onUse(aiValue) })
+}
+
+@Composable
+private fun AiSuggestionRow(label: String, onUse: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f)
+        )
+        TextButton(onClick = onUse) { Text("Bruk") }
+    }
+}
+
+/** 2 500,00 is stored as 2500.0; the trailing zero belongs in a report, not a field. */
+private fun trimAmount(value: Double): String =
+    if (value == value.toLong().toDouble()) value.toLong().toString()
+    else java.math.BigDecimal.valueOf(value).stripTrailingZeros().toPlainString()
+
+@Composable
+private fun AccountPickerDialog(
+    accounts: List<AccountResponse>,
+    selectedId: Int?,
+    onPick: (Int?) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var query by remember { mutableStateOf("") }
+    val needle = query.trim().lowercase()
+    val matches = accounts.filter {
+        needle.isEmpty() ||
+            it.accountNumber.lowercase().contains(needle) ||
+            it.accountName.lowercase().contains(needle)
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Velg motkonto") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    placeholder = { Text("Søk i kontoplanen") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                Spacer(Modifier.height(8.dp))
+                LazyColumn(modifier = Modifier.height(320.dp)) {
+                    item {
+                        TextButton(onClick = { onPick(null) }) { Text("– ikke valgt –") }
+                    }
+                    POSTING_ACCOUNT_GROUPS.forEach { (type, label) ->
+                        val group = matches.filter { it.accountType == type }
+                        if (group.isNotEmpty()) {
+                            item(key = "h$type") {
+                                Text(
+                                    text = label,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(top = 8.dp, bottom = 2.dp)
+                                )
+                            }
+                            items(group, key = { it.id }) { account ->
+                                Text(
+                                    text = "${account.accountNumber} ${account.accountName}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = if (account.id == selectedId) FontWeight.Bold else null,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { onPick(account.id) }
+                                        .padding(vertical = 8.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Lukk") }
+        }
+    )
 }

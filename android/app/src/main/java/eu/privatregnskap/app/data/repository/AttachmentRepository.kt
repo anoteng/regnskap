@@ -3,6 +3,9 @@ package eu.privatregnskap.app.data.repository
 import eu.privatregnskap.app.data.network.ApiService
 import eu.privatregnskap.app.data.network.dto.AttachmentResponse
 import eu.privatregnskap.app.data.network.dto.MatchSuggestionResponse
+import eu.privatregnskap.app.data.network.dto.PlannedTransactionPatch
+import eu.privatregnskap.app.data.network.dto.PlannedTransactionResponse
+import eu.privatregnskap.app.data.network.dto.ReceiptUpdateRequest
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -22,7 +25,10 @@ interface AttachmentRepository {
         amount: String?,
         description: String?
     ): Result<AttachmentResponse>
+    suspend fun updateAttachment(ledgerId: Int?, id: Int, request: ReceiptUpdateRequest): Result<AttachmentResponse>
     suspend fun deleteAttachment(ledgerId: Int?, id: Int): Result<Unit>
+    suspend fun getPlannedTransactions(ledgerId: Int?): Result<List<PlannedTransactionResponse>>
+    suspend fun setPlannedAccount(ledgerId: Int?, id: Int, accountId: Int?): Result<PlannedTransactionResponse>
     suspend fun extractAI(ledgerId: Int?, id: Int): Result<AttachmentResponse>
     suspend fun matchAttachment(ledgerId: Int?, id: Int, transactionId: Int): Result<Unit>
     suspend fun unmatchAttachment(ledgerId: Int?, id: Int): Result<Unit>
@@ -62,6 +68,15 @@ class AttachmentRepositoryImpl @Inject constructor(
 
         apiService.uploadAttachment(ledgerId, filePart, typePart, datePart, dueDatePart, amountPart, descPart)
     }
+
+    override suspend fun updateAttachment(ledgerId: Int?, id: Int, request: ReceiptUpdateRequest): Result<AttachmentResponse> =
+        runCatching { apiService.updateAttachment(ledgerId, id, request) }
+
+    override suspend fun getPlannedTransactions(ledgerId: Int?): Result<List<PlannedTransactionResponse>> =
+        runCatching { apiService.getPlannedTransactions(ledgerId) }
+
+    override suspend fun setPlannedAccount(ledgerId: Int?, id: Int, accountId: Int?): Result<PlannedTransactionResponse> =
+        runCatching { apiService.updatePlannedTransaction(ledgerId, id, PlannedTransactionPatch(accountId)) }
 
     override suspend fun deleteAttachment(ledgerId: Int?, id: Int): Result<Unit> =
         runCatching { apiService.deleteAttachment(ledgerId, id); Unit }

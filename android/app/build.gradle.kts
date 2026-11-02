@@ -21,8 +21,8 @@ android {
         applicationId = "eu.privatregnskap.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 54
-        versionName = "2.11.0"
+        versionCode = 55
+        versionName = "2.12.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

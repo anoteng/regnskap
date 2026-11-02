@@ -21,7 +21,10 @@ import eu.privatregnskap.app.data.network.dto.MatchSuggestionResponse
 import eu.privatregnskap.app.data.network.dto.PasskeyCredentialResponse
 import eu.privatregnskap.app.data.network.dto.PasskeyRegisterBeginRequest
 import eu.privatregnskap.app.data.network.dto.PasswordResetRequest
+import eu.privatregnskap.app.data.network.dto.PlannedTransactionPatch
+import eu.privatregnskap.app.data.network.dto.PlannedTransactionResponse
 import eu.privatregnskap.app.data.network.dto.PostingQueueResponse
+import eu.privatregnskap.app.data.network.dto.ReceiptUpdateRequest
 import eu.privatregnskap.app.data.network.dto.SettlementCalculationResponse
 import eu.privatregnskap.app.data.network.dto.SettlementSettingsRequest
 import eu.privatregnskap.app.data.network.dto.SettlementSettingsResponse
@@ -180,6 +183,13 @@ interface ApiService {
         @Part("description") description: RequestBody? = null
     ): AttachmentResponse
 
+    @PUT("receipts/{id}")
+    suspend fun updateAttachment(
+        @Header("X-Ledger-ID") ledgerId: Int? = null,
+        @Path("id") id: Int,
+        @Body request: ReceiptUpdateRequest
+    ): AttachmentResponse
+
     @DELETE("receipts/{id}")
     suspend fun deleteAttachment(
         @Header("X-Ledger-ID") ledgerId: Int? = null,
@@ -204,6 +214,21 @@ interface ApiService {
         @Header("X-Ledger-ID") ledgerId: Int? = null,
         @Path("id") id: Int
     ): ResponseBody
+
+    // ─── Planned transactions (registered invoices) ───────────────────────────
+
+    @GET("planned-transactions/")
+    suspend fun getPlannedTransactions(
+        @Header("X-Ledger-ID") ledgerId: Int? = null,
+        @Query("limit") limit: Int = 500
+    ): List<PlannedTransactionResponse>
+
+    @PATCH("planned-transactions/{id}")
+    suspend fun updatePlannedTransaction(
+        @Header("X-Ledger-ID") ledgerId: Int? = null,
+        @Path("id") id: Int,
+        @Body request: PlannedTransactionPatch
+    ): PlannedTransactionResponse
 
     @GET("receipts/{id}/suggest-match")
     suspend fun getMatchSuggestions(

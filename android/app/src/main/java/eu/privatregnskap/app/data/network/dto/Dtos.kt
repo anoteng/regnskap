@@ -179,6 +179,8 @@ data class AttachmentResponse(
     @Json(name = "ai_extracted_date") val aiExtractedDate: String?,
     @Json(name = "ai_confidence") val aiConfidence: Double?,
     @Json(name = "ai_suggested_account") val aiSuggestedAccount: String?,
+    /** Set once an interpretation has run, even one that found no vendor */
+    @Json(name = "ai_processed_at") val aiProcessedAt: String? = null,
     @Json(name = "created_at") val createdAt: String
 )
 
@@ -432,4 +434,30 @@ data class AiKeyStatusResponse(
 @JsonClass(generateAdapter = true)
 data class AiKeyUpdateRequest(
     @Json(name = "api_key") val apiKey: String
+)
+
+@JsonClass(generateAdapter = true)
+data class ReceiptUpdateRequest(
+    @Json(name = "attachment_type") val attachmentType: String,
+    @Json(name = "receipt_date") val receiptDate: String? = null,
+    @Json(name = "due_date") val dueDate: String? = null,
+    /** Sent as a string so the decimal survives the trip unrounded */
+    val amount: String? = null,
+    val description: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class PlannedTransactionResponse(
+    val id: Int,
+    @Json(name = "receipt_id") val receiptId: Int? = null,
+    val description: String,
+    @Json(name = "expected_date") val expectedDate: String,
+    val amount: String,
+    @Json(name = "suggested_account_id") val suggestedAccountId: Int? = null,
+    val status: String
+)
+
+@JsonClass(generateAdapter = true)
+data class PlannedTransactionPatch(
+    @Json(name = "suggested_account_id") val suggestedAccountId: Int?
 )
