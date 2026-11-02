@@ -1,5 +1,5 @@
-import api from './api.js?v=19';
-import { formatCurrency, showError, showSuccess, showModal, closeModal } from './utils.js?v=19';
+import api from './api.js?v=20';
+import { formatCurrency, showError, showSuccess, showModal, closeModal } from './utils.js?v=20';
 
 const KINDS = {
     LOAN: 'Lån',

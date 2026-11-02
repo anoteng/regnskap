@@ -1,5 +1,5 @@
-import api from './api.js?v=19';
-import { showModal, closeModal, showError, showSuccess, formatDate } from './utils.js?v=19';
+import api from './api.js?v=20';
+import { showModal, closeModal, showError, showSuccess, formatDate } from './utils.js?v=20';
 
 class ReceiptsManager {
     constructor() {
@@ -7,7 +7,7 @@ class ReceiptsManager {
         this.currentFilter = 'PENDING';
         this.subscription = null;
         this.plansByReceipt = {};
-        this.expenseAccounts = null;
+        this.postingAccounts = null;
     }
 
     async init() {
@@ -116,7 +116,7 @@ class ReceiptsManager {
     async loadPlans() {
         // Planned transactions are optional context; never block the queue on them
         try {
-            await this.ensureExpenseAccounts();
+            await this.ensurePostingAccounts();
             const plans = await api.getPlannedTransactions({ limit: 500 });
             this.plansByReceipt = Object.fromEntries(
                 plans.filter(p => p.receipt_id).map(p => [p.receipt_id, p])
@@ -127,16 +127,37 @@ class ReceiptsManager {
         }
     }
 
-    async ensureExpenseAccounts() {
-        if (!this.expenseAccounts) {
-            const accounts = await api.getAccounts('EXPENSE');
-            this.expenseAccounts = accounts.filter(a => a.is_active);
+    // Not every invoice is a cost. A credit card statement settles purchases
+    // already booked one by one, a loan notice pays down debt, a window
+    // invoice is capitalised -- so the counter-account may be a balance
+    // account, and the list has to offer those too.
+    static ACCOUNT_GROUPS = [
+        ['EXPENSE', 'Kostnad'],
+        ['ASSET', 'Eiendel'],
+        ['LIABILITY', 'Gjeld'],
+    ];
+
+    async ensurePostingAccounts() {
+        if (!this.postingAccounts) {
+            const wanted = new Set(ReceiptsManager.ACCOUNT_GROUPS.map(([type]) => type));
+            const accounts = await api.getAccounts();
+            this.postingAccounts = accounts.filter(a => a.is_active && wanted.has(a.account_type));
         }
-        return this.expenseAccounts;
+        return this.postingAccounts;
+    }
+
+    accountOptionsHtml(selectedId) {
+        return '<option value="">– ikke valgt –</option>' + ReceiptsManager.ACCOUNT_GROUPS.map(([type, label]) => {
+            const options = (this.postingAccounts || [])
+                .filter(a => a.account_type === type)
+                .map(a => `<option value="${a.id}" ${selectedId === a.id ? 'selected' : ''}>${a.account_number} ${a.account_name}</option>`)
+                .join('');
+            return options ? `<optgroup label="${label}">${options}</optgroup>` : '';
+        }).join('');
     }
 
     accountLabel(id) {
-        const a = (this.expenseAccounts || []).find(x => x.id === id);
+        const a = (this.postingAccounts || []).find(x => x.id === id);
         return a ? `${a.account_number} ${a.account_name}` : `konto #${id}`;
     }
 
@@ -663,10 +684,8 @@ class ReceiptsManager {
 
         const isInvoice = receipt.attachment_type === 'INVOICE';
         const plan = this.plansByReceipt[id];
-        const accounts = await this.ensureExpenseAccounts();
-        const accountOptions = '<option value="">– ikke valgt –</option>' + accounts.map(a =>
-            `<option value="${a.id}" ${plan?.suggested_account_id === a.id ? 'selected' : ''}>${a.account_number} ${a.account_name}</option>`
-        ).join('');
+        await this.ensurePostingAccounts();
+        const accountOptions = this.accountOptionsHtml(plan?.suggested_account_id ?? null);
 
         const content = `
             <form id="edit-receipt-form">
@@ -686,9 +705,9 @@ class ReceiptsManager {
                     <input type="date" id="receipt-due-date" value="${receipt.due_date || ''}">
                 </div>
                 <div class="form-group" id="expected-account-group" style="${isInvoice ? '' : 'display:none'}">
-                    <label>Forventet kostnadskonto</label>
+                    <label>Forventet motkonto</label>
                     <select id="receipt-expected-account" ${plan?.status === 'MATCHED' ? 'disabled' : ''}>${accountOptions}</select>
-                    <small style="color:#6b7280;">Brukes av månedsavregningen til å avgjøre om fakturaen er en felleskostnad.</small>
+                    <small style="color:#6b7280;">Brukes av månedsavregningen til å avgjøre om fakturaen er en felleskostnad. En kredittkortfaktura hører på kortkontoen, ikke på en kostnadskonto.</small>
                 </div>
                 <div class="form-group">
                     <label>Beløp</label>

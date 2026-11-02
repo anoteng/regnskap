@@ -1,5 +1,5 @@
-import api from './api.js?v=19';
-import { showModal, closeModal, showError, showSuccess } from './utils.js?v=19';
+import api from './api.js?v=20';
+import { showModal, closeModal, showError, showSuccess } from './utils.js?v=20';
 
 class PostingQueueManager {
     constructor() {

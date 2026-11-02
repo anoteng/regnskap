@@ -20,6 +20,7 @@ from ..planned_transactions import (
     reopen_planned_for_receipt,
 )
 from ..models import PlannedTransaction, PlannedTransactionStatus
+from ..models import BankAccount, BankAccountType
 from backend.config import get_settings
 
 router = APIRouter(prefix="/receipts", tags=["receipts"])
@@ -549,18 +550,69 @@ SUPPORTED_IMAGE_TYPES = {
 }
 
 
-def expense_chart(db: Session, ledger_id: int) -> str:
-    """The ledger's own expense accounts, one per line.
+# Account types the model may post to, in the order they are offered. Expenses
+# come first because an ordinary purchase belongs on a cost account; the balance
+# accounts exist for the few attachments that are not a cost at all.
+CHART_TYPES = (
+    (AccountType.EXPENSE, "Kostnadskontoer"),
+    (AccountType.ASSET, "Eiendelskontoer"),
+    (AccountType.LIABILITY, "Gjeldskontoer"),
+)
+# An account note is a hint, not an essay; a runaway description would crowd
+# out the rest of the chart
+MAX_ACCOUNT_NOTE = 300
+
+
+def account_chart(db: Session, ledger_id: int) -> str:
+    """The ledger's own accounts, one per line, with the user's own notes.
 
     The model must pick from this chart; a number from the generic Norwegian
     standard chart never matches and is discarded.
+
+    An account's description is the user's own rule for when to use it, and it
+    carries knowledge the name cannot: "Utlegg som dekkes av loyvehaver" tells
+    the model what belongs there in a way "Utlegg taxi" never will. It is
+    passed along verbatim, per ledger, so each household teaches the model its
+    own habits.
+
+    Balance accounts are included because some attachments are not an expense:
+    a credit card statement settles purchases already booked one by one, a loan
+    notice pays down debt, an invoice for a new window is capitalised. Without
+    them the model has nowhere to put those and answers null.
     """
+    # The account the money leaves is booked by the bank side, never by the
+    # attachment, so offering it only invites a nonsense suggestion. A credit
+    # card is the exception: a card statement is paid from the bank account to
+    # the card, so the card itself is the counter-account.
+    payment_accounts = {
+        account_id for (account_id,) in db.query(BankAccount.account_id).filter(
+            BankAccount.ledger_id == ledger_id,
+            BankAccount.account_id.isnot(None),
+            BankAccount.account_type != BankAccountType.CREDIT_CARD,
+        )
+    }
+
     accounts = db.query(Account).filter(
         Account.ledger_id == ledger_id,
-        Account.account_type == AccountType.EXPENSE,
+        Account.account_type.in_([t for t, _ in CHART_TYPES]),
         Account.is_active == True  # noqa: E712
     ).order_by(Account.account_number).all()
-    return "\n".join(f"{a.account_number} {a.account_name}" for a in accounts)
+
+    by_type: dict = {t: [] for t, _ in CHART_TYPES}
+    for a in accounts:
+        if a.id in payment_accounts:
+            continue
+        line = f"{a.account_number} {a.account_name}"
+        note = " ".join((a.description or "").split())[:MAX_ACCOUNT_NOTE]
+        if note:
+            line += f" -- {note}"
+        by_type[a.account_type].append(line)
+
+    blocks = [
+        f"{label}:\n" + "\n".join(by_type[account_type])
+        for account_type, label in CHART_TYPES if by_type[account_type]
+    ]
+    return "\n\n".join(blocks)
 
 
 def _extraction_prompt(accounts_text: str) -> str:
@@ -585,9 +637,16 @@ def _extraction_prompt(accounts_text: str) -> str:
         "- due_date: forfallsdato i ISO-format YYYY-MM-DD, kun hvis dette er en faktura (string eller null)\n"
         "- is_invoice: true hvis dette er en faktura, false hvis kvittering (boolean)\n"
         "- suggested_account: kontonummeret som passer best fra kontoplanen nedenfor.\n"
-        "  Bruk kun et nummer som står i listen; finner du ingen som passer, svar null (string eller null)\n"
+        "  Bruk kun et nummer som står i listen; finner du ingen som passer, svar null.\n"
+        "  Et vanlig kjøp hører på en kostnadskonto. Balansekontoene er for de få\n"
+        "  vedleggene som ikke er en kostnad: en kredittkortfaktura, der kjøpene\n"
+        "  alt er kostnadsført hver for seg da de ble gjort, et terminvarsel på et\n"
+        "  lån, eller en faktura for noe som øker verdien av en eiendel. Er du i\n"
+        "  tvil mellom en kostnadskonto og en balansekonto, velg kostnadskontoen\n"
+        "  (string eller null)\n"
         "- confidence: din sikkerhetsscore for ekstraksjonen, 0.0 til 1.0 (number)\n"
-        "\nKontoplan (kostnadskontoer i dette regnskapet):\n"
+        "\nKontoplanen i dette regnskapet. Teksten etter -- er brukerens egen regel\n"
+        "for når kontoen skal brukes, og veier tyngre enn kontonavnet:\n"
         f"{accounts_text}\n"
         "\nSvar kun med JSON, ingen forklaringstekst."
     )
@@ -679,7 +738,7 @@ async def extract_receipt_ai(
         import anthropic
         client = anthropic.Anthropic(api_key=api_key)
         result = interpret_attachment(
-            client, receipt.file_data, mime, expense_chart(db, current_ledger.id)
+            client, receipt.file_data, mime, account_chart(db, current_ledger.id)
         )
 
         receipt.ai_extracted_vendor = result.get("vendor")
