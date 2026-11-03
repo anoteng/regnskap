@@ -28,8 +28,14 @@ async def sync_all_connections(
 
     now = datetime.now(timezone.utc)
 
+    # ERROR connections are retried too. A session that really has expired just
+    # fails again and costs one call; one that was knocked out by a passing bank
+    # error heals itself, because a successful sync sets the status back to ACTIVE.
     connections = db.query(BankConnection).filter(
-        BankConnection.status == BankConnectionStatus.ACTIVE,
+        BankConnection.status.in_([
+            BankConnectionStatus.ACTIVE,
+            BankConnectionStatus.ERROR,
+        ]),
         BankConnection.auto_sync_enabled == True,
     ).all()
 

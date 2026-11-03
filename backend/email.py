@@ -66,3 +66,90 @@ Privatregnskap.eu
         },
     )
     response.raise_for_status()
+
+
+def send_bank_connection_error_email(
+    to_email: str,
+    user_name: str,
+    account_name: str,
+    needs_reauth: bool,
+    failures: int,
+    error: str,
+):
+    """Tell the owner that a bank connection has stopped syncing on its own."""
+
+    link = f"https://{settings.rp_id}/?view=bank-connections"
+
+    if needs_reauth:
+        heading = "Bankkoblingen må autoriseres på nytt"
+        reason = (
+            f"Banksesjonen for <strong>{account_name}</strong> har utløpt. "
+            "Transaksjoner hentes ikke inn før du har logget inn i banken på nytt."
+        )
+        reason_text = (
+            f"Banksesjonen for {account_name} har utløpt. Transaksjoner hentes ikke "
+            "inn før du har logget inn i banken på nytt."
+        )
+    else:
+        heading = "Bankkoblingen får ikke kontakt"
+        reason = (
+            f"Synkroniseringen av <strong>{account_name}</strong> har feilet "
+            f"{failures} ganger på rad. Feilen kommer fra banken, ikke fra sesjonen, "
+            "men den har vart lenge nok til at den bør ses på."
+        )
+        reason_text = (
+            f"Synkroniseringen av {account_name} har feilet {failures} ganger på rad. "
+            "Feilen kommer fra banken, ikke fra sesjonen, men den har vart lenge nok "
+            "til at den bør ses på."
+        )
+
+    text = f"""
+Hei {user_name},
+
+{reason_text}
+
+Siste feilmelding:
+{error}
+
+Åpne bankkoblinger: {link}
+
+Hilsen
+Privatregnskap.eu
+"""
+
+    html = f"""
+<html>
+  <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+    <h2>{heading}</h2>
+    <p>Hei {user_name},</p>
+    <p>{reason}</p>
+    <p style="margin: 30px 0;">
+      <a href="{link}"
+         style="background-color: #4CAF50; color: white; padding: 12px 24px;
+                text-decoration: none; border-radius: 4px; display: inline-block;">
+        Åpne bankkoblinger
+      </a>
+    </p>
+    <p style="color: #666; font-size: 0.9em;">Siste feilmelding:</p>
+    <pre style="color: #666; font-size: 0.8em; white-space: pre-wrap;">{error}</pre>
+    <hr style="margin-top: 30px; border: none; border-top: 1px solid #ddd;">
+    <p style="color: #999; font-size: 0.8em;">Hilsen Privatregnskap.eu</p>
+  </body>
+</html>
+"""
+
+    response = requests.post(
+        "https://api.brevo.com/v3/smtp/email",
+        headers={
+            "api-key": settings.brevo_api_key,
+            "Content-Type": "application/json",
+        },
+        json={
+            "sender": {"name": settings.email_from_name, "email": settings.email_from},
+            "to": [{"email": to_email}],
+            "subject": f"{heading} - Privatregnskap.eu",
+            "htmlContent": html,
+            "textContent": text,
+        },
+    )
+    response.raise_for_status()

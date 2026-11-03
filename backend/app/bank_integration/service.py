@@ -9,12 +9,15 @@ Main orchestration service that handles:
 - Import as DRAFT transactions
 """
 
+import asyncio
 import secrets
 import logging
 from collections import Counter
 from typing import Dict, Any, Optional, Tuple
 from datetime import datetime, timedelta, date
 from decimal import Decimal
+
+import httpx
 from sqlalchemy.orm import Session
 
 from backend.app.models import (
@@ -26,7 +29,7 @@ from backend.app.models import (
 )
 
 from .providers.base import BaseBankProvider
-from .providers.enable_banking import EnableBankingProvider, SessionExpiredError
+from .providers.enable_banking import EnableBankingProvider, SessionExpiredError, TransientBankError
 from .encryption import TokenEncryption
 from .deduplication import TransactionDeduplicator, id_survives_a_refetch
 from ..planned_transactions import find_and_match_for_bank_transaction
@@ -40,6 +43,15 @@ SYNC_OVERLAP_DAYS = 30
 # Enable Banking only serves the last 90 days once the post-authorization
 # window has closed
 MAX_HISTORY_DAYS = 89
+
+# Pauses between retries within one sync run. The bank's 500s usually clear
+# within seconds.
+RETRY_BACKOFF_SECONDS = [2, 8]
+
+# A session that is still valid can fail for days without anyone being able to
+# do anything about it. Only after this many consecutive failed runs do we call
+# it broken, put the connection in ERROR and tell the user.
+MAX_CONSECUTIVE_FAILURES = 5
 
 
 class BankIntegrationService:
@@ -483,6 +495,7 @@ class BankIntegrationService:
             >>> print(f"Imported {result['imported']} new transactions")
         """
         started_at = datetime.utcnow()
+        previous_status = bank_connection.status
 
         # Create sync log
         sync_log = BankSyncLog(
@@ -622,25 +635,36 @@ class BankIntegrationService:
             # Fetch transactions from provider
             # For initial sync: use strategy=longest to get maximum history
             # For ongoing sync: use default strategy with date range
-            try:
-                logger.info(f"Fetching transactions (initial_sync={is_initial_sync})")
+            # The bank's own 500s are common and short-lived. Retrying in the same
+            # run costs seconds; not retrying used to cost the connection a night.
+            raw_transactions = None
+            for attempt, pause in enumerate(RETRY_BACKOFF_SECONDS + [None], start=1):
+                try:
+                    logger.info(f"Fetching transactions (initial_sync={is_initial_sync}, attempt {attempt})")
 
-                raw_transactions = await provider.fetch_transactions(
-                    access_token=access_token,
-                    account_id=bank_connection.external_account_id,
-                    from_date=from_date,
-                    to_date=to_date,
-                    is_initial_sync=is_initial_sync,
-                    psu_ip_address=psu_ip_address,
-                    psu_user_agent=psu_user_agent
-                )
+                    raw_transactions = await provider.fetch_transactions(
+                        access_token=access_token,
+                        account_id=bank_connection.external_account_id,
+                        from_date=from_date,
+                        to_date=to_date,
+                        is_initial_sync=is_initial_sync,
+                        psu_ip_address=psu_ip_address,
+                        psu_user_agent=psu_user_agent
+                    )
 
-                logger.info(f"Successfully fetched {len(raw_transactions)} transactions")
+                    logger.info(f"Successfully fetched {len(raw_transactions)} transactions")
+                    break
 
-            except Exception as e:
-                error_str = str(e)
-                logger.error(f"Failed to fetch transactions: {error_str}")
-                raise
+                except (TransientBankError, httpx.TransportError, httpx.TimeoutException) as e:
+                    if pause is None:
+                        logger.error(f"Failed to fetch transactions after {attempt} attempts: {e}")
+                        raise
+                    logger.warning(f"Attempt {attempt} failed ({e}); retrying in {pause}s")
+                    await asyncio.sleep(pause)
+
+                except Exception as e:
+                    logger.error(f"Failed to fetch transactions: {e}")
+                    raise
 
             # Fix amount signs for LIABILITY accounts (credit cards)
             # Enable Banking returns DBIT/CRDT from the bank's perspective
@@ -824,10 +848,29 @@ class BankIntegrationService:
             sync_log.duration_seconds = int((datetime.utcnow() - started_at).total_seconds())
 
             bank_connection.last_sync_at = datetime.utcnow()
-            bank_connection.status = BankConnectionStatus.ERROR
             bank_connection.connection_error = str(e)
 
-            self.db.commit()
+            # A failed run is not by itself a broken connection. Only an expired
+            # session actually needs the user, and a bank that keeps failing for
+            # MAX_CONSECUTIVE_FAILURES runs needs looking at. Everything else stays
+            # ACTIVE so the nightly job picks it up again tomorrow -- an ASPSP_ERROR
+            # once took a connection out of the rotation for nine days.
+            needs_reauth = isinstance(e, SessionExpiredError)
+            failures = self._consecutive_failures(bank_connection.id)
+
+            if needs_reauth or failures >= MAX_CONSECUTIVE_FAILURES:
+                bank_connection.status = BankConnectionStatus.ERROR
+                self.db.commit()
+                if previous_status != BankConnectionStatus.ERROR:
+                    self._notify_connection_broken(bank_connection, str(e), needs_reauth, failures)
+            else:
+                bank_connection.status = BankConnectionStatus.ACTIVE
+                self.db.commit()
+                logger_ = logging.getLogger(__name__)
+                logger_.warning(
+                    f"Connection {bank_connection.id}: sync failed ({failures} in a row), "
+                    f"staying ACTIVE and retrying on the next run"
+                )
 
             return {
                 'status': 'failed',
@@ -836,6 +879,56 @@ class BankIntegrationService:
                 'duplicates': 0,
                 'errors': [str(e)]
             }
+
+    def _consecutive_failures(self, bank_connection_id: int) -> int:
+        """
+        How many sync runs have failed in a row, newest first, counting the one
+        just logged. Derived from bank_sync_logs so no state can drift out of
+        step with the log the user sees.
+        """
+        recent = (
+            self.db.query(BankSyncLog.sync_status)
+            .filter(BankSyncLog.bank_connection_id == bank_connection_id)
+            .order_by(BankSyncLog.started_at.desc(), BankSyncLog.id.desc())
+            .limit(MAX_CONSECUTIVE_FAILURES)
+            .all()
+        )
+        count = 0
+        for (status,) in recent:
+            if status != BankSyncStatus.FAILED:
+                break
+            count += 1
+        return count
+
+    def _notify_connection_broken(
+        self,
+        bank_connection: BankConnection,
+        error: str,
+        needs_reauth: bool,
+        failures: int
+    ) -> None:
+        """Email the connection's owner once, on the way into ERROR."""
+        logger_ = logging.getLogger(__name__)
+        try:
+            from backend.email import send_bank_connection_error_email
+
+            user = self.db.query(User).get(bank_connection.created_by)
+            if not user or not user.email:
+                logger_.warning(f"Connection {bank_connection.id}: no owner to notify")
+                return
+
+            bank_account = self.db.query(BankAccount).get(bank_connection.bank_account_id)
+            send_bank_connection_error_email(
+                to_email=user.email,
+                user_name=user.full_name or user.email,
+                account_name=bank_account.name if bank_account else f"tilkobling {bank_connection.id}",
+                needs_reauth=needs_reauth,
+                failures=failures,
+                error=error,
+            )
+        except Exception as mail_error:
+            # Never let the notification take down the sync result
+            logger_.error(f"Could not send connection error email: {mail_error}")
 
     def _import_as_draft_transaction(
         self,

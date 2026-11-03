@@ -23,6 +23,15 @@ class SessionExpiredError(Exception):
     pass
 
 
+class TransientBankError(Exception):
+    """
+    Raised when the bank (or Enable Banking) fails in a way that is not the user's
+    problem to fix: ASPSP_ERROR, 5xx, timeouts. The session is still valid, so the
+    connection must stay ACTIVE and the sync should simply be retried.
+    """
+    pass
+
+
 class EnableBankingProvider(BaseBankProvider):
     """
     Enable Banking API integration.
@@ -629,10 +638,10 @@ class EnableBankingProvider(BaseBankProvider):
                     except:
                         pass
 
-                    if error_code == 'EXPIRED_SESSION':
-                        raise Exception(f"Bank session has expired. Please re-authorize the connection. (Response: {error_body})")
-                    elif error_code == 'ASPSP_ERROR':
-                        raise Exception(f"Bank returned an error (ASPSP_ERROR). This may require re-authorization. (Response: {error_body})")
+                    if error_code == 'EXPIRED_SESSION' or response.status_code == 401:
+                        raise SessionExpiredError(f"Bank session has expired. Please re-authorize the connection. (Response: {error_body})")
+                    elif error_code == 'ASPSP_ERROR' or response.status_code >= 500:
+                        raise TransientBankError(f"The bank returned a temporary error ({error_code or response.status_code}). (Response: {error_body})")
                     else:
                         raise Exception(f"Enable Banking error {response.status_code}: {error_body}")
                 data = response.json()
