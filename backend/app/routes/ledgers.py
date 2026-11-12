@@ -50,7 +50,7 @@ async def list_user_ledgers(
     return ledgers_with_roles
 
 
-@router.post("/", response_model=LedgerSchema)
+@router.post("/", response_model=LedgerWithRole)
 async def create_ledger(
     ledger: LedgerCreate,
     current_user: User = Depends(get_current_active_user),
@@ -100,7 +100,17 @@ async def create_ledger(
     db.commit()
     db.refresh(db_ledger)
 
-    return db_ledger
+    # Same shape as the listing: clients read a ledger the same way wherever
+    # it comes from, and the Android app requires the role to be there
+    return {
+        "id": db_ledger.id,
+        "name": db_ledger.name,
+        "created_by": db_ledger.created_by,
+        "chart_template_id": db_ledger.chart_template_id,
+        "created_at": db_ledger.created_at,
+        "is_active": db_ledger.is_active,
+        "user_role": LedgerRole.OWNER.value,
+    }
 
 
 def _copy_accounts_from_template(db: Session, ledger_id: int, template_id: int):
