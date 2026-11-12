@@ -1,0 +1,39 @@
+name: Android to production
+
+# Started by hand once a build on the internal track has been tried. The
+# "What's new" text comes from .github/whatsnew/<language>.txt: update it first.
+#   gh workflow run android-promote.yml
+#   gh workflow run android-promote.yml -f version_code=57 -f dry_run=true
+on:
+  workflow_dispatch:
+    inputs:
+      version_code:
+        description: 'Version code to promote (empty = newest on internal)'
+        required: false
+        default: ''
+      dry_run:
+        description: 'Validate only, publish nothing'
+        type: boolean
+        default: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Google auth
+        run: pip install google-auth==2.38.0 requests==2.32.3
+
+      - name: Promote internal to production
+        env:
+          SERVICE_ACCOUNT_JSON: ${{ secrets.SERVICE_ACCOUNT_JSON }}
+          PACKAGE_NAME: eu.privatregnskap.app
+          VERSION_CODE: ${{ inputs.version_code }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          WHATS_NEW_DIR: .github/whatsnew
+        run: python .github/scripts/play_promote.py

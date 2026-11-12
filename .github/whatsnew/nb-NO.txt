@@ -1,0 +1,5 @@
+Nytt i denne versjonen:
+- Banksynk fra telefonen: hent transaksjoner fra SpareBank 1 med din egen nøkkel fra banken. Krever ikke Premium. Finnes under Profil → Bank.
+- Søk i transaksjoner, og trykk på en transaksjon for å se bilaget.
+- Rediger det appen leste av en kvittering før du bokfører.
+- Kortfakturaer blir ikke lenger regnet som nye kostnader.
