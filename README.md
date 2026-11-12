@@ -10,6 +10,9 @@ En komplett web-applikasjon for personlig regnskap med dobbelt bokføring, baser
 - **Delt regnskap**: Inviter andre brukere til dine regnskap med roller (Owner, Member, Viewer)
 - **Transaksjoner**: Manuell registrering og fleksibel CSV-import med kolonnemapping
 - **Bankkontoer**: Støtte for brukskontoer, sparekontoer og kredittkort
+- **Banksynk via Enable Banking** (Premium): Tjeneren henter transaksjoner fra banken via PSD2, og de havner som kladder i posteringskøen
+- **Banksynk fra telefonen** (alle planer): Android-appen henter fra SpareBank 1 med brukerens egen API-nøkkel og laster opp til regnskapet
+- **Android-app**: Posteringskø, vedlegg, budsjett, søk og banksynk fra egen enhet
 - **Budsjett**: Lag og følg budsjetter
 - **Rapporter**: Balanse og resultatregnskap
 - **Kategorisering**: Fleksibel tagging av transaksjoner
@@ -162,6 +165,39 @@ Se [KREDITTKORT_GUIDE.md](KREDITTKORT_GUIDE.md) for detaljert guide om hvordan d
 - Opprett bankkonto av type "Kredittkort" koblet til konto 2501
 - Importer transaksjoner fra kredittkort-CSV (systemet håndterer automatisk korrekt debet/kredit)
 - Registrer fakturabetaling som manuell transaksjon (debet kredittkort, kredit bankkonto)
+
+### Banksynk fra telefonen (SpareBank 1)
+
+SpareBank 1 gir hver kunde en personlig API-klient, men vilkårene forbyr å gi
+nøkkelen videre. Derfor henter Android-appen selv, og tjeneren får bare
+transaksjonene. Krever ikke Premium.
+
+Støttede banker: SpareBank 1 Østlandet, SpareBank 1 Sør-Norge, SpareBank 1 SMN
+og SpareBank 1 Østfold Akershus.
+
+1. Logg inn med BankID på [developer.sparebank1.no](https://developer.sparebank1.no),
+   og opprett en ny klient under «Start using SpareBank 1 Customer Client».
+2. Fyll inn et navn og en beskrivelse, velg banken din, og sett Redirect Uri til
+   `http://localhost:8765/callback`, nøyaktig slik. Les og godta avtalen, og
+   trykk «Create client».
+3. I appen: Profil → Bank → «Banksynk fra denne enheten». Lim inn Client ID
+   og Client Secret.
+4. Logg inn i banken med BankID, og koble hver bankkonto til en bankkonto i
+   regnskapet. Første gang kan du hente inntil fem år tilbake.
+
+Deretter synkroniserer appen av seg selv to ganger i døgnet, og nye
+transaksjoner havner i posteringskøen. BankID trengs på nytt etter ett år, eller
+etter 60 dager uten synk.
+
+- Nøklene lagres kryptert på telefonen, sendes aldri til tjeneren og er holdt
+  utenfor sikkerhetskopi.
+- Bare bokførte transaksjoner lastes opp. Reserverte beløp kommer med når banken
+  har bokført dem.
+- Kredittkort er ikke med ennå.
+- Har kontoen vært synket via Enable Banking før, velg en startdato etter siste
+  synk der. Beskrivelsene er ulike i de to kildene, så overlapp gir doble kladder.
+- Har ikke telefonen lastet opp på 14 dager, merkes koblingen med feil og du får
+  en e-post.
 
 ### Registrere transaksjoner
 
