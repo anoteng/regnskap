@@ -1,5 +1,5 @@
-import api from './api.js?v=22';
-import { showModal, closeModal, showError, showSuccess, formatDate } from './utils.js?v=22';
+import api from './api.js?v=23';
+import { showModal, closeModal, showError, showSuccess, formatDate } from './utils.js?v=23';
 
 class BankConnectionsManager {
     constructor() {
@@ -11,17 +11,20 @@ class BankConnectionsManager {
 
     async init() {
         try {
-            // Check subscription - bank integration requires Premium
+            // Fetching on the server through Enable Banking requires Premium.
+            // Connections filled from the user's own phone do not, so the list
+            // is shown to everyone.
             const sub = await api.request('/auth/me/subscription');
-            if (!sub || sub.tier !== 'PREMIUM') {
+            const isPremium = sub?.tier === 'PREMIUM';
+
+            await this.loadBankAccounts();
+            if (isPremium) await this.loadProviders();
+            await this.loadConnections();
+
+            if (!isPremium) {
                 this.showUpgradeInfo();
                 return;
             }
-
-            // Load data
-            await this.loadBankAccounts();
-            await this.loadProviders();
-            await this.loadConnections();
 
             if (!this.initialized) {
                 this.setupEventListeners();
@@ -37,44 +40,26 @@ class BankConnectionsManager {
     }
 
     showUpgradeInfo() {
-        // Hide the connect button and subtitle
+        // Only what belongs to Enable Banking is hidden; the list and the
+        // guide to syncing from the phone stay
         const connectBtn = document.getElementById('connect-bank-btn');
         if (connectBtn) connectBtn.style.display = 'none';
-        const subtitle = document.querySelector('#bank-connections-view .subtitle');
-        if (subtitle) subtitle.style.display = 'none';
         const syncProgress = document.getElementById('sync-progress');
         if (syncProgress) syncProgress.style.display = 'none';
         const helpBox = document.getElementById('connection-help');
         if (helpBox) helpBox.style.display = 'none';
 
-        const container = document.getElementById('connections-list');
+        const container = document.getElementById('premium-bank-info');
+        if (!container) return;
         container.innerHTML = `
-            <div class="card" style="max-width: 600px; margin: 2rem auto; text-align: center; padding: 2rem;">
-                <h2 style="margin-bottom: 1rem;">Automatisk banksynkronisering</h2>
-                <p style="margin-bottom: 1.5rem; color: #666;">
-                    Med Premium-abonnementet kan du koble bankkontoen din direkte til regnskapet
-                    og f\u00e5 transaksjoner importert automatisk.
+            <div class="card" style="margin-top: 2rem; padding: 1.5rem;">
+                <h3 style="margin-top: 0;">Automatisk banksynk for alle banker (Premium)</h3>
+                <p style="color: #666;">
+                    Med Premium henter tjeneren transaksjoner fra banken din via Enable Banking,
+                    uten at du trenger egen nøkkel eller telefonen.
                 </p>
-
-                <div style="background: #f0f9ff; border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem; text-align: left;">
-                    <h3 style="margin-bottom: 0.75rem;">Premium inkluderer:</h3>
-                    <ul style="list-style: none; padding: 0; margin: 0;">
-                        <li style="padding: 0.4rem 0;">&#10003; Alt i Basic (vedlegg, CSV-import)</li>
-                        <li style="padding: 0.4rem 0;">&#10003; Automatisk banksynkronisering</li>
-                        <li style="padding: 0.4rem 0;">&#10003; St\u00f8tte for flere bankkontoer</li>
-                        <li style="padding: 0.4rem 0;">&#10003; Duplikatdeteksjon ved import</li>
-                    </ul>
-                </div>
-
-                <div style="background: #fffbeb; border: 1px solid #f59e0b; border-radius: 8px; padding: 1rem; margin-bottom: 1.5rem;">
-                    <p style="margin: 0; color: #92400e; font-size: 0.9rem;">
-                        Bankintegrasjon er under utvikling og er forel\u00f8pig ikke tilgjengelig for nye abonnenter.
-                        Vi jobber med \u00e5 f\u00e5 dette klart \u2013 f\u00f8lg med!
-                    </p>
-                </div>
-
-                <p style="color: #666; font-size: 0.875rem;">
-                    Kontakt administrator for mer informasjon.
+                <p style="margin-bottom: 0; color: #92400e; font-size: 0.9rem;">
+                    Premium er ikke åpent for nye abonnenter ennå.
                 </p>
             </div>
         `;
@@ -122,7 +107,7 @@ class BankConnectionsManager {
             container.innerHTML = `
                 <div style="text-align: center; padding: 3rem; color: #666;">
                     <h3>Ingen bankkoblinger</h3>
-                    <p>Koble til banken din for automatisk synkronisering av transaksjoner</p>
+                    <p>Har du SpareBank 1, kan du hente transaksjoner med Android-appen. Se veiledningen under.</p>
                 </div>
             `;
             return;
@@ -161,7 +146,9 @@ class BankConnectionsManager {
             { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
         ));
         const title = isPush
-            ? `Egen enhet${connection.external_bank_id ? ` (${safe(connection.external_bank_id)})` : ''}`
+            ? (connection.external_bank_id === 'sparebank1'
+                ? 'SpareBank 1, fra telefonen'
+                : `Egen enhet${connection.external_bank_id ? ` (${safe(connection.external_bank_id)})` : ''}`)
             : (provider?.display_name || 'Ukjent bank');
         const accountLine = isPush
             ? `<p><strong>Kontonummer:</strong> ${safe(connection.external_account_id)}</p>`

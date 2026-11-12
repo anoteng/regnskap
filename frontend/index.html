@@ -62,7 +62,7 @@
                     <div class="feature-card">
                         <div class="feature-icon">🏦</div>
                         <h3>Banksynkronisering</h3>
-                        <p>Importer transaksjoner automatisk fra banken din.</p>
+                        <p>Hent transaksjoner fra SpareBank 1 med Android-appen, gratis. Andre banker med Premium.</p>
                     </div>
                     <div class="feature-card">
                         <div class="feature-icon">👨‍👩‍👧‍👦</div>
@@ -85,6 +85,7 @@
                             <li>Budsjett og rapporter</li>
                             <li>Delt tilgang</li>
                             <li>CSV-import</li>
+                            <li>Banksynk fra SpareBank 1 via Android-appen</li>
                         </ul>
                     </div>
                     <div class="pricing-card pricing-card-highlight">
@@ -101,7 +102,7 @@
                         <div class="pricing-yearly">Kommer snart</div>
                         <ul class="pricing-features">
                             <li>Alt i Basic</li>
-                            <li>Automatisk banksynk</li>
+                            <li>Automatisk banksynk fra alle banker</li>
                             <li>Duplikatdeteksjon</li>
                         </ul>
                     </div>
@@ -327,6 +328,59 @@
                             <li>Transaksjoner synkroniseres automatisk</li>
                             <li>Nye transaksjoner havner i posteringskøen for gjennomgang</li>
                             <li>Duplikater (f.eks. fra CSV-import) detekteres automatisk</li>
+                        </ul>
+                    </div>
+
+                    <div id="premium-bank-info"></div>
+
+                    <div id="phone-sync-help" class="card" style="margin-top: 2rem; padding: 1.5rem;">
+                        <h2 style="margin-top: 0;">Banksynk fra telefonen (SpareBank 1)</h2>
+                        <p>
+                            Android-appen kan hente transaksjoner fra SpareBank 1 med din egen nøkkel fra banken,
+                            og legge dem i posteringskøen her. Det krever ikke Premium.
+                        </p>
+                        <p>
+                            Banken gir nøkkelen til deg personlig og tillater ikke at den gis videre. Derfor henter
+                            telefonen selv: nøkkelen lagres kryptert der og sendes aldri til Privatregnskap.
+                        </p>
+                        <p><strong>Støttede banker:</strong> SpareBank 1 Østlandet, SpareBank 1 Sør-Norge,
+                            SpareBank 1 SMN og SpareBank 1 Østfold Akershus.</p>
+
+                        <h3>1. Opprett en klient hos banken</h3>
+                        <p>
+                            Gå til <a href="https://developer.sparebank1.no" target="_blank" rel="noopener">developer.sparebank1.no</a>
+                            og logg inn med BankID. Under «Start using SpareBank 1 Customer Client» fyller du ut skjemaet
+                            «Create new client»:
+                        </p>
+                        <ul>
+                            <li><strong>Client Name</strong> og <strong>Description</strong>: hva du vil, for eksempel «privatregnskap.eu».</li>
+                            <li><strong>Bank</strong>: banken din.</li>
+                            <li><strong>Redirect Uri</strong>: <code>http://localhost:8765/callback</code>, nøyaktig slik.</li>
+                        </ul>
+                        <p>Les avtalen som dukker opp, og trykk «Create client». Du får en Client ID og en Client Secret.</p>
+                        <div style="display: flex; flex-wrap: wrap; gap: 1rem; margin: 1rem 0;">
+                            <img src="/static/img/help/sb1-create-client.jpg" alt="Skjemaet Create new client hos SpareBank 1, med Redirect Uri utfylt"
+                                 loading="lazy" style="width: 100%; max-width: 280px; height: auto; border-radius: 8px; border: 1px solid #ddd;">
+                            <img src="/static/img/help/sb1-choose-bank.jpg" alt="Valg av bank: SpareBank 1 Østlandet, Sør-Norge, SMN og Østfold Akershus"
+                                 loading="lazy" style="width: 100%; max-width: 280px; height: auto; border-radius: 8px; border: 1px solid #ddd;">
+                        </div>
+
+                        <h3>2. Sett opp appen</h3>
+                        <ol>
+                            <li>Installer Privatregnskap fra Google Play og logg inn.</li>
+                            <li>Gå til Profil → Bank → «Banksynk fra denne enheten».</li>
+                            <li>Lim inn Client ID og Client Secret, og logg inn i banken med BankID.</li>
+                            <li>Koble hver konto i banken til en bankkonto i regnskapet, og velg hvor langt tilbake du vil hente (inntil fem år).</li>
+                        </ol>
+
+                        <h3>Deretter</h3>
+                        <ul style="margin-bottom: 0;">
+                            <li>Appen synkroniserer av seg selv to ganger i døgnet, og nye transaksjoner havner i posteringskøen.</li>
+                            <li>BankID trengs på nytt etter ett år, eller hvis telefonen ikke har synkronisert på 60 dager.</li>
+                            <li>Har telefonen ikke lastet opp på 14 dager, får du en e-post.</li>
+                            <li>Bare bokførte transaksjoner hentes. Reserverte beløp kommer når banken har bokført dem.</li>
+                            <li>Kredittkort er ikke med ennå.</li>
+                            <li>Har kontoen vært synkronisert på en annen måte før, velg en periode som begynner etter den siste synkroniseringen. Ellers kommer de samme transaksjonene inn en gang til.</li>
                         </ul>
                     </div>
                 </div>
@@ -572,6 +626,6 @@
     </div>
 
     <script src="/static/js/passkey.js?v=7"></script>
-    <script type="module" src="/static/js/main.js?v=22"></script>
+    <script type="module" src="/static/js/main.js?v=23"></script>
 </body>
 </html>
