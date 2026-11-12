@@ -467,3 +467,37 @@ data class PlannedTransactionResponse(
 data class PlannedTransactionPatch(
     @Json(name = "suggested_account_id") val suggestedAccountId: Int?
 )
+
+// ─── Bank sync from this device ──────────────────────────────────────────────
+
+@JsonClass(generateAdapter = true)
+data class PushConnectionCreateRequest(
+    @Json(name = "bank_account_id") val bankAccountId: Int,
+    @Json(name = "external_account_id") val externalAccountId: String,
+    @Json(name = "external_account_name") val externalAccountName: String? = null,
+    @Json(name = "external_bank_id") val externalBankId: String? = null,
+    @Json(name = "initial_sync_from_date") val initialSyncFromDate: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class PushConnectionResponse(
+    val id: Int,
+    @Json(name = "bank_account_id") val bankAccountId: Int,
+    @Json(name = "bank_account_name") val bankAccountName: String? = null,
+    @Json(name = "external_bank_id") val externalBankId: String? = null,
+    @Json(name = "external_account_id") val externalAccountId: String,
+    @Json(name = "external_account_name") val externalAccountName: String? = null,
+    val status: String,
+    @Json(name = "connection_error") val connectionError: String? = null,
+    @Json(name = "initial_sync_from_date") val initialSyncFromDate: String? = null,
+    @Json(name = "last_successful_sync_at") val lastSuccessfulSyncAt: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class PushSyncResponse(
+    val status: String,
+    @Json(name = "transactions_fetched") val transactionsFetched: Int = 0,
+    val imported: Int = 0,
+    val duplicates: Int = 0,
+    val message: String? = null
+)

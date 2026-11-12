@@ -19,6 +19,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.biometric.BiometricPrompt
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -78,6 +79,7 @@ import kotlinx.coroutines.launch
 fun ProfileScreen(
     onLogout: () -> Unit,
     onCreateLedger: () -> Unit = {},
+    onOpenBankSync: () -> Unit = {},
     authViewModel: AuthViewModel = hiltViewModel(),
     profileViewModel: ProfileViewModel = hiltViewModel()
 ) {
@@ -162,6 +164,19 @@ fun ProfileScreen(
                             Icon(Icons.Default.SwapHoriz, contentDescription = null)
                         },
                         modifier = Modifier.clickable { showLedgerPicker = true }
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("Bank", style = MaterialTheme.typography.titleMedium)
+                Spacer(modifier = Modifier.height(4.dp))
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    ListItem(
+                        headlineContent = { Text("Banksynk fra denne enheten") },
+                        supportingContent = { Text("Hent fra SpareBank 1 med din egen nøkkel") },
+                        leadingContent = {
+                            Icon(Icons.Default.AccountBalance, contentDescription = null)
+                        },
+                        modifier = Modifier.clickable(onClick = onOpenBankSync)
                     )
                 }
                 Spacer(modifier = Modifier.height(8.dp))

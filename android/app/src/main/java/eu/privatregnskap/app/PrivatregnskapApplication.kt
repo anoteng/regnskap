@@ -32,10 +32,21 @@ class PrivatregnskapApplication : Application(), Configuration.Provider {
         ).apply {
             description = "Varsler om nye transaksjoner i posteringskøen"
         }
-        getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+        val bankSyncChannel = NotificationChannel(
+            BANK_SYNC_CHANNEL_ID,
+            "Banksynk",
+            NotificationManager.IMPORTANCE_DEFAULT
+        ).apply {
+            description = "Varsler når synkroniseringen fra banken trenger en ny innlogging"
+        }
+        getSystemService(NotificationManager::class.java).apply {
+            createNotificationChannel(channel)
+            createNotificationChannel(bankSyncChannel)
+        }
     }
 
     companion object {
         const val POSTING_QUEUE_CHANNEL_ID = "posting_queue"
+        const val BANK_SYNC_CHANNEL_ID = "bank_sync"
     }
 }

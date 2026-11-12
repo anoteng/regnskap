@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 11 and older. The bank keys are personal and stay on the device
+     they were entered on; a copy elsewhere could not be read anyway, since
+     the key that opens the file never leaves this device's keystore. -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="sb1_sync_secure_prefs.xml" />
+</full-backup-content>

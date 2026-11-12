@@ -24,6 +24,9 @@ import eu.privatregnskap.app.data.network.dto.PasswordResetRequest
 import eu.privatregnskap.app.data.network.dto.PlannedTransactionPatch
 import eu.privatregnskap.app.data.network.dto.PlannedTransactionResponse
 import eu.privatregnskap.app.data.network.dto.PostingQueueResponse
+import eu.privatregnskap.app.data.network.dto.PushConnectionCreateRequest
+import eu.privatregnskap.app.data.network.dto.PushConnectionResponse
+import eu.privatregnskap.app.data.network.dto.PushSyncResponse
 import eu.privatregnskap.app.data.network.dto.ReceiptUpdateRequest
 import eu.privatregnskap.app.data.network.dto.SettlementCalculationResponse
 import eu.privatregnskap.app.data.network.dto.SettlementSettingsRequest
@@ -345,4 +348,32 @@ interface ApiService {
     suspend fun getChainSuggestions(
         @Header("X-Ledger-ID") ledgerId: Int? = null
     ): ChainSuggestionsResponse
+
+    // ─── Bank sync from this device ───────────────────────────────────────────
+
+    @GET("bank-connections/push")
+    suspend fun getPushConnections(
+        @Header("X-Ledger-ID") ledgerId: Int? = null
+    ): List<PushConnectionResponse>
+
+    @POST("bank-connections/push")
+    suspend fun createPushConnection(
+        @Header("X-Ledger-ID") ledgerId: Int? = null,
+        @Body request: PushConnectionCreateRequest
+    ): PushConnectionResponse
+
+    // The body is built by hand: each transaction carries the bank's own
+    // record along, and that has no fixed shape to generate an adapter for
+    @POST("bank-connections/{id}/transactions")
+    suspend fun uploadBankTransactions(
+        @Header("X-Ledger-ID") ledgerId: Int? = null,
+        @Path("id") id: Int,
+        @Body body: RequestBody
+    ): PushSyncResponse
+
+    @DELETE("bank-connections/{id}")
+    suspend fun disconnectBankConnection(
+        @Header("X-Ledger-ID") ledgerId: Int? = null,
+        @Path("id") id: Int
+    ): ResponseBody
 }

@@ -28,6 +28,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import eu.privatregnskap.app.ui.attachments.AttachmentsScreen
+import eu.privatregnskap.app.ui.banksync.BankSyncScreen
 import eu.privatregnskap.app.ui.budget.BudgetScreen
 import eu.privatregnskap.app.ui.dashboard.DashboardScreen
 import eu.privatregnskap.app.ui.postingqueue.PostingQueueScreen
@@ -55,6 +56,7 @@ private const val NEW_LEDGER_ROUTE = "ledger/new"
 private const val CSV_IMPORT_ROUTE = "transactions/import-csv"
 private const val TRANSACTION_SEARCH_ROUTE = "transactions/search"
 private const val TRANSACTION_DETAIL_ROUTE = "transactions/detail"
+private const val BANK_SYNC_ROUTE = "bank-sync"
 
 @Composable
 fun MainScreen(
@@ -186,8 +188,12 @@ fun MainScreen(
             composable(Tab.Profile.route) {
                 ProfileScreen(
                     onLogout = onLogout,
-                    onCreateLedger = { navController.navigate(NEW_LEDGER_ROUTE) { launchSingleTop = true } }
+                    onCreateLedger = { navController.navigate(NEW_LEDGER_ROUTE) { launchSingleTop = true } },
+                    onOpenBankSync = { navController.navigate(BANK_SYNC_ROUTE) { launchSingleTop = true } }
                 )
+            }
+            composable(BANK_SYNC_ROUTE) {
+                BankSyncScreen(innerPadding = padding, onBack = { navController.popBackStack() })
             }
             composable(NEW_LEDGER_ROUTE) {
                 CreateLedgerScreen(
