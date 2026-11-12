@@ -733,11 +733,54 @@ class BankConnection(BankConnectionBase):
     last_sync_at: Optional[datetime] = None
     last_successful_sync_at: Optional[datetime] = None
     auto_sync_enabled: bool
+    is_push: bool = False
     created_at: datetime
     created_by: int
 
     class Config:
         from_attributes = True
+
+
+class PushConnectionCreate(BaseModel):
+    bank_account_id: int
+    external_account_id: str = Field(min_length=1, max_length=255)  # Account number at the bank
+    external_account_name: Optional[str] = Field(None, max_length=255)
+    external_bank_id: Optional[str] = Field(None, max_length=255)
+    initial_sync_from_date: Optional[date] = None
+
+
+class PushConnection(BaseModel):
+    id: int
+    bank_account_id: int
+    bank_account_name: Optional[str] = None
+    external_bank_id: Optional[str] = None
+    external_account_id: str
+    external_account_name: Optional[str] = None
+    status: str
+    connection_error: Optional[str] = None
+    initial_sync_from_date: Optional[date] = None
+    last_successful_sync_at: Optional[datetime] = None
+
+
+class PushedTransaction(BaseModel):
+    """One booked transaction, as the user's device read it from the bank.
+
+    The amount keeps the bank's sign: positive into the account, negative out.
+    """
+    external_id: str = Field(min_length=1, max_length=255)
+    transaction_date: date
+    booking_date: Optional[date] = None
+    value_date: Optional[date] = None
+    amount: Decimal = Field(max_digits=15, decimal_places=2)
+    currency: str = Field("NOK", min_length=3, max_length=3)
+    description: str = Field("", max_length=2000)
+    reference: Optional[str] = Field(None, max_length=255)
+    merchant_name: Optional[str] = Field(None, max_length=255)
+    raw_data: Optional[Dict] = None
+
+
+class PushUpload(BaseModel):
+    transactions: List[PushedTransaction] = Field(max_length=2000)
 
 
 class BankTransactionBase(BaseModel):

@@ -153,3 +153,71 @@ Privatregnskap.eu
         },
     )
     response.raise_for_status()
+
+
+def send_push_connection_stale_email(
+    to_email: str,
+    user_name: str,
+    account_name: str,
+    days: int,
+):
+    """Tell the owner that their own device has stopped uploading transactions."""
+
+    link = f"https://{settings.rp_id}/?view=bank-connections"
+    heading = "Ingen nye transaksjoner fra enheten din"
+
+    text = f"""
+Hei {user_name},
+
+{account_name} har ikke fått transaksjoner fra enheten din på {days} dager.
+
+Denne kontoen hentes ikke av Privatregnskap.eu. Det er din egen enhet som henter
+fra banken og laster opp, så når den stopper, stopper alt. Åpne appen eller
+klienten og kjør en synkronisering. Har innloggingen mot banken utløpt, må du
+logge inn med BankID på nytt der.
+
+Åpne bankkoblinger: {link}
+
+Hilsen
+Privatregnskap.eu
+"""
+
+    html = f"""
+<html>
+  <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+    <h2>{heading}</h2>
+    <p>Hei {user_name},</p>
+    <p><strong>{account_name}</strong> har ikke fått transaksjoner fra enheten din
+       på {days} dager.</p>
+    <p>Denne kontoen hentes ikke av Privatregnskap.eu. Det er din egen enhet som
+       henter fra banken og laster opp, så når den stopper, stopper alt. Åpne appen
+       eller klienten og kjør en synkronisering. Har innloggingen mot banken utløpt,
+       må du logge inn med BankID på nytt der.</p>
+    <p style="margin: 30px 0;">
+      <a href="{link}"
+         style="background-color: #4CAF50; color: white; padding: 12px 24px;
+                text-decoration: none; border-radius: 4px; display: inline-block;">
+        Åpne bankkoblinger
+      </a>
+    </p>
+    <hr style="margin-top: 30px; border: none; border-top: 1px solid #ddd;">
+    <p style="color: #999; font-size: 0.8em;">Hilsen Privatregnskap.eu</p>
+  </body>
+</html>
+"""
+
+    response = requests.post(
+        "https://api.brevo.com/v3/smtp/email",
+        headers={
+            "api-key": settings.brevo_api_key,
+            "Content-Type": "application/json",
+        },
+        json={
+            "sender": {"name": settings.email_from_name, "email": settings.email_from},
+            "to": [{"email": to_email}],
+            "subject": f"{heading} - Privatregnskap.eu",
+            "htmlContent": html,
+            "textContent": text,
+        },
+    )
+    response.raise_for_status()

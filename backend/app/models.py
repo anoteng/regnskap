@@ -49,6 +49,7 @@ class BankSyncType(str, enum.Enum):
     MANUAL = "MANUAL"
     AUTO = "AUTO"
     OAUTH_CONNECT = "OAUTH_CONNECT"
+    PUSH = "PUSH"
 
 
 class BankSyncStatus(str, enum.Enum):
@@ -547,6 +548,12 @@ class UserMonthlyUsage(Base):
 
 # Bank Integration Models
 
+# The provider row that stands for no provider at all: the user's own device
+# fetches from the bank and uploads the result. The server never holds a key
+# to the bank for such a connection, and never calls the bank on its behalf.
+PUSH_PROVIDER_NAME = "client_push"
+
+
 class BankProvider(Base):
     __tablename__ = "bank_providers"
 
@@ -608,6 +615,11 @@ class BankConnection(Base):
     creator = relationship("User")
     transactions = relationship("BankTransaction", back_populates="connection")
     sync_logs = relationship("BankSyncLog", back_populates="connection")
+
+    @property
+    def is_push(self) -> bool:
+        """Filled by uploads from the user's own device, not fetched by us."""
+        return bool(self.provider and self.provider.name == PUSH_PROVIDER_NAME)
 
 
 class BankTransaction(Base):

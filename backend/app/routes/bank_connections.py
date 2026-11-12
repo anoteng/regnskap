@@ -5,8 +5,11 @@ User-facing endpoints for:
 - Connecting bank accounts
 - OAuth callback handling
 - Syncing transactions
+- Receiving transactions the user's own device has fetched
 - Disconnecting banks
 """
+
+import json
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from fastapi.responses import RedirectResponse
@@ -22,6 +25,44 @@ from backend.app.subscriptions import require_bank_integration
 
 
 router = APIRouter(prefix="/bank-connections", tags=["bank-connections"])
+
+# bank_transactions.raw_data is TEXT. What does not fit is dropped rather than
+# cut, since half a JSON document is worth less than none.
+MAX_RAW_DATA_CHARS = 60000
+
+
+def _sync_response(result: Dict) -> schemas.SyncResponse:
+    """Turn the service's result into the response a sync or an upload gives."""
+    message = result.get('message')
+    if not message and result['errors']:
+        if isinstance(result['errors'], list):
+            # Include the first error message for context
+            message = result['errors'][0] if len(result['errors']) == 1 else f"{len(result['errors'])} errors occurred: {result['errors'][0]}"
+        else:
+            message = str(result['errors'])
+
+    return schemas.SyncResponse(
+        status=result['status'],
+        transactions_fetched=result.get('transactions_fetched', 0),
+        imported=result['imported'],
+        duplicates=result['duplicates'],
+        message=message
+    )
+
+
+def _push_connection_out(connection: models.BankConnection) -> schemas.PushConnection:
+    return schemas.PushConnection(
+        id=connection.id,
+        bank_account_id=connection.bank_account_id,
+        bank_account_name=connection.bank_account.name if connection.bank_account else None,
+        external_bank_id=connection.external_bank_id,
+        external_account_id=connection.external_account_id,
+        external_account_name=connection.external_account_name,
+        status=connection.status.value,
+        connection_error=connection.connection_error,
+        initial_sync_from_date=connection.initial_sync_from_date,
+        last_successful_sync_at=connection.last_successful_sync_at
+    )
 
 
 @router.get("/providers")
@@ -395,6 +436,161 @@ def list_connections(
     return connections
 
 
+@router.get("/push", response_model=List[schemas.PushConnection])
+def list_push_connections(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+    current_ledger: models.Ledger = Depends(get_current_ledger)
+):
+    """
+    List the connections in the current ledger that the user's own device fills.
+
+    What a client asks first: which accounts it is expected to upload for, and
+    how far each one has come.
+    """
+    connections = db.query(models.BankConnection).join(
+        models.BankProvider,
+        models.BankProvider.id == models.BankConnection.provider_id
+    ).filter(
+        models.BankConnection.ledger_id == current_ledger.id,
+        models.BankProvider.name == models.PUSH_PROVIDER_NAME,
+        models.BankConnection.status != models.BankConnectionStatus.DISCONNECTED
+    ).order_by(models.BankConnection.id).all()
+
+    return [_push_connection_out(c) for c in connections]
+
+
+@router.post("/push", response_model=schemas.PushConnection)
+def create_push_connection(
+    request: schemas.PushConnectionCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+    current_ledger: models.Ledger = Depends(get_current_ledger)
+):
+    """
+    Open a bank account for uploads from the user's own device.
+
+    No OAuth: the key to the bank stays on the device. Asking again for a bank
+    account that already has such a connection returns that connection.
+
+    Open to every plan. Premium pays for the provider that fetches on the
+    user's behalf; here the user's own device does the fetching and nothing
+    is bought from anyone.
+
+    Example:
+        POST /bank-connections/push
+        {
+            "bank_account_id": 3,
+            "external_account_id": "12345678903",
+            "external_account_name": "Brukskonto",
+            "external_bank_id": "sparebank1"
+        }
+    """
+    service = BankIntegrationService(db)
+    try:
+        connection = service.create_push_connection(
+            ledger_id=current_ledger.id,
+            user=current_user,
+            bank_account_id=request.bank_account_id,
+            external_account_id=request.external_account_id,
+            external_account_name=request.external_account_name,
+            external_bank_id=request.external_bank_id,
+            initial_sync_from_date=request.initial_sync_from_date
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+    return _push_connection_out(connection)
+
+
+@router.post("/{connection_id}/transactions", response_model=schemas.SyncResponse)
+def upload_transactions(
+    connection_id: int,
+    upload: schemas.PushUpload,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+    current_ledger: models.Ledger = Depends(get_current_ledger)
+):
+    """
+    Receive transactions the user's own device has fetched from the bank.
+
+    Send booked transactions only, with the bank's own id where it is stable.
+    Sending the same transaction again is harmless; it is counted as a
+    duplicate. An empty list is a valid upload and says the device has looked.
+
+    Example:
+        POST /bank-connections/14/transactions
+        {
+            "transactions": [
+                {
+                    "external_id": "123456789012345678",
+                    "transaction_date": "2026-11-10",
+                    "amount": "-249.00",
+                    "description": "Dagligvarer"
+                }
+            ]
+        }
+
+        Response: as for a manual sync
+    """
+    # Verify connection exists and belongs to current ledger
+    connection = db.query(models.BankConnection).get(connection_id)
+    if not connection:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Connection not found"
+        )
+
+    if connection.ledger_id != current_ledger.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Connection does not belong to current ledger"
+        )
+
+    if not connection.is_push:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Denne bankkoblingen tar ikke imot opplastinger."
+        )
+
+    if connection.status == models.BankConnectionStatus.DISCONNECTED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Bankkoblingen er frakoblet."
+        )
+
+    transactions = []
+    for tx in upload.transactions:
+        raw_data = json.dumps(tx.raw_data, ensure_ascii=False) if tx.raw_data else None
+        if raw_data and len(raw_data) > MAX_RAW_DATA_CHARS:
+            raw_data = None
+
+        transactions.append({
+            'external_id': tx.external_id,
+            'date': tx.transaction_date,
+            'booking_date': tx.booking_date,
+            'value_date': tx.value_date,
+            'amount': tx.amount,
+            'currency': tx.currency.upper(),
+            'description': tx.description,
+            'reference': tx.reference,
+            'merchant_name': tx.merchant_name,
+            'raw_data': raw_data
+        })
+
+    service = BankIntegrationService(db)
+    result = service.receive_pushed_transactions(
+        bank_connection=connection,
+        user=current_user,
+        transactions=transactions
+    )
+
+    return _sync_response(result)
+
+
 @router.post("/{connection_id}/sync", response_model=schemas.SyncResponse)
 async def manual_sync(
     connection_id: int,
@@ -445,6 +641,12 @@ async def manual_sync(
             detail="Connection is disconnected. Reconnect first."
         )
 
+    if connection.is_push:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Denne kontoen fylles fra din egen enhet og kan ikke synkroniseres herfra."
+        )
+
     # Sync transactions
     service = BankIntegrationService(db)
 
@@ -465,22 +667,7 @@ async def manual_sync(
         psu_user_agent=psu_ua
     )
 
-    # Build response
-    message = result.get('message')
-    if not message and result['errors']:
-        if isinstance(result['errors'], list):
-            # Include the first error message for context
-            message = result['errors'][0] if len(result['errors']) == 1 else f"{len(result['errors'])} errors occurred: {result['errors'][0]}"
-        else:
-            message = str(result['errors'])
-
-    return schemas.SyncResponse(
-        status=result['status'],
-        transactions_fetched=result.get('transactions_fetched', 0),
-        imported=result['imported'],
-        duplicates=result['duplicates'],
-        message=message
-    )
+    return _sync_response(result)
 
 
 @router.delete("/{connection_id}")
@@ -548,6 +735,12 @@ async def reauthorize_bank_connection(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Connection does not belong to current ledger"
+        )
+
+    if connection.is_push:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Denne kontoen fylles fra din egen enhet. Innloggingen mot banken fornyes der."
         )
 
     # Get associated bank account

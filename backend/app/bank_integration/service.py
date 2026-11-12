@@ -13,7 +13,7 @@ import asyncio
 import secrets
 import logging
 from collections import Counter
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime, timedelta, date
 from decimal import Decimal
 
@@ -25,7 +25,7 @@ from backend.app.models import (
     OAuthState, User, Ledger, BankAccount, Transaction, JournalEntry,
     Account, AccountType, TransactionStatus, TransactionSource,
     BankConnectionStatus, BankSyncType, BankSyncStatus,
-    BankTransactionImportStatus
+    BankTransactionImportStatus, PUSH_PROVIDER_NAME
 )
 
 from .providers.base import BaseBankProvider
@@ -52,6 +52,11 @@ RETRY_BACKOFF_SECONDS = [2, 8]
 # do anything about it. Only after this many consecutive failed runs do we call
 # it broken, put the connection in ERROR and tell the user.
 MAX_CONSECUTIVE_FAILURES = 5
+
+# A push connection has nobody fetching on its behalf, so silence is the only
+# sign that the user's device has stopped. After this many days without an
+# upload we say so.
+PUSH_STALE_DAYS = 14
 
 
 class BankIntegrationService:
@@ -494,6 +499,11 @@ class BankIntegrationService:
             ... )
             >>> print(f"Imported {result['imported']} new transactions")
         """
+        if bank_connection.is_push:
+            # Nothing to fetch with: the key to the bank never leaves the
+            # user's device. Refuse before a failed run is logged against it.
+            raise ValueError("Push connections are filled by the user's own device")
+
         started_at = datetime.utcnow()
         previous_status = bank_connection.status
 
@@ -515,7 +525,6 @@ class BankIntegrationService:
             # Decrypt access token (session_id for Enable Banking)
             access_token = self.encryption.decrypt(bank_connection.access_token)
 
-            import logging
             logger = logging.getLogger(__name__)
 
             # Check if token/session expired
@@ -666,179 +675,17 @@ class BankIntegrationService:
                     logger.error(f"Failed to fetch transactions: {e}")
                     raise
 
-            # Fix amount signs for LIABILITY accounts (credit cards)
-            # Enable Banking returns DBIT/CRDT from the bank's perspective
-            # For LIABILITY accounts, we need to invert the sign
-            bank_account = self.db.query(BankAccount).get(bank_connection.bank_account_id)
-            if bank_account and bank_account.account:
-                gl_account = bank_account.account
-                is_liability = (gl_account.account_type == AccountType.LIABILITY)
-
-                if is_liability:
-                    print(f"[DEBUG] Inverting amount signs for LIABILITY account {gl_account.account_number}")
-                    for raw_tx in raw_transactions:
-                        raw_tx['amount'] = -raw_tx['amount']
-
             sync_log.transactions_fetched = len(raw_transactions)
             print(f"[DEBUG] Fetched {len(raw_transactions)} transactions")
 
-            for raw_tx in raw_transactions:
-                if raw_tx.get('date'):
-                    raw_tx['_dedup_hash'] = TransactionDeduplicator.generate_hash(
-                        transaction_date=raw_tx['date'],
-                        amount=raw_tx['amount'],
-                        description=raw_tx['description'],
-                        reference=raw_tx['reference']
-                    )
+            imported_count, duplicate_count, errors = self._ingest_transactions(
+                bank_connection, raw_transactions
+            )
 
-            # Counting by hash is the fallback for banks whose id does not
-            # survive a refetch. It is coarser than the unique constraint:
-            # four identical tram tickets share one hash, so the batch can
-            # only say how many of that hash are new, never which. Where the
-            # id holds — Bank Norwegian's plain sequence number — we leave it
-            # alone and let the constraint answer per transaction.
-            #
-            # One volatile id in the batch is enough to switch over. A bank
-            # does not mint its ids two ways at once, and if it did, the
-            # cautious reading is the right one.
-            quota = None
-            if any(not id_survives_a_refetch(raw_tx.get('external_id'))
-                   for raw_tx in raw_transactions):
-                batch_counts = Counter(
-                    raw_tx['_dedup_hash'] for raw_tx in raw_transactions
-                    if raw_tx.get('_dedup_hash')
-                )
-                held_counts = TransactionDeduplicator.count_existing_by_hash(
-                    self.db, bank_connection.id, set(batch_counts)
-                )
-                # How many of each hash this batch may still store
-                quota = {
-                    h: max(0, n - held_counts.get(h, 0))
-                    for h, n in batch_counts.items()
-                }
-                refetched = sum(batch_counts[h] - quota[h] for h in batch_counts)
-                if refetched:
-                    print(f"[DEBUG] {refetched} transactions already held, skipping")
-
-            # Process each transaction
-            imported_count = 0
-            duplicate_count = 0
-            errors = []
-
-            for raw_tx in raw_transactions:
-                print(f"[DEBUG] Processing transaction: {raw_tx.get('external_id')}")
-                try:
-                    # Skip transactions without a date
-                    if not raw_tx.get('date'):
-                        logger.warning(f"Skipping transaction {raw_tx.get('external_id')} - no date available")
-                        errors.append(f"Transaction {raw_tx.get('external_id')}: No date available")
-                        continue
-
-                    dedup_hash = raw_tx['_dedup_hash']
-
-                    # Already hold as many of this one as the bank reports.
-                    # Only consulted when the bank's id cannot be trusted.
-                    if quota is not None:
-                        if quota.get(dedup_hash, 0) <= 0:
-                            duplicate_count += 1
-                            continue
-                        quota[dedup_hash] -= 1
-
-                    # Check if already fetched
-                    existing_bank_tx = TransactionDeduplicator.check_duplicate_bank_transaction(
-                        self.db,
-                        bank_connection.id,
-                        raw_tx['external_id'],
-                        reference=raw_tx.get('reference'),
-                        transaction_date=raw_tx['date'],
-                        amount=raw_tx['amount']
-                    )
-
-                    if existing_bank_tx:
-                        duplicate_count += 1
-                        continue
-
-                    # Store in bank_transactions
-                    bank_tx = BankTransaction(
-                        bank_connection_id=bank_connection.id,
-                        external_transaction_id=raw_tx['external_id'],
-                        transaction_date=raw_tx['date'],
-                        booking_date=raw_tx.get('booking_date'),
-                        value_date=raw_tx.get('value_date'),
-                        amount=raw_tx['amount'],
-                        currency=raw_tx['currency'],
-                        description=raw_tx['description'],
-                        reference=raw_tx['reference'],
-                        merchant_name=raw_tx.get('merchant_name'),
-                        dedup_hash=dedup_hash,
-                        raw_data=raw_tx['raw_data'],
-                        import_status=BankTransactionImportStatus.PENDING
-                    )
-                    self.db.add(bank_tx)
-                    self.db.flush()
-
-                    # Check if duplicate of existing transaction
-                    existing_tx = TransactionDeduplicator.find_duplicate_transaction(
-                        self.db,
-                        bank_connection.ledger_id,
-                        bank_connection.bank_account.account_id,
-                        dedup_hash,
-                        raw_tx['date'],
-                        raw_tx['amount']
-                    )
-
-                    if existing_tx:
-                        # Mark as duplicate
-                        bank_tx.import_status = BankTransactionImportStatus.DUPLICATE
-                        bank_tx.imported_transaction_id = existing_tx.id
-                        duplicate_count += 1
-                    else:
-                        # Import as DRAFT transaction
-                        imported_tx = self._import_as_draft_transaction(
-                            bank_connection,
-                            raw_tx
-                        )
-
-                        bank_tx.import_status = BankTransactionImportStatus.IMPORTED
-                        bank_tx.imported_transaction_id = imported_tx.id
-                        imported_count += 1
-
-                except Exception as e:
-                    error_msg = f"Transaction {raw_tx.get('external_id')}: {str(e)}"
-                    errors.append(error_msg)
-                    print(f"[ERROR] {error_msg}")
-                    import traceback
-                    traceback.print_exc()
-                    continue
-
-            self.db.commit()
-
-            print(f"[DEBUG] Sync complete: imported={imported_count}, duplicates={duplicate_count}, errors={len(errors)}")
-            if errors:
-                print(f"[DEBUG] Errors: {errors}")
-
-            # Update connection status
-            bank_connection.last_sync_at = datetime.utcnow()
-            bank_connection.last_successful_sync_at = datetime.utcnow()
-            bank_connection.status = BankConnectionStatus.ACTIVE
-            bank_connection.connection_error = None
-
-            # Complete sync log
-            sync_log.sync_status = BankSyncStatus.SUCCESS
-            sync_log.transactions_imported = imported_count
-            sync_log.transactions_duplicate = duplicate_count
-            sync_log.completed_at = datetime.utcnow()
-            sync_log.duration_seconds = int((datetime.utcnow() - started_at).total_seconds())
-
-            self.db.commit()
-
-            return {
-                'status': 'success',
-                'transactions_fetched': len(raw_transactions),
-                'imported': imported_count,
-                'duplicates': duplicate_count,
-                'errors': errors
-            }
+            return self._complete_sync(
+                bank_connection, sync_log, started_at,
+                len(raw_transactions), imported_count, duplicate_count, errors
+            )
 
         except Exception as e:
             # Log error
@@ -879,6 +726,215 @@ class BankIntegrationService:
                 'duplicates': 0,
                 'errors': [str(e)]
             }
+
+    def _ingest_transactions(
+        self,
+        bank_connection: BankConnection,
+        raw_transactions: List[Dict[str, Any]]
+    ) -> Tuple[int, int, List[str]]:
+        """
+        Take normalized bank transactions in: deduplicate, store, import as DRAFT.
+
+        The one way in, whoever fetched them. A provider sync and an upload from
+        the user's own device both end here, so a transaction is judged new or
+        known by the same rules regardless of the road it travelled.
+
+        Amounts arrive as the bank states them — positive into the account,
+        negative out of it — and are turned around here for LIABILITY accounts.
+
+        Args:
+            bank_connection: Connection the transactions belong to
+            raw_transactions: Normalized transactions, see
+                BaseBankProvider.fetch_transactions. Modified in place.
+
+        Returns:
+            (imported, duplicates, errors)
+        """
+        logger = logging.getLogger(__name__)
+
+        # Fix amount signs for LIABILITY accounts (credit cards)
+        # Enable Banking returns DBIT/CRDT from the bank's perspective
+        # For LIABILITY accounts, we need to invert the sign
+        bank_account = self.db.query(BankAccount).get(bank_connection.bank_account_id)
+        if bank_account and bank_account.account:
+            gl_account = bank_account.account
+            is_liability = (gl_account.account_type == AccountType.LIABILITY)
+
+            if is_liability:
+                print(f"[DEBUG] Inverting amount signs for LIABILITY account {gl_account.account_number}")
+                for raw_tx in raw_transactions:
+                    raw_tx['amount'] = -raw_tx['amount']
+
+        for raw_tx in raw_transactions:
+            if raw_tx.get('date'):
+                raw_tx['_dedup_hash'] = TransactionDeduplicator.generate_hash(
+                    transaction_date=raw_tx['date'],
+                    amount=raw_tx['amount'],
+                    description=raw_tx['description'],
+                    reference=raw_tx['reference']
+                )
+
+        # Counting by hash is the fallback for banks whose id does not
+        # survive a refetch. It is coarser than the unique constraint:
+        # four identical tram tickets share one hash, so the batch can
+        # only say how many of that hash are new, never which. Where the
+        # id holds — Bank Norwegian's plain sequence number — we leave it
+        # alone and let the constraint answer per transaction.
+        #
+        # One volatile id in the batch is enough to switch over. A bank
+        # does not mint its ids two ways at once, and if it did, the
+        # cautious reading is the right one.
+        quota = None
+        if any(not id_survives_a_refetch(raw_tx.get('external_id'))
+               for raw_tx in raw_transactions):
+            batch_counts = Counter(
+                raw_tx['_dedup_hash'] for raw_tx in raw_transactions
+                if raw_tx.get('_dedup_hash')
+            )
+            held_counts = TransactionDeduplicator.count_existing_by_hash(
+                self.db, bank_connection.id, set(batch_counts)
+            )
+            # How many of each hash this batch may still store
+            quota = {
+                h: max(0, n - held_counts.get(h, 0))
+                for h, n in batch_counts.items()
+            }
+            refetched = sum(batch_counts[h] - quota[h] for h in batch_counts)
+            if refetched:
+                print(f"[DEBUG] {refetched} transactions already held, skipping")
+
+        # Process each transaction
+        imported_count = 0
+        duplicate_count = 0
+        errors = []
+
+        for raw_tx in raw_transactions:
+            print(f"[DEBUG] Processing transaction: {raw_tx.get('external_id')}")
+            try:
+                # Skip transactions without a date
+                if not raw_tx.get('date'):
+                    logger.warning(f"Skipping transaction {raw_tx.get('external_id')} - no date available")
+                    errors.append(f"Transaction {raw_tx.get('external_id')}: No date available")
+                    continue
+
+                dedup_hash = raw_tx['_dedup_hash']
+
+                # Already hold as many of this one as the bank reports.
+                # Only consulted when the bank's id cannot be trusted.
+                if quota is not None:
+                    if quota.get(dedup_hash, 0) <= 0:
+                        duplicate_count += 1
+                        continue
+                    quota[dedup_hash] -= 1
+
+                # Check if already fetched
+                existing_bank_tx = TransactionDeduplicator.check_duplicate_bank_transaction(
+                    self.db,
+                    bank_connection.id,
+                    raw_tx['external_id'],
+                    reference=raw_tx.get('reference'),
+                    transaction_date=raw_tx['date'],
+                    amount=raw_tx['amount']
+                )
+
+                if existing_bank_tx:
+                    duplicate_count += 1
+                    continue
+
+                # Store in bank_transactions
+                bank_tx = BankTransaction(
+                    bank_connection_id=bank_connection.id,
+                    external_transaction_id=raw_tx['external_id'],
+                    transaction_date=raw_tx['date'],
+                    booking_date=raw_tx.get('booking_date'),
+                    value_date=raw_tx.get('value_date'),
+                    amount=raw_tx['amount'],
+                    currency=raw_tx['currency'],
+                    description=raw_tx['description'],
+                    reference=raw_tx['reference'],
+                    merchant_name=raw_tx.get('merchant_name'),
+                    dedup_hash=dedup_hash,
+                    raw_data=raw_tx['raw_data'],
+                    import_status=BankTransactionImportStatus.PENDING
+                )
+                self.db.add(bank_tx)
+                self.db.flush()
+
+                # Check if duplicate of existing transaction
+                existing_tx = TransactionDeduplicator.find_duplicate_transaction(
+                    self.db,
+                    bank_connection.ledger_id,
+                    bank_connection.bank_account.account_id,
+                    dedup_hash,
+                    raw_tx['date'],
+                    raw_tx['amount']
+                )
+
+                if existing_tx:
+                    # Mark as duplicate
+                    bank_tx.import_status = BankTransactionImportStatus.DUPLICATE
+                    bank_tx.imported_transaction_id = existing_tx.id
+                    duplicate_count += 1
+                else:
+                    # Import as DRAFT transaction
+                    imported_tx = self._import_as_draft_transaction(
+                        bank_connection,
+                        raw_tx
+                    )
+
+                    bank_tx.import_status = BankTransactionImportStatus.IMPORTED
+                    bank_tx.imported_transaction_id = imported_tx.id
+                    imported_count += 1
+
+            except Exception as e:
+                error_msg = f"Transaction {raw_tx.get('external_id')}: {str(e)}"
+                errors.append(error_msg)
+                print(f"[ERROR] {error_msg}")
+                import traceback
+                traceback.print_exc()
+                continue
+
+        self.db.commit()
+
+        print(f"[DEBUG] Sync complete: imported={imported_count}, duplicates={duplicate_count}, errors={len(errors)}")
+        if errors:
+            print(f"[DEBUG] Errors: {errors}")
+
+        return imported_count, duplicate_count, errors
+
+    def _complete_sync(
+        self,
+        bank_connection: BankConnection,
+        sync_log: BankSyncLog,
+        started_at: datetime,
+        fetched: int,
+        imported_count: int,
+        duplicate_count: int,
+        errors: List[str]
+    ) -> Dict[str, Any]:
+        """Mark the connection healthy, close the sync log and build the result."""
+        # Update connection status
+        bank_connection.last_sync_at = datetime.utcnow()
+        bank_connection.last_successful_sync_at = datetime.utcnow()
+        bank_connection.status = BankConnectionStatus.ACTIVE
+        bank_connection.connection_error = None
+
+        # Complete sync log
+        sync_log.sync_status = BankSyncStatus.SUCCESS
+        sync_log.transactions_imported = imported_count
+        sync_log.transactions_duplicate = duplicate_count
+        sync_log.completed_at = datetime.utcnow()
+        sync_log.duration_seconds = int((datetime.utcnow() - started_at).total_seconds())
+
+        self.db.commit()
+
+        return {
+            'status': 'success',
+            'transactions_fetched': fetched,
+            'imported': imported_count,
+            'duplicates': duplicate_count,
+            'errors': errors
+        }
 
     def _consecutive_failures(self, bank_connection_id: int) -> int:
         """
@@ -1027,6 +1083,259 @@ class BankIntegrationService:
 
         return transaction
 
+    def _push_provider(self) -> BankProvider:
+        """The provider row push connections hang on, created on first use."""
+        provider = self.db.query(BankProvider).filter(
+            BankProvider.name == PUSH_PROVIDER_NAME
+        ).first()
+        if not provider:
+            provider = BankProvider(
+                name=PUSH_PROVIDER_NAME,
+                display_name='Egen enhet',
+                # Inactive on purpose: is_active is what offers a provider for
+                # OAuth connect, and there is no OAuth here to start.
+                is_active=False,
+                environment='PRODUCTION',
+                config_notes="No provider. The user's own device fetches from the bank and uploads."
+            )
+            self.db.add(provider)
+            self.db.flush()
+        return provider
+
+    def create_push_connection(
+        self,
+        ledger_id: int,
+        user: User,
+        bank_account_id: int,
+        external_account_id: str,
+        external_account_name: Optional[str] = None,
+        external_bank_id: Optional[str] = None,
+        initial_sync_from_date: Optional[date] = None
+    ) -> BankConnection:
+        """
+        Open a bank account for uploads from the user's own device.
+
+        No OAuth and no tokens: the connection only says which bank account the
+        uploaded transactions belong to. Asking again for the same bank account
+        returns the connection that is already there, so a reinstalled client
+        can pick up where the old one stopped.
+
+        Args:
+            ledger_id: Ledger the bank account lives in
+            user: User setting it up
+            bank_account_id: Internal bank account to fill
+            external_account_id: The account's number at the bank
+            external_account_name: The bank's name for the account
+            external_bank_id: Which bank, as the client names it
+            initial_sync_from_date: Earliest date the client should upload from
+
+        Raises:
+            ValueError: If the bank account is unknown or already connected
+                through a provider
+        """
+        bank_account = self.db.query(BankAccount).filter(
+            BankAccount.id == bank_account_id,
+            BankAccount.ledger_id == ledger_id,
+            BankAccount.is_active == True
+        ).first()
+
+        if not bank_account:
+            raise ValueError("Bankkontoen finnes ikke i denne regnskapsboken")
+
+        provider = self._push_provider()
+
+        # One connection per bank account, as for OAuth connections
+        existing = self.db.query(BankConnection).filter(
+            BankConnection.bank_account_id == bank_account_id,
+            BankConnection.ledger_id == ledger_id
+        ).first()
+
+        if existing and not existing.is_push \
+                and existing.status != BankConnectionStatus.DISCONNECTED:
+            raise ValueError(
+                "Bankkontoen har allerede en bankkobling. Koble den fra først."
+            )
+
+        if existing:
+            if not existing.is_push or existing.status == BankConnectionStatus.DISCONNECTED:
+                # A connection brought back to life starts over: what it last
+                # synced through a provider, or before it was disconnected,
+                # says nothing about the device now taking over.
+                existing.last_sync_at = None
+                existing.last_successful_sync_at = None
+                existing.initial_sync_from_date = initial_sync_from_date
+                existing.created_by = user.id
+            existing.provider_id = provider.id
+            existing.external_bank_id = external_bank_id
+            existing.external_account_id = external_account_id
+            existing.external_account_name = external_account_name
+            existing.external_account_iban = None
+            existing.external_account_bic = None
+            existing.access_token = None
+            existing.refresh_token = None
+            existing.token_expires_at = None
+            existing.status = BankConnectionStatus.ACTIVE
+            existing.connection_error = None
+            bank_connection = existing
+        else:
+            bank_connection = BankConnection(
+                ledger_id=ledger_id,
+                bank_account_id=bank_account_id,
+                provider_id=provider.id,
+                external_bank_id=external_bank_id,
+                external_account_id=external_account_id,
+                external_account_name=external_account_name,
+                status=BankConnectionStatus.ACTIVE,
+                created_by=user.id,
+                initial_sync_from_date=initial_sync_from_date
+            )
+            self.db.add(bank_connection)
+
+        self.db.commit()
+        self.db.refresh(bank_connection)
+
+        return bank_connection
+
+    def receive_pushed_transactions(
+        self,
+        bank_connection: BankConnection,
+        user: User,
+        transactions: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """
+        Take in transactions the user's own device has fetched from the bank.
+
+        Same result shape as sync_transactions, and the same road in from
+        _ingest_transactions onwards. An upload with nothing in it still counts
+        as a successful run: the device looked and found nothing new, which is
+        exactly what keeps the connection from being called stale.
+
+        Args:
+            bank_connection: Push connection to fill
+            user: User whose device is uploading
+            transactions: Normalized transactions, see
+                BaseBankProvider.fetch_transactions
+        """
+        started_at = datetime.utcnow()
+        connection_id = bank_connection.id
+
+        sync_log = BankSyncLog(
+            bank_connection_id=connection_id,
+            sync_type=BankSyncType.PUSH,
+            sync_status=BankSyncStatus.FAILED,  # Assume failure, update on success
+            started_at=started_at,
+            triggered_by=user.id
+        )
+        self.db.add(sync_log)
+        self.db.flush()
+
+        try:
+            dates = [tx['date'] for tx in transactions]
+            if dates:
+                sync_log.sync_from_date = min(dates)
+                sync_log.sync_to_date = max(dates)
+            sync_log.transactions_fetched = len(transactions)
+
+            imported_count, duplicate_count, errors = self._ingest_transactions(
+                bank_connection, transactions
+            )
+
+            return self._complete_sync(
+                bank_connection, sync_log, started_at,
+                len(transactions), imported_count, duplicate_count, errors
+            )
+
+        except Exception as e:
+            # A failure here is ours, not the bank's and not the device's, so
+            # the connection's status is left alone. Drop the half-done batch
+            # and keep only a record that it was attempted; the device sends
+            # the same transactions again on its next run.
+            self.db.rollback()
+            logging.getLogger(__name__).error(
+                f"Connection {connection_id}: upload failed: {e}"
+            )
+            self.db.add(BankSyncLog(
+                bank_connection_id=connection_id,
+                sync_type=BankSyncType.PUSH,
+                sync_status=BankSyncStatus.FAILED,
+                transactions_fetched=len(transactions),
+                error_message=str(e),
+                started_at=started_at,
+                completed_at=datetime.utcnow(),
+                duration_seconds=int((datetime.utcnow() - started_at).total_seconds()),
+                triggered_by=user.id
+            ))
+            self.db.commit()
+
+            return {
+                'status': 'failed',
+                'transactions_fetched': len(transactions),
+                'imported': 0,
+                'duplicates': 0,
+                'errors': [str(e)]
+            }
+
+    def flag_stale_push_connections(self) -> List[int]:
+        """
+        Put push connections that have gone quiet into ERROR and tell the owner.
+
+        Only connections that have worked are judged. One that has never
+        received anything is still being set up, and its owner knows that
+        better than we do. The next upload brings a flagged connection back to
+        ACTIVE, so the email goes out once per silence.
+
+        Returns:
+            Ids of the connections flagged in this run
+        """
+        cutoff = datetime.utcnow() - timedelta(days=PUSH_STALE_DAYS)
+
+        stale = self.db.query(BankConnection).join(
+            BankProvider, BankProvider.id == BankConnection.provider_id
+        ).filter(
+            BankProvider.name == PUSH_PROVIDER_NAME,
+            BankConnection.status == BankConnectionStatus.ACTIVE,
+            BankConnection.last_successful_sync_at != None,
+            BankConnection.last_successful_sync_at < cutoff
+        ).all()
+
+        flagged = []
+        for bank_connection in stale:
+            last = bank_connection.last_successful_sync_at.replace(tzinfo=None)
+            days = (datetime.utcnow() - last).days
+
+            bank_connection.status = BankConnectionStatus.ERROR
+            bank_connection.connection_error = (
+                f"Ingen opplasting fra enheten på {days} dager."
+            )
+            self.db.commit()
+            flagged.append(bank_connection.id)
+
+            self._notify_push_stale(bank_connection, days)
+
+        return flagged
+
+    def _notify_push_stale(self, bank_connection: BankConnection, days: int) -> None:
+        """Email the connection's owner that their device has stopped uploading."""
+        logger_ = logging.getLogger(__name__)
+        try:
+            from backend.email import send_push_connection_stale_email
+
+            user = self.db.query(User).get(bank_connection.created_by)
+            if not user or not user.email:
+                logger_.warning(f"Connection {bank_connection.id}: no owner to notify")
+                return
+
+            bank_account = self.db.query(BankAccount).get(bank_connection.bank_account_id)
+            send_push_connection_stale_email(
+                to_email=user.email,
+                user_name=user.full_name or user.email,
+                account_name=bank_account.name if bank_account else f"tilkobling {bank_connection.id}",
+                days=days,
+            )
+        except Exception as mail_error:
+            # Never let the notification take down the nightly run
+            logger_.error(f"Could not send stale connection email: {mail_error}")
+
     async def disconnect_bank(
         self,
         bank_connection: BankConnection,
@@ -1045,14 +1354,16 @@ class BankIntegrationService:
             >>> await service.disconnect_bank(bank_connection, user)
             >>> # Connection is now DISCONNECTED
         """
-        try:
-            # Get provider and revoke token
-            provider = self._get_provider(bank_connection.provider_id)
-            access_token = self.encryption.decrypt(bank_connection.access_token)
-            await provider.revoke_token(access_token)
-        except Exception as e:
-            # Log but don't fail - connection will be marked disconnected anyway
-            print(f"Token revocation failed: {e}")
+        # A push connection has no token with us to revoke
+        if not bank_connection.is_push:
+            try:
+                # Get provider and revoke token
+                provider = self._get_provider(bank_connection.provider_id)
+                access_token = self.encryption.decrypt(bank_connection.access_token)
+                await provider.revoke_token(access_token)
+            except Exception as e:
+                # Log but don't fail - connection will be marked disconnected anyway
+                print(f"Token revocation failed: {e}")
 
         # Update connection status
         bank_connection.status = BankConnectionStatus.DISCONNECTED

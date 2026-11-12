@@ -1,5 +1,5 @@
-import api from './api.js?v=21';
-import { showModal, closeModal, showError, showSuccess, formatDate } from './utils.js?v=21';
+import api from './api.js?v=22';
+import { showModal, closeModal, showError, showSuccess, formatDate } from './utils.js?v=22';
 
 class BankConnectionsManager {
     constructor() {
@@ -153,18 +153,33 @@ class BankConnectionsManager {
             ? `Sist synkronisert: ${this.formatRelativeTime(connection.last_sync_at)}`
             : 'Aldri synkronisert';
 
+        // A push connection is filled by the user's own device. There is
+        // nothing to fetch or re-authorize from here, and what the device
+        // says about the bank is text we did not write ourselves.
+        const isPush = connection.is_push === true;
+        const safe = (text) => String(text ?? '').replace(/[&<>"']/g, (c) => (
+            { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+        ));
+        const title = isPush
+            ? `Egen enhet${connection.external_bank_id ? ` (${safe(connection.external_bank_id)})` : ''}`
+            : (provider?.display_name || 'Ukjent bank');
+        const accountLine = isPush
+            ? `<p><strong>Kontonummer:</strong> ${safe(connection.external_account_id)}</p>`
+            : `<p><strong>IBAN:</strong> ${connection.external_account_iban || 'N/A'}</p>`;
+
         return `
             <div class="connection-card">
                 <div class="connection-info">
-                    <h3>${provider?.display_name || 'Ukjent bank'}</h3>
+                    <h3>${title}</h3>
                     <p><strong>Konto:</strong> ${bankAccount?.name || 'Ukjent'}</p>
-                    <p><strong>IBAN:</strong> ${connection.external_account_iban || 'N/A'}</p>
+                    ${accountLine}
                     <p><small>${lastSync}</small></p>
+                    ${isPush ? `<p><small>${safe(connection.connection_error) || 'Hentes fra banken av din egen enhet og lastes opp hit.'}</small></p>` : ''}
                 </div>
                 <div class="connection-status">
                     <span class="status-badge ${statusClass}">${statusText}</span>
                     <div class="connection-actions">
-                        ${connection.status !== 'DISCONNECTED' ? `
+                        ${connection.status !== 'DISCONNECTED' && !isPush ? `
                             <button class="btn btn-sm btn-primary" onclick="bankConnectionsManager.syncConnection(${connection.id})">
                                 Synkroniser
                             </button>

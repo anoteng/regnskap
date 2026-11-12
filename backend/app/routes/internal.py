@@ -4,7 +4,10 @@ from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend.config import get_settings
-from ..models import BankConnection, User, BankConnectionStatus, BankSyncType
+from ..models import (
+    BankConnection, BankProvider, User, BankConnectionStatus, BankSyncType,
+    PUSH_PROVIDER_NAME
+)
 
 router = APIRouter(prefix="/internal", tags=["internal"])
 
@@ -31,12 +34,18 @@ async def sync_all_connections(
     # ERROR connections are retried too. A session that really has expired just
     # fails again and costs one call; one that was knocked out by a passing bank
     # error heals itself, because a successful sync sets the status back to ACTIVE.
-    connections = db.query(BankConnection).filter(
+    #
+    # Push connections are left out: the user's own device fetches for those,
+    # and we hold nothing to fetch with.
+    connections = db.query(BankConnection).join(
+        BankProvider, BankProvider.id == BankConnection.provider_id
+    ).filter(
         BankConnection.status.in_([
             BankConnectionStatus.ACTIVE,
             BankConnectionStatus.ERROR,
         ]),
         BankConnection.auto_sync_enabled == True,
+        BankProvider.name != PUSH_PROVIDER_NAME,
     ).all()
 
     results = []
@@ -76,5 +85,17 @@ async def sync_all_connections(
         except Exception as e:
             results.append({'connection_id': conn.id, 'status': 'failed', 'error': str(e)})
 
+    # What we cannot fetch we can at least notice has gone quiet
+    try:
+        stale_push = service.flag_stale_push_connections()
+    except Exception as e:
+        stale_push = []
+        results.append({'status': 'failed', 'error': f'stale push check: {e}'})
+
     synced = sum(1 for r in results if r.get('status') not in ('skipped', 'failed'))
-    return {'total': len(connections), 'synced': synced, 'results': results}
+    return {
+        'total': len(connections),
+        'synced': synced,
+        'stale_push': stale_push,
+        'results': results,
+    }
