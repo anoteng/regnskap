@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API - Privatregnskap.eu</title>
+    <link rel="stylesheet" href="/static/css/styles.css?v=4">
+    <style>
+        .legal-content { max-width: 860px; margin: 2rem auto; padding: 2rem; background: white;
+            border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); line-height: 1.6; }
+        .legal-content h1, .legal-content h2 { color: #1e40af; }
+        .legal-content h3 { margin-top: 1.5rem; }
+        .legal-content pre { background: #f3f4f6; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; }
+        .legal-content code { font-size: 0.9em; }
+        .legal-content table { border-collapse: collapse; margin: 1rem 0; }
+        .legal-content th, .legal-content td { border: 1px solid #e5e7eb; padding: 0.4rem 0.75rem; text-align: left; }
+        @media (max-width: 600px) { .legal-content { margin: 0; padding: 1rem; border-radius: 0; } }
+    </style>
+</head>
+<body>
+    <div class="legal-content" id="content">
+        <p>Laster… Beskrivelsen finnes også som ren tekst: <a href="/api.md">/api.md</a></p>
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+    <script>
+        // One source for people and programs: the same Markdown is served at /api.md
+        fetch('/api.md', { cache: 'no-cache' })
+            .then((response) => response.text())
+            .then((text) => {
+                document.getElementById('content').innerHTML = marked.parse(text) +
+                    '<p><a href="/">Tilbake til Privatregnskap</a> · <a href="/api.md">Som Markdown</a></p>';
+            });
+    </script>
+</body>
+</html>

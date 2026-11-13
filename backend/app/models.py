@@ -209,6 +209,33 @@ class RefreshToken(Base):
     user = relationship("User")
 
 
+
+class ApiToken(Base):
+    """
+    A personal key for reading through /api/v1 from another program.
+
+    It reads with the rights of the user who made it and nothing more: only
+    ledgers the user is still a member of, and only ever reading, because no
+    other route accepts it. Only a hash is kept; the key is shown once.
+    """
+    __tablename__ = "api_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    # NULL reads every ledger the user is a member of
+    ledger_id = Column(Integer, ForeignKey("ledgers.id", ondelete="CASCADE"), nullable=True)
+    name = Column(String(100), nullable=False)
+    # The first characters, so the user can tell keys apart
+    token_prefix = Column(String(16), nullable=False)
+    token_hash = Column(String(64), unique=True, nullable=False)
+    expires_at = Column(DateTime, nullable=True)
+    last_used_at = Column(DateTime, nullable=True)
+    revoked_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User")
+    ledger = relationship("Ledger")
+
 class Account(Base):
     __tablename__ = "accounts"
     __table_args__ = (

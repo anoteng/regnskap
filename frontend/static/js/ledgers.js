@@ -1,6 +1,7 @@
-import api from './api.js?v=23';
-import settlementManager from './settlement.js?v=23';
-import aiKeyManager from './ai-key.js?v=23';
+import api from './api.js?v=24';
+import settlementManager from './settlement.js?v=24';
+import aiKeyManager from './ai-key.js?v=24';
+import apiTokensManager from './api-tokens.js?v=24';
 
 class LedgerManager {
     constructor() {
@@ -119,6 +120,9 @@ class LedgerManager {
 
         // Personal AI key card
         aiKeyManager.load();
+
+        // Personal API keys card
+        apiTokensManager.load();
 
         // Settlement configuration card
         settlementManager.loadSettingsCard(ledger);

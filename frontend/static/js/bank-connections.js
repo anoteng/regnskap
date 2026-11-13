@@ -1,5 +1,5 @@
-import api from './api.js?v=23';
-import { showModal, closeModal, showError, showSuccess, formatDate } from './utils.js?v=23';
+import api from './api.js?v=24';
+import { showModal, closeModal, showError, showSuccess, formatDate } from './utils.js?v=24';
 
 class BankConnectionsManager {
     constructor() {

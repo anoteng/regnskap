@@ -103,6 +103,33 @@ CREATE TABLE `ai_usage` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `api_tokens`
+--
+
+DROP TABLE IF EXISTS `api_tokens`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `api_tokens` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL,
+  `ledger_id` int(11) DEFAULT NULL,
+  `name` varchar(100) NOT NULL,
+  `token_prefix` varchar(16) NOT NULL,
+  `token_hash` varchar(64) NOT NULL,
+  `expires_at` datetime DEFAULT NULL,
+  `last_used_at` datetime DEFAULT NULL,
+  `revoked_at` datetime DEFAULT NULL,
+  `created_at` datetime DEFAULT utc_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_api_tokens_hash` (`token_hash`),
+  KEY `ix_api_tokens_user` (`user_id`),
+  KEY `fk_api_tokens_ledger` (`ledger_id`),
+  CONSTRAINT `fk_api_tokens_ledger` FOREIGN KEY (`ledger_id`) REFERENCES `ledgers` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_api_tokens_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Table structure for table `bank_accounts`
 --
 

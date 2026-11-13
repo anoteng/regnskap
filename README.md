@@ -12,6 +12,7 @@ En komplett web-applikasjon for personlig regnskap med dobbelt bokføring, baser
 - **Bankkontoer**: Støtte for brukskontoer, sparekontoer og kredittkort
 - **Banksynk via Enable Banking** (Premium): Tjeneren henter transaksjoner fra banken via PSD2, og de havner som kladder i posteringskøen
 - **Banksynk fra telefonen** (alle planer): Android-appen henter fra SpareBank 1 med brukerens egen API-nøkkel og laster opp til regnskapet
+- **Lese-API**: Personlige API-nøkler gir andre programmer lesetilgang via `/api/v1`
 - **Android-app**: Posteringskø, vedlegg, budsjett, søk og banksynk fra egen enhet
 - **Budsjett**: Lag og følg budsjetter
 - **Rapporter**: Balanse og resultatregnskap
@@ -198,6 +199,16 @@ etter 60 dager uten synk.
   synk der. Beskrivelsene er ulike i de to kildene, så overlapp gir doble kladder.
 - Har ikke telefonen lastet opp på 14 dager, merkes koblingen med feil og du får
   en e-post.
+
+### API (lesetilgang)
+
+Andre programmer kan lese regnskapene dine med en personlig API-nøkkel. Lag den under
+Regnskapsinnstillinger → API-nøkler. Nøkkelen kan bare lese, og bare regnskap du selv er medlem av.
+Den kan låses til ett regnskap, få en utløpsdato og tilbakekalles.
+
+Endepunktene ligger under `/api/v1` (regnskap, kontoplan, bankkontoer, transaksjoner, saldo per måned
+og et månedssammendrag med inntekter, kostnader og nettoformue). Full beskrivelse:
+[frontend/api.md](frontend/api.md), også på https://privatregnskap.eu/api-docs.html.
 
 ### Registrere transaksjoner
 
