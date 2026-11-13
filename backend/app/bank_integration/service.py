@@ -810,81 +810,91 @@ class BankIntegrationService:
 
         for raw_tx in raw_transactions:
             print(f"[DEBUG] Processing transaction: {raw_tx.get('external_id')}")
+            # Each transaction in its own savepoint. A row the database turns
+            # down must cost only that row: without this, one failed flush
+            # leaves the session unusable and the whole batch is thrown away.
             try:
-                # Skip transactions without a date
-                if not raw_tx.get('date'):
-                    logger.warning(f"Skipping transaction {raw_tx.get('external_id')} - no date available")
-                    errors.append(f"Transaction {raw_tx.get('external_id')}: No date available")
-                    continue
-
-                dedup_hash = raw_tx['_dedup_hash']
-
-                # Already hold as many of this one as the bank reports.
-                # Only consulted when the bank's id cannot be trusted.
-                if quota is not None:
-                    if quota.get(dedup_hash, 0) <= 0:
-                        duplicate_count += 1
+                with self.db.begin_nested():
+                    # Skip transactions without a date
+                    if not raw_tx.get('date'):
+                        logger.warning(f"Skipping transaction {raw_tx.get('external_id')} - no date available")
+                        errors.append(f"Transaction {raw_tx.get('external_id')}: No date available")
                         continue
-                    quota[dedup_hash] -= 1
 
-                # Check if already fetched
-                existing_bank_tx = TransactionDeduplicator.check_duplicate_bank_transaction(
-                    self.db,
-                    bank_connection.id,
-                    raw_tx['external_id'],
-                    reference=raw_tx.get('reference'),
-                    transaction_date=raw_tx['date'],
-                    amount=raw_tx['amount']
-                )
+                    dedup_hash = raw_tx['_dedup_hash']
 
-                if existing_bank_tx:
-                    duplicate_count += 1
-                    continue
+                    # Already hold as many of this one as the bank reports.
+                    # Only consulted when the bank's id cannot be trusted.
+                    if quota is not None:
+                        if quota.get(dedup_hash, 0) <= 0:
+                            duplicate_count += 1
+                            continue
+                        quota[dedup_hash] -= 1
 
-                # Store in bank_transactions
-                bank_tx = BankTransaction(
-                    bank_connection_id=bank_connection.id,
-                    external_transaction_id=raw_tx['external_id'],
-                    transaction_date=raw_tx['date'],
-                    booking_date=raw_tx.get('booking_date'),
-                    value_date=raw_tx.get('value_date'),
-                    amount=raw_tx['amount'],
-                    currency=raw_tx['currency'],
-                    description=raw_tx['description'],
-                    reference=raw_tx['reference'],
-                    merchant_name=raw_tx.get('merchant_name'),
-                    dedup_hash=dedup_hash,
-                    raw_data=raw_tx['raw_data'],
-                    import_status=BankTransactionImportStatus.PENDING
-                )
-                self.db.add(bank_tx)
-                self.db.flush()
-
-                # Check if duplicate of existing transaction
-                existing_tx = TransactionDeduplicator.find_duplicate_transaction(
-                    self.db,
-                    bank_connection.ledger_id,
-                    bank_connection.bank_account.account_id,
-                    dedup_hash,
-                    raw_tx['date'],
-                    raw_tx['amount']
-                )
-
-                if existing_tx:
-                    # Mark as duplicate
-                    bank_tx.import_status = BankTransactionImportStatus.DUPLICATE
-                    bank_tx.imported_transaction_id = existing_tx.id
-                    duplicate_count += 1
-                else:
-                    # Import as DRAFT transaction
-                    imported_tx = self._import_as_draft_transaction(
-                        bank_connection,
-                        raw_tx
+                    # Check if already fetched
+                    existing_bank_tx = TransactionDeduplicator.check_duplicate_bank_transaction(
+                        self.db,
+                        bank_connection.id,
+                        raw_tx['external_id'],
+                        reference=raw_tx.get('reference'),
+                        transaction_date=raw_tx['date'],
+                        amount=raw_tx['amount']
                     )
 
-                    bank_tx.import_status = BankTransactionImportStatus.IMPORTED
-                    bank_tx.imported_transaction_id = imported_tx.id
-                    imported_count += 1
+                    if existing_bank_tx:
+                        duplicate_count += 1
+                        continue
+
+                    # Store in bank_transactions
+                    bank_tx = BankTransaction(
+                        bank_connection_id=bank_connection.id,
+                        external_transaction_id=raw_tx['external_id'],
+                        transaction_date=raw_tx['date'],
+                        booking_date=raw_tx.get('booking_date'),
+                        value_date=raw_tx.get('value_date'),
+                        amount=raw_tx['amount'],
+                        currency=raw_tx['currency'],
+                        description=raw_tx['description'],
+                        reference=raw_tx['reference'],
+                        merchant_name=raw_tx.get('merchant_name'),
+                        dedup_hash=dedup_hash,
+                        raw_data=raw_tx['raw_data'],
+                        import_status=BankTransactionImportStatus.PENDING
+                    )
+                    self.db.add(bank_tx)
+                    self.db.flush()
+
+                    # Check if duplicate of existing transaction
+                    existing_tx = TransactionDeduplicator.find_duplicate_transaction(
+                        self.db,
+                        bank_connection.ledger_id,
+                        bank_connection.bank_account.account_id,
+                        dedup_hash,
+                        raw_tx['date'],
+                        raw_tx['amount']
+                    )
+
+                    if existing_tx:
+                        # Mark as duplicate
+                        bank_tx.import_status = BankTransactionImportStatus.DUPLICATE
+                        bank_tx.imported_transaction_id = existing_tx.id
+                        duplicate_count += 1
+                    elif raw_tx['amount'] == 0:
+                        # The bank lists some zero-kroner lines (an
+                        # "Overførsel" of 0,00). Nothing moved, and a journal
+                        # line of nothing is not allowed. Kept as ignored so
+                        # the next fetch knows it.
+                        bank_tx.import_status = BankTransactionImportStatus.IGNORED
+                    else:
+                        # Import as DRAFT transaction
+                        imported_tx = self._import_as_draft_transaction(
+                            bank_connection,
+                            raw_tx
+                        )
+
+                        bank_tx.import_status = BankTransactionImportStatus.IMPORTED
+                        bank_tx.imported_transaction_id = imported_tx.id
+                        imported_count += 1
 
             except Exception as e:
                 error_msg = f"Transaction {raw_tx.get('external_id')}: {str(e)}"
