@@ -526,9 +526,10 @@
 
                     <div class="card">
                         <h2>API-nøkler</h2>
-                        <p class="subtitle">Gi et annet program lesetilgang til regnskapene dine, for eksempel en
-                        egen app eller et regneark. En nøkkel kan bare lese, aldri endre, og bare regnskap du selv
-                        er medlem av. Se <a href="/api-docs.html" target="_blank">beskrivelsen av API-et</a>.</p>
+                        <p class="subtitle">Gi et annet program tilgang til regnskapene dine, for eksempel en
+                        egen app, et regneark eller en assistent. En nøkkel når bare regnskap du selv er medlem av.
+                        Den leser, og kan også bokføre hvis du velger det, men bare der du selv kan føre.
+                        Se <a href="/api-docs.html" target="_blank">beskrivelsen av API-et</a>.</p>
                         <div id="api-tokens-list"></div>
                         <div class="form-group">
                             <label for="api-token-name">Navn</label>
@@ -544,6 +545,13 @@
                                 <option value="">Aldri</option>
                                 <option value="30">Om 30 dager</option>
                                 <option value="365">Om ett år</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="api-token-access">Tilgang</label>
+                            <select id="api-token-access">
+                                <option value="read">Kun lese</option>
+                                <option value="write">Lese og bokføre</option>
                             </select>
                         </div>
                         <button id="api-token-create" class="btn btn-primary">Lag nøkkel</button>
@@ -651,6 +659,6 @@
     </div>
 
     <script src="/static/js/passkey.js?v=7"></script>
-    <script type="module" src="/static/js/main.js?v=24"></script>
+    <script type="module" src="/static/js/main.js?v=25"></script>
 </body>
 </html>

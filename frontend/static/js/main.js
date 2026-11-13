@@ -1,16 +1,16 @@
-import auth from './auth.js?v=24';
-import api from './api.js?v=24';
-import ledgerManager from './ledgers.js?v=24';
-import transactionsManager from './transactions.js?v=24';
-import bankAccountsManager from './bank-accounts.js?v=24';
-import postingQueueManager from './posting-queue.js?v=24';
-import receiptsManager from './receipts.js?v=24';
-import reportsManager from './reports.js?v=24';
-import bankConnectionsManager from './bank-connections.js?v=24';
-import adminManager from './admin.js?v=24';
-import settlementManager from './settlement.js?v=24';
-import fireManager from './fire.js?v=24';
-import { formatCurrency, formatDate, getTodayDate, getFirstDayOfMonth, getLastDayOfMonth, showModal, closeModal, showError, showSuccess } from './utils.js?v=24';
+import auth from './auth.js?v=25';
+import api from './api.js?v=25';
+import ledgerManager from './ledgers.js?v=25';
+import transactionsManager from './transactions.js?v=25';
+import bankAccountsManager from './bank-accounts.js?v=25';
+import postingQueueManager from './posting-queue.js?v=25';
+import receiptsManager from './receipts.js?v=25';
+import reportsManager from './reports.js?v=25';
+import bankConnectionsManager from './bank-connections.js?v=25';
+import adminManager from './admin.js?v=25';
+import settlementManager from './settlement.js?v=25';
+import fireManager from './fire.js?v=25';
+import { formatCurrency, formatDate, getTodayDate, getFirstDayOfMonth, getLastDayOfMonth, showModal, closeModal, showError, showSuccess } from './utils.js?v=25';
 
 // Make auth available globally for passkey management
 window.auth = auth;

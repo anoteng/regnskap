@@ -1,9 +1,12 @@
 """
-Read-only API for other programs, at /api/v1.
+API for other programs, at /api/v1.
 
 Reached with a personal key (Authorization: Bearer pr_...), never with the
-app's login, and the key is accepted nowhere else. Every route here is a GET,
-so a key can read and nothing more.
+app's login, and the key is accepted nowhere else. A key reads. A key made
+to write can also book, but only in ledgers where its owner is OWNER or
+MEMBER; a VIEWER's ledger stays read-only whatever the key says. Writing is
+kept narrow: completing drafts, new transactions, new accounts and market
+values. Posted transactions are never changed here; that is done in the app.
 
 Amounts are numbers in the ledger's currency (NOK), signed the way the
 account type is normally read: assets and expenses grow with debit,
@@ -14,18 +17,20 @@ so they move bank balances but not income or expenses until posted.
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from typing import Optional
+from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session, selectinload
 
 from backend.database import get_db
 from ..models import (
-    Account, AccountType, ApiToken, BankAccount, JournalEntry, Ledger,
-    LedgerMember, Transaction, TransactionStatus, User,
+    Account, AccountType, ApiToken, BankAccount, FireRole, JournalEntry, Ledger,
+    LedgerMember, LedgerRole, Transaction, TransactionSource, TransactionStatus, User,
 )
+from ..market_value import set_market_value
 from .api_tokens import TOKEN_PREFIX, hash_token
 
 router = APIRouter(prefix="/v1", tags=["api-v1"])
@@ -78,25 +83,49 @@ def _readable_ledgers(db: Session, token: ApiToken):
     return query.order_by(Ledger.id).all()
 
 
-def get_ledger(
-    ledger_id: Optional[int] = Query(None, description="Required when the key can read more than one ledger"),
-    token: ApiToken = Depends(get_api_token),
-    db: Session = Depends(get_db),
-) -> Ledger:
+WRITING_ROLES = {LedgerRole.OWNER, LedgerRole.MEMBER}
+
+
+def _can_write(token: ApiToken, role: LedgerRole) -> bool:
+    return bool(token.can_write) and role in WRITING_ROLES
+
+
+def _pick_ledger(db: Session, token: ApiToken, ledger_id: Optional[int]):
     readable = _readable_ledgers(db, token)
     if ledger_id is None:
         if len(readable) == 1:
-            return readable[0][0]
+            return readable[0]
         if not readable:
             raise HTTPException(status_code=404, detail="Nøkkelen har ikke tilgang til noe regnskap")
         raise HTTPException(
             status_code=400,
             detail="Velg regnskap med ?ledger_id=. Se GET /api/v1/ledgers.",
         )
-    for ledger, _ in readable:
+    for ledger, role in readable:
         if ledger.id == ledger_id:
-            return ledger
+            return ledger, role
     raise HTTPException(status_code=404, detail="Fant ikke regnskapet")
+
+
+def get_ledger(
+    ledger_id: Optional[int] = Query(None, description="Required when the key can read more than one ledger"),
+    token: ApiToken = Depends(get_api_token),
+    db: Session = Depends(get_db),
+) -> Ledger:
+    return _pick_ledger(db, token, ledger_id)[0]
+
+
+def get_writable_ledger(
+    ledger_id: Optional[int] = Query(None, description="Required when the key can read more than one ledger"),
+    token: ApiToken = Depends(get_api_token),
+    db: Session = Depends(get_db),
+) -> Ledger:
+    ledger, role = _pick_ledger(db, token, ledger_id)
+    if not token.can_write:
+        raise HTTPException(status_code=403, detail="Nøkkelen kan bare lese")
+    if role not in WRITING_ROLES:
+        raise HTTPException(status_code=403, detail="Du har bare lesetilgang til dette regnskapet")
+    return ledger
 
 
 def _num(value) -> float:
@@ -141,9 +170,9 @@ def _month_window(from_month: Optional[str], to_month: Optional[str]):
 
 @router.get("/ledgers")
 def list_ledgers(token: ApiToken = Depends(get_api_token), db: Session = Depends(get_db)):
-    """The ledgers this key can read."""
+    """The ledgers this key can read, and whether it can write in each."""
     return [
-        {"id": ledger.id, "name": ledger.name, "role": role.value}
+        {"id": ledger.id, "name": ledger.name, "role": role.value, "can_write": _can_write(token, role)}
         for ledger, role in _readable_ledgers(db, token)
     ]
 
@@ -163,23 +192,24 @@ def list_accounts(
         query = query.filter(Account.is_active == True)
     accounts = query.order_by(Account.account_number).all()
     numbers = {a.id: a.account_number for a in accounts}
-    return [
-        {
-            "id": a.id,
-            "number": a.account_number,
-            "name": a.account_name,
-            "type": a.account_type.value,
-            "parent_id": a.parent_account_id,
-            "parent_number": numbers.get(a.parent_account_id),
-            "description": a.description,
-            "is_active": a.is_active,
-            "fire_role": a.fire_role.value if a.fire_role else None,
-            "fire_unlock_age": a.fire_unlock_age,
-            "wealth_valuation_percent": _num(a.wealth_valuation_percent)
-            if a.wealth_valuation_percent is not None else None,
-        }
-        for a in accounts
-    ]
+    return [_account_out(a, numbers) for a in accounts]
+
+
+def _account_out(a: Account, numbers: dict) -> dict:
+    return {
+        "id": a.id,
+        "number": a.account_number,
+        "name": a.account_name,
+        "type": a.account_type.value,
+        "parent_id": a.parent_account_id,
+        "parent_number": numbers.get(a.parent_account_id),
+        "description": a.description,
+        "is_active": a.is_active,
+        "fire_role": a.fire_role.value if a.fire_role else None,
+        "fire_unlock_age": a.fire_unlock_age,
+        "wealth_valuation_percent": _num(a.wealth_valuation_percent)
+        if a.wealth_valuation_percent is not None else None,
+    }
 
 
 @router.get("/bank-accounts")
@@ -215,6 +245,29 @@ def list_bank_accounts(ledger: Ledger = Depends(get_ledger), db: Session = Depen
 
 
 # ─── Transactions ────────────────────────────────────────────────────────────
+
+def _transaction_out(t: Transaction) -> dict:
+    return {
+        "id": t.id,
+        "date": t.transaction_date.isoformat(),
+        "description": t.description,
+        "reference": t.reference,
+        "status": t.status.value,
+        "source": t.source.value if t.source else None,
+        "lines": [
+            {
+                "account_id": je.account_id,
+                "account_number": je.account.account_number,
+                "account_name": je.account.account_name,
+                "account_type": je.account.account_type.value,
+                "debit": _num(je.debit),
+                "credit": _num(je.credit),
+                "description": je.description,
+            }
+            for je in t.journal_entries
+        ],
+    }
+
 
 @router.get("/transactions")
 def list_transactions(
@@ -263,29 +316,7 @@ def list_transactions(
     transactions = transactions[:limit]
     last = transactions[-1] if transactions else None
     return {
-        "transactions": [
-            {
-                "id": t.id,
-                "date": t.transaction_date.isoformat(),
-                "description": t.description,
-                "reference": t.reference,
-                "status": t.status.value,
-                "source": t.source.value if t.source else None,
-                "lines": [
-                    {
-                        "account_id": je.account_id,
-                        "account_number": je.account.account_number,
-                        "account_name": je.account.account_name,
-                        "account_type": je.account.account_type.value,
-                        "debit": _num(je.debit),
-                        "credit": _num(je.credit),
-                        "description": je.description,
-                    }
-                    for je in t.journal_entries
-                ],
-            }
-            for t in transactions
-        ],
+        "transactions": [_transaction_out(t) for t in transactions],
         "next_cursor": f"{last.transaction_date.isoformat()}_{last.id}" if has_more else None,
     }
 
@@ -411,3 +442,248 @@ def monthly_summary(
             "net_worth": _num(assets - liabilities),
         })
     return {"ledger_id": ledger.id, "months": result}
+
+
+# ─── Writing ─────────────────────────────────────────────────────────────────
+
+CENT = Decimal("0.01")
+
+
+class LineIn(BaseModel):
+    """One journal line. Name the account by id or by number."""
+    account_id: Optional[int] = None
+    account_number: Optional[str] = None
+    debit: Decimal = Field(default=Decimal(0), ge=0)
+    credit: Decimal = Field(default=Decimal(0), ge=0)
+    description: Optional[str] = Field(default=None, max_length=500)
+
+
+class PostDraftIn(BaseModel):
+    # The counter-entries; the bank's own line stays as it is
+    lines: List[LineIn] = []
+    description: Optional[str] = Field(default=None, min_length=1, max_length=500)
+
+
+class TransactionIn(BaseModel):
+    on: date = Field(alias="date")
+    description: str = Field(min_length=1, max_length=500)
+    reference: Optional[str] = Field(default=None, max_length=100)
+    status: Literal["DRAFT", "POSTED"] = "POSTED"
+    lines: List[LineIn] = Field(min_length=2)
+
+
+class AccountIn(BaseModel):
+    number: str = Field(min_length=1, max_length=20)
+    name: str = Field(min_length=1, max_length=200)
+    type: AccountType
+    parent_number: Optional[str] = None
+    description: Optional[str] = None
+    fire_role: Optional[FireRole] = None
+    fire_unlock_age: Optional[int] = Field(default=None, ge=0, le=100)
+    wealth_valuation_percent: Optional[Decimal] = Field(default=None, ge=0, le=100)
+    # Where market value changes are booked, for investment accounts
+    value_change_account_number: Optional[str] = None
+
+
+class MarketValueIn(BaseModel):
+    value: Decimal
+    # Defaults to today
+    as_of: Optional[date] = Field(default=None, alias="date")
+
+
+def _account_by_number(db: Session, ledger: Ledger, number: str) -> Account:
+    account = db.query(Account).filter(
+        Account.ledger_id == ledger.id, Account.account_number == number
+    ).first()
+    if not account:
+        raise HTTPException(status_code=400, detail=f"Fant ikke konto {number}")
+    return account
+
+
+def _journal_lines(db: Session, ledger: Ledger, lines: List[LineIn]) -> List[JournalEntry]:
+    entries = []
+    for i, line in enumerate(lines, start=1):
+        debit = line.debit.quantize(CENT)
+        credit = line.credit.quantize(CENT)
+        if (debit > 0) == (credit > 0):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Linje {i}: oppgi enten debit eller credit, større enn null",
+            )
+        if line.account_id is not None:
+            account = db.query(Account).filter(
+                Account.id == line.account_id, Account.ledger_id == ledger.id
+            ).first()
+            if not account:
+                raise HTTPException(status_code=400, detail=f"Linje {i}: fant ikke konto-id {line.account_id}")
+            if line.account_number and line.account_number != account.account_number:
+                raise HTTPException(status_code=400, detail=f"Linje {i}: account_id og account_number er ulike kontoer")
+        elif line.account_number:
+            account = _account_by_number(db, ledger, line.account_number)
+        else:
+            raise HTTPException(status_code=400, detail=f"Linje {i}: mangler konto")
+        if not account.is_active:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Linje {i}: konto {account.account_number} er deaktivert",
+            )
+        entries.append(JournalEntry(
+            account_id=account.id, debit=debit, credit=credit, description=line.description,
+        ))
+    return entries
+
+
+def _check_balanced(entries) -> None:
+    if len(entries) < 2:
+        raise HTTPException(status_code=400, detail="Et bilag trenger minst to linjer")
+    debit = sum((e.debit for e in entries), Decimal(0))
+    credit = sum((e.credit for e in entries), Decimal(0))
+    if debit != credit:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Bilaget balanserer ikke: debit {debit}, credit {credit}",
+        )
+
+
+def _load_transaction(db: Session, ledger: Ledger, transaction_id: int) -> Transaction:
+    transaction = db.query(Transaction).filter(
+        Transaction.id == transaction_id, Transaction.ledger_id == ledger.id
+    ).with_for_update().first()
+    if not transaction:
+        raise HTTPException(status_code=404, detail="Fant ikke bilaget")
+    return transaction
+
+
+@router.post("/transactions/{transaction_id}/post")
+def post_draft(
+    transaction_id: int,
+    payload: PostDraftIn,
+    ledger: Ledger = Depends(get_writable_ledger),
+    db: Session = Depends(get_db),
+):
+    """
+    Book a draft: add the counter-entries and mark it posted. The lines it
+    already has (from bank sync, the bank side) are kept as they are.
+    """
+    transaction = _load_transaction(db, ledger, transaction_id)
+    if transaction.status != TransactionStatus.DRAFT:
+        raise HTTPException(status_code=409, detail="Bilaget er allerede bokført")
+    added = _journal_lines(db, ledger, payload.lines)
+    _check_balanced(list(transaction.journal_entries) + added)
+    for entry in added:
+        transaction.journal_entries.append(entry)
+    if payload.description:
+        transaction.description = payload.description
+    transaction.status = TransactionStatus.POSTED
+    db.commit()
+    db.refresh(transaction)
+    return _transaction_out(transaction)
+
+
+@router.post("/transactions", status_code=201)
+def create_transaction(
+    payload: TransactionIn,
+    ledger: Ledger = Depends(get_writable_ledger),
+    token: ApiToken = Depends(get_api_token),
+    db: Session = Depends(get_db),
+):
+    """A new transaction, balanced, as a draft or posted."""
+    entries = _journal_lines(db, ledger, payload.lines)
+    _check_balanced(entries)
+    transaction = Transaction(
+        ledger_id=ledger.id,
+        created_by=token.user_id,
+        transaction_date=payload.on,
+        description=payload.description,
+        reference=payload.reference,
+        status=TransactionStatus[payload.status],
+        source=TransactionSource.API,
+        is_reconciled=False,
+        journal_entries=entries,
+    )
+    db.add(transaction)
+    db.commit()
+    db.refresh(transaction)
+    return _transaction_out(transaction)
+
+
+@router.delete("/transactions/{transaction_id}")
+def delete_transaction(
+    transaction_id: int,
+    ledger: Ledger = Depends(get_writable_ledger),
+    db: Session = Depends(get_db),
+):
+    """Delete a draft this API made. Anything else is removed in the app."""
+    transaction = _load_transaction(db, ledger, transaction_id)
+    if transaction.source != TransactionSource.API or transaction.status != TransactionStatus.DRAFT:
+        raise HTTPException(
+            status_code=409,
+            detail="Bare kladder laget via API-et kan slettes her",
+        )
+    db.delete(transaction)
+    db.commit()
+    return {"deleted": transaction_id}
+
+
+@router.post("/accounts", status_code=201)
+def create_account(
+    payload: AccountIn,
+    ledger: Ledger = Depends(get_writable_ledger),
+    db: Session = Depends(get_db),
+):
+    """A new account in the chart of accounts."""
+    exists = db.query(Account.id).filter(
+        Account.ledger_id == ledger.id, Account.account_number == payload.number
+    ).first()
+    if exists:
+        raise HTTPException(status_code=409, detail=f"Konto {payload.number} finnes allerede")
+    parent = _account_by_number(db, ledger, payload.parent_number) if payload.parent_number else None
+    value_change = (
+        _account_by_number(db, ledger, payload.value_change_account_number)
+        if payload.value_change_account_number else None
+    )
+    account = Account(
+        ledger_id=ledger.id,
+        account_number=payload.number,
+        account_name=payload.name,
+        account_type=payload.type,
+        parent_account_id=parent.id if parent else None,
+        value_change_account_id=value_change.id if value_change else None,
+        fire_role=payload.fire_role,
+        fire_unlock_age=payload.fire_unlock_age,
+        wealth_valuation_percent=payload.wealth_valuation_percent,
+        description=payload.description,
+        is_active=True,
+    )
+    db.add(account)
+    db.commit()
+    db.refresh(account)
+    return _account_out(account, {parent.id: parent.account_number} if parent else {})
+
+
+@router.post("/accounts/{account_id}/market-value")
+def record_market_value(
+    account_id: int,
+    payload: MarketValueIn,
+    ledger: Ledger = Depends(get_writable_ledger),
+    token: ApiToken = Depends(get_api_token),
+    db: Session = Depends(get_db),
+):
+    """
+    Bring an investment account to its market value on a date (default
+    today). The difference is booked against the account's value change
+    account. Values must be entered in date order; the same date again
+    replaces the earlier one.
+    """
+    account = db.query(Account).filter(
+        Account.id == account_id, Account.ledger_id == ledger.id
+    ).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Fant ikke kontoen")
+    adjustment = set_market_value(
+        db, ledger.id, account, payload.value, payload.as_of or date.today(), created_by=token.user_id,
+    )
+    db.commit()
+    if adjustment:
+        db.refresh(adjustment)
+    return {"adjustment": _transaction_out(adjustment) if adjustment else None}

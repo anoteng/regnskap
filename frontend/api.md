@@ -1,11 +1,13 @@
-# Privatregnskap API (les)
+# Privatregnskap API
 
-Et lese-API for andre programmer: egne apper, regneark, skript. Det kan bare lese, aldri endre.
+Et API for andre programmer: egne apper, regneark, skript, assistenter. Det leser, og kan også
+bokføre hvis nøkkelen er laget for det.
 
 ## Tilgang
 
 1. Logg inn på https://privatregnskap.eu, gå til Regnskapsinnstillinger → **API-nøkler**, og lag en nøkkel.
-   Velg om den skal kunne lese alle regnskapene dine eller bare ett, og om den skal utløpe.
+   Velg om den skal nå alle regnskapene dine eller bare ett, om den skal utløpe, og om den skal
+   kunne bokføre (**Kun lese** eller **Lese og bokføre**).
 2. Nøkkelen vises én gang og begynner med `pr_`. Oppbevar den som et passord.
 3. Send den med hver forespørsel:
 
@@ -13,8 +15,9 @@ Et lese-API for andre programmer: egne apper, regneark, skript. Det kan bare les
 Authorization: Bearer pr_...
 ```
 
-Nøkkelen leser med dine rettigheter: bare regnskap du er medlem av, og den slutter å virke for et
-regnskap hvis du mister tilgangen til det. Den kan tilbakekalles når som helst på samme side.
+Nøkkelen har dine rettigheter og aldri mer: bare regnskap du er medlem av, og den slutter å virke for
+et regnskap hvis du mister tilgangen til det. En nøkkel som kan bokføre, gjør det bare i regnskap der
+du er eier eller medlem; der du bare har lesetilgang (`VIEWER`), kan den bare lese. Den kan tilbakekalles når som helst på samme side.
 
 Grunnadresse: `https://privatregnskap.eu/api/v1`
 
@@ -36,9 +39,10 @@ Er den låst til ett regnskap, kan parameteren utelates.
 ## Endepunkter
 
 ### `GET /ledgers`
-Regnskapene nøkkelen kan lese.
+Regnskapene nøkkelen kan lese, og om den kan bokføre i hvert av dem.
 ```json
-[{"id": 2, "name": "Fellesregnskap", "role": "MEMBER"}]
+[{"id": 2, "name": "Fellesregnskap", "role": "VIEWER", "can_write": false},
+ {"id": 3, "name": "Privat", "role": "OWNER", "can_write": true}]
 ```
 
 ### `GET /accounts`
@@ -102,15 +106,75 @@ Inntekter, kostnader og netto per måned, og eiendeler, gjeld og nettoformue ved
    "assets": 2400000.0, "liabilities": 1900000.0, "net_worth": 500000.0}]}
 ```
 
+## Bokføre
+
+Krever en nøkkel med **Lese og bokføre**, og et regnskap der `can_write` er `true`.
+API-et endrer aldri bokførte bilag; retting og reversering gjøres i appen.
+
+### Posteringslinjer
+
+Alle skrivekall bruker samme form for linjer. Kontoen oppgis med `account_number` eller `account_id`,
+og hver linje har enten `debit` eller `credit`, større enn null:
+```json
+{"account_number": "6301", "debit": 412.5, "description": "valgfri"}
+```
+Et bilag må ha minst to linjer, og sum debet må være lik sum kredit.
+
+### `POST /transactions/{id}/post`
+Bokfører en kladd fra banksynken. Kladden har banksiden; send motpostene, gjerne fordelt på flere
+kontoer. `description` kan erstatte bankens tekst. Svaret er bilaget, som i `GET /transactions`.
+```json
+{"lines": [
+  {"account_number": "6301", "debit": 300},
+  {"account_number": "6302", "debit": 112.5}],
+ "description": "REMA 1000, mat og kaffe"}
+```
+Et kjøp på 412,50 har banklinjen `credit: 412.5` på bankkontoen, så motpostene står i debet.
+En innbetaling er motsatt: motposten står i kredit (for eksempel lønn på en inntektskonto).
+
+### `POST /transactions`
+Et nytt bilag, for eksempel noe som ikke går gjennom banken. `status` er `POSTED` (standard) eller
+`DRAFT`. Bilaget merkes `source: "API"`.
+```json
+{"date": "2026-10-31", "description": "Kontant fra mor", "reference": null, "status": "POSTED",
+ "lines": [
+   {"account_number": "1100", "debit": 500},
+   {"account_number": "3405", "credit": 500}]}
+```
+
+### `DELETE /transactions/{id}`
+Sletter en kladd som ble laget via API-et. Andre bilag slettes i appen.
+
+### `POST /accounts`
+Ny konto i kontoplanen. Bare `number`, `name` og `type` (`ASSET`, `LIABILITY`, `EQUITY`, `REVENUE`,
+`EXPENSE`) er påkrevd.
+```json
+{"number": "1630", "name": "Fond", "type": "ASSET", "parent_number": "1600",
+ "description": null, "fire_role": "AVAILABLE", "fire_unlock_age": null,
+ "wealth_valuation_percent": 80, "value_change_account_number": "8300"}
+```
+`value_change_account_number` er kontoen verdiendringer føres mot (se under).
+
+### `POST /accounts/{id}/market-value`
+Setter en eiendelskonto (fond, aksjer, pensjon) til markedsverdien på en dato, standard i dag.
+Forskjellen fra bokført saldo føres mot kontoens verdiendringskonto. Verdier må legges inn i
+datorekkefølge; samme dato på nytt erstatter den forrige.
+```json
+{"value": 125000, "date": "2026-11-13"}
+```
+Svaret er `{"adjustment": <bilag>}`, eller `{"adjustment": null}` hvis kontoen allerede stod på verdien.
+
 ## Feil
 
 Feil kommer som `{"detail": "..."}`:
 
 | Kode | Betyr |
 |---|---|
-| 400 | Ugyldig parameter, eller `ledger_id` mangler |
+| 400 | Ugyldig parameter, `ledger_id` mangler, eller bilaget balanserer ikke |
 | 401 | Nøkkel mangler, er feil, utløpt eller tilbakekalt |
-| 404 | Regnskapet finnes ikke eller nøkkelen har ikke tilgang |
+| 403 | Nøkkelen kan bare lese, eller du har bare lesetilgang til regnskapet |
+| 404 | Regnskapet, bilaget eller kontoen finnes ikke, eller nøkkelen har ikke tilgang |
+| 409 | Bilaget er allerede bokført, kontonummeret finnes, eller bilaget kan ikke slettes her |
 
 ## Eksempel
 

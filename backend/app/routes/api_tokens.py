@@ -25,6 +25,8 @@ class ApiTokenCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     # None reads every ledger the user is a member of
     ledger_id: Optional[int] = None
+    # Writing is also bounded by the user's role in each ledger
+    can_write: bool = False
     expires_in_days: Optional[int] = Field(default=None, ge=1, le=3650)
 
 
@@ -33,6 +35,7 @@ class ApiTokenOut(BaseModel):
     name: str
     ledger_id: Optional[int]
     ledger_name: Optional[str]
+    can_write: bool
     token_prefix: str
     created_at: Optional[datetime]
     expires_at: Optional[datetime]
@@ -50,6 +53,7 @@ def _out(token: ApiToken) -> dict:
         "name": token.name,
         "ledger_id": token.ledger_id,
         "ledger_name": token.ledger.name if token.ledger else None,
+        "can_write": bool(token.can_write),
         "token_prefix": token.token_prefix,
         "created_at": token.created_at,
         "expires_at": token.expires_at,
@@ -88,6 +92,7 @@ def create_token(
     token = ApiToken(
         user_id=current_user.id,
         ledger_id=payload.ledger_id,
+        can_write=payload.can_write,
         name=payload.name.strip(),
         token_prefix=raw[:10],
         token_hash=hash_token(raw),

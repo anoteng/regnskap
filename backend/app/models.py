@@ -77,6 +77,7 @@ class TransactionSource(str, enum.Enum):
     MANUAL = "MANUAL"
     CSV_IMPORT = "CSV_IMPORT"
     BANK_SYNC = "BANK_SYNC"
+    API = "API"
 
 
 class ChartOfAccountsTemplate(Base):
@@ -212,11 +213,13 @@ class RefreshToken(Base):
 
 class ApiToken(Base):
     """
-    A personal key for reading through /api/v1 from another program.
+    A personal key for /api/v1, used by another program.
 
-    It reads with the rights of the user who made it and nothing more: only
-    ledgers the user is still a member of, and only ever reading, because no
-    other route accepts it. Only a hash is kept; the key is shown once.
+    It acts with the rights of the user who made it and nothing more: only
+    ledgers the user is still a member of, and no other route accepts it. A
+    key reads unless it was made to write too, and even then it writes only
+    where the user's own role allows it. Only a hash is kept; the key is
+    shown once.
     """
     __tablename__ = "api_tokens"
 
@@ -224,6 +227,7 @@ class ApiToken(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     # NULL reads every ledger the user is a member of
     ledger_id = Column(Integer, ForeignKey("ledgers.id", ondelete="CASCADE"), nullable=True)
+    can_write = Column(Boolean, nullable=False, default=False)
     name = Column(String(100), nullable=False)
     # The first characters, so the user can tell keys apart
     token_prefix = Column(String(16), nullable=False)

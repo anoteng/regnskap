@@ -1,5 +1,5 @@
-import api from './api.js?v=24';
-import { showError, showSuccess, showModal } from './utils.js?v=24';
+import api from './api.js?v=25';
+import { showError, showSuccess, showModal } from './utils.js?v=25';
 
 const escape = (text) => String(text ?? '').replace(/[&<>"']/g, (c) => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
@@ -42,12 +42,13 @@ class ApiTokensManager {
         }
         list.innerHTML = `
             <table class="table">
-                <thead><tr><th>Navn</th><th>Regnskap</th><th>Sist brukt</th><th>Utløper</th><th></th></tr></thead>
+                <thead><tr><th>Navn</th><th>Regnskap</th><th>Tilgang</th><th>Sist brukt</th><th>Utløper</th><th></th></tr></thead>
                 <tbody>
                     ${tokens.map((t) => `
                         <tr>
                             <td>${escape(t.name)}<br><small><code>${escape(t.token_prefix)}…</code></small></td>
                             <td>${t.ledger_name ? escape(t.ledger_name) : 'Alle'}</td>
+                            <td>${t.can_write ? 'Lese og bokføre' : 'Kun lese'}</td>
                             <td>${formatDate(t.last_used_at) || 'Aldri'}</td>
                             <td>${formatDate(t.expires_at) || 'Aldri'}</td>
                             <td><button class="btn btn-sm btn-danger" data-revoke="${t.id}">Tilbakekall</button></td>
@@ -69,11 +70,13 @@ class ApiTokensManager {
         }
         const ledgerValue = document.getElementById('api-token-ledger').value;
         const expiresValue = document.getElementById('api-token-expires').value;
+        const canWrite = document.getElementById('api-token-access').value === 'write';
         try {
             const created = await api.post('/api-tokens/', {
                 name,
                 ledger_id: ledgerValue ? Number(ledgerValue) : null,
                 expires_in_days: expiresValue ? Number(expiresValue) : null,
+                can_write: canWrite,
             });
             document.getElementById('api-token-name').value = '';
             showModal('Ny API-nøkkel', `
@@ -82,7 +85,9 @@ class ApiTokensManager {
                        style="width: 100%; font-family: monospace;" onclick="this.select()">
                 <button class="btn btn-primary" id="api-token-copy" style="margin-top: 1rem;">Kopier</button>
                 <p class="subtitle" style="margin-top: 1rem;">Bruk den som <code>Authorization: Bearer &lt;nøkkel&gt;</code>
-                mot <code>${escape(location.origin)}/api/v1/</code>. Den kan bare lese.</p>
+                mot <code>${escape(location.origin)}/api/v1/</code>. ${canWrite
+                    ? 'Den kan lese, og bokføre i regnskap der du selv kan føre.'
+                    : 'Den kan bare lese.'}</p>
             `);
             document.getElementById('api-token-copy').addEventListener('click', async () => {
                 try {

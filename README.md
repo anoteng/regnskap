@@ -12,7 +12,7 @@ En komplett web-applikasjon for personlig regnskap med dobbelt bokføring, baser
 - **Bankkontoer**: Støtte for brukskontoer, sparekontoer og kredittkort
 - **Banksynk via Enable Banking** (Premium): Tjeneren henter transaksjoner fra banken via PSD2, og de havner som kladder i posteringskøen
 - **Banksynk fra telefonen** (alle planer): Android-appen henter fra SpareBank 1 med brukerens egen API-nøkkel og laster opp til regnskapet
-- **Lese-API**: Personlige API-nøkler gir andre programmer lesetilgang via `/api/v1`
+- **API**: Personlige API-nøkler gir andre programmer lesetilgang via `/api/v1`, og om ønsket mulighet til å bokføre
 - **Android-app**: Posteringskø, vedlegg, budsjett, søk og banksynk fra egen enhet
 - **Budsjett**: Lag og følg budsjetter
 - **Rapporter**: Balanse og resultatregnskap
@@ -200,14 +200,18 @@ etter 60 dager uten synk.
 - Har ikke telefonen lastet opp på 14 dager, merkes koblingen med feil og du får
   en e-post.
 
-### API (lesetilgang)
+### API
 
 Andre programmer kan lese regnskapene dine med en personlig API-nøkkel. Lag den under
-Regnskapsinnstillinger → API-nøkler. Nøkkelen kan bare lese, og bare regnskap du selv er medlem av.
-Den kan låses til ett regnskap, få en utløpsdato og tilbakekalles.
+Regnskapsinnstillinger → API-nøkler. Nøkkelen når bare regnskap du selv er medlem av, og kan låses
+til ett regnskap, få en utløpsdato og tilbakekalles.
+
+En nøkkel er «Kun lese» eller «Lese og bokføre». Den som kan bokføre, gjør det bare der eieren selv
+kan føre (eier eller medlem, ikke lesetilgang). Den kan bokføre kladder fra banksynken, lage nye
+bilag og kontoer og legge inn markedsverdier, men aldri endre et bokført bilag.
 
 Endepunktene ligger under `/api/v1` (regnskap, kontoplan, bankkontoer, transaksjoner, saldo per måned
-og et månedssammendrag med inntekter, kostnader og nettoformue). Full beskrivelse:
+og et månedssammendrag med inntekter, kostnader og nettoformue, og skrivekallene). Full beskrivelse:
 [frontend/api.md](frontend/api.md), også på https://privatregnskap.eu/api-docs.html.
 
 ### Registrere transaksjoner

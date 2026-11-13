@@ -113,6 +113,7 @@ CREATE TABLE `api_tokens` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `user_id` int(11) NOT NULL,
   `ledger_id` int(11) DEFAULT NULL,
+  `can_write` tinyint(1) NOT NULL DEFAULT 0,
   `name` varchar(100) NOT NULL,
   `token_prefix` varchar(16) NOT NULL,
   `token_hash` varchar(64) NOT NULL,
