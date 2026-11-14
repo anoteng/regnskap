@@ -5,8 +5,8 @@ Reached with a personal key (Authorization: Bearer pr_...), never with the
 app's login, and the key is accepted nowhere else. A key reads. A key made
 to write can also book, but only in ledgers where its owner is OWNER or
 MEMBER; a VIEWER's ledger stays read-only whatever the key says. Writing is
-kept narrow: completing drafts, new transactions, new accounts and market
-values. Posted transactions are never changed here; that is done in the app.
+kept narrow: completing drafts, joining the two halves of a transfer, new
+transactions, new accounts and market values. Posted transactions are never changed here; that is done in the app.
 
 Amounts are numbers in the ledger's currency (NOK), signed the way the
 account type is normally read: assets and expenses grow with debit,
@@ -31,6 +31,7 @@ from ..models import (
     LedgerMember, LedgerRole, Transaction, TransactionSource, TransactionStatus, User,
 )
 from ..market_value import set_market_value
+from ..transaction_chaining import TransactionChainMatcher
 from .api_tokens import TOKEN_PREFIX, hash_token
 
 router = APIRouter(prefix="/v1", tags=["api-v1"])
@@ -578,6 +579,66 @@ def post_draft(
     db.commit()
     db.refresh(transaction)
     return _transaction_out(transaction)
+
+
+class ChainIn(BaseModel):
+    first_id: int
+    second_id: int
+
+
+@router.get("/transactions/chain-suggestions")
+def chain_suggestions(ledger: Ledger = Depends(get_ledger), db: Session = Depends(get_db)):
+    """
+    Pairs of bank drafts that look like the two sides of one transfer between
+    the ledger's own accounts: same amount, opposite sides, at most two days apart.
+    """
+    return [
+        {
+            "first_id": s.primary_transaction_id,
+            "second_id": s.secondary_transaction_id,
+            "amount": _num(s.amount),
+            "first_date": s.primary_date.isoformat(),
+            "second_date": s.secondary_date.isoformat(),
+            "first_description": s.primary_description,
+            "second_description": s.secondary_description,
+            "first_account": s.primary_account_name,
+            "second_account": s.secondary_account_name,
+            "confidence": s.confidence,
+        }
+        for s in TransactionChainMatcher.find_chain_candidates(db, ledger.id)
+    ]
+
+
+@router.post("/transactions/chain")
+def chain_drafts(
+    payload: ChainIn,
+    ledger: Ledger = Depends(get_writable_ledger),
+    db: Session = Depends(get_db),
+):
+    """
+    Join two bank drafts, one on each side of a transfer between own accounts,
+    into one posted transaction. Both must be drafts with only their bank line,
+    on different accounts, and balance each other exactly.
+    """
+    if payload.first_id == payload.second_id:
+        raise HTTPException(status_code=400, detail="Velg to ulike bilag")
+    first = _load_transaction(db, ledger, payload.first_id)
+    second = _load_transaction(db, ledger, payload.second_id)
+    for t in (first, second):
+        if t.status != TransactionStatus.DRAFT:
+            raise HTTPException(status_code=409, detail=f"Bilag {t.id} er allerede bokført")
+        if len(t.journal_entries) != 1:
+            raise HTTPException(status_code=400, detail=f"Bilag {t.id} har mer enn banklinjen")
+    a, b = first.journal_entries[0], second.journal_entries[0]
+    if a.account_id == b.account_id:
+        raise HTTPException(status_code=400, detail="Begge bilagene er på samme konto")
+    if a.debit - a.credit != b.credit - b.debit:
+        raise HTTPException(status_code=400, detail="Beløpene går ikke opp mot hverandre")
+    # The earlier one is kept, as in the app
+    keep, drop = (first, second) if (first.transaction_date, first.id) <= (second.transaction_date, second.id) else (second, first)
+    merged = TransactionChainMatcher.chain_transactions(db, ledger.id, keep.id, drop.id, auto_post=True)
+    db.commit()
+    return _transaction_out(merged)
 
 
 @router.post("/transactions", status_code=201)

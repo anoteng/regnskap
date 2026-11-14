@@ -207,7 +207,8 @@ Regnskapsinnstillinger → API-nøkler. Nøkkelen når bare regnskap du selv er 
 til ett regnskap, få en utløpsdato og tilbakekalles.
 
 En nøkkel er «Kun lese» eller «Lese og bokføre». Den som kan bokføre, gjør det bare der eieren selv
-kan føre (eier eller medlem, ikke lesetilgang). Den kan bokføre kladder fra banksynken, lage nye
+kan føre (eier eller medlem, ikke lesetilgang). Den kan bokføre kladder fra banksynken, slå sammen
+de to sidene av en overføring mellom egne kontoer, lage nye
 bilag og kontoer og legge inn markedsverdier, men aldri endre et bokført bilag.
 
 Endepunktene ligger under `/api/v1` (regnskap, kontoplan, bankkontoer, transaksjoner, saldo per måned

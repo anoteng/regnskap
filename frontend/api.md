@@ -132,6 +132,25 @@ kontoer. `description` kan erstatte bankens tekst. Svaret er bilaget, som i `GET
 Et kjøp på 412,50 har banklinjen `credit: 412.5` på bankkontoen, så motpostene står i debet.
 En innbetaling er motsatt: motposten står i kredit (for eksempel lønn på en inntektskonto).
 
+### `GET /transactions/chain-suggestions`
+Par av kladder som ser ut som de to sidene av én overføring mellom egne kontoer: samme beløp,
+motsatt side, høyst to dager mellom. Krever bare lesetilgang.
+```json
+[{"first_id": 4501, "second_id": 4502, "amount": 862.0,
+  "first_date": "2026-06-23", "second_date": "2026-06-23",
+  "first_description": "Overføring", "second_description": "Overføring",
+  "first_account": "Regningskonto", "second_account": "Brukskonto", "confidence": "HIGH"}]
+```
+`confidence` er `HIGH` ved samme dato, ellers `MEDIUM`.
+
+### `POST /transactions/chain`
+Slår sammen to kladder, én på hver side av en overføring, til ett bokført bilag. Begge må være
+kladder med bare banklinjen, på ulike kontoer, og beløpene må gå nøyaktig opp. Det tidligste bilaget
+beholdes; det andre forsvinner. Svaret er det sammenslåtte bilaget.
+```json
+{"first_id": 4501, "second_id": 4502}
+```
+
 ### `POST /transactions`
 Et nytt bilag, for eksempel noe som ikke går gjennom banken. `status` er `POSTED` (standard) eller
 `DRAFT`. Bilaget merkes `source: "API"`.
