@@ -894,6 +894,8 @@ class FireObligationInput(BaseModel):
     monthly_amount: Decimal = Decimal("0")
     balance: Optional[Decimal] = None
     interest_percent: Optional[Decimal] = None
+    """Payments begin here; a loan gathers interest until then."""
+    start_date: Optional[date] = None
     end_date: Optional[date] = None
     inflation_adjusted: bool = False
     frees_up_cash: bool = True

@@ -103,11 +103,15 @@ class Obligation:
 
     Either a flat `monthly` with an `end_month`, or a loan given as `balance`
     plus `annual_rate`, where the end is amortised out of the payment.
+
+    Nothing is paid before `start_month`. A loan gathers interest meanwhile,
+    so the balance it starts paying on is larger than today's.
     """
     name: str
     kind: str
     monthly: float
     end_month: Optional[int] = None
+    start_month: int = 0
     balance: float = 0.0
     annual_rate: float = 0.0
     # Child support follows the index; a fixed-term loan payment does not
@@ -470,9 +474,14 @@ def project(
 
             for i, ob in enumerate(inputs.obligations):
                 cost_nominal = 0.0
-                running = ob.end_month is None or month < ob.end_month
+                started = month >= ob.start_month
+                running = started and (ob.end_month is None or month < ob.end_month)
                 if ob.is_loan:
-                    if loan_balance[i] > PAID_OFF and running:
+                    if loan_balance[i] > PAID_OFF and not started:
+                        interest = loan_balance[i] * ob.annual_rate / MONTHS_PER_YEAR
+                        loan_balance[i] += interest
+                        interest_paid[i] += interest
+                    elif loan_balance[i] > PAID_OFF and running:
                         interest = loan_balance[i] * ob.annual_rate / MONTHS_PER_YEAR
                         payment = min(ob.monthly, loan_balance[i] + interest)
                         loan_balance[i] += interest - payment
@@ -487,7 +496,7 @@ def project(
                         loan_balance[i] = 0.0
                 elif running:
                     cost_nominal = ob.monthly
-                elif payoff_month[i] is None and ob.end_month is not None:
+                elif started and payoff_month[i] is None and ob.end_month is not None:
                     payoff_month[i] = ob.end_month
 
                 if cost_nominal:
@@ -712,9 +721,14 @@ def _present_value(ob: Obligation, inputs: FireInputs, real_monthly: float) -> f
     discount = 1.0
     total = 0.0
     for month in range(horizon):
-        running = ob.end_month is None or month < ob.end_month
-        if not running:
+        if ob.end_month is not None and month >= ob.end_month:
             break
+        if month < ob.start_month:
+            if ob.is_loan:
+                balance += balance * ob.annual_rate / MONTHS_PER_YEAR
+            inflation_factor *= 1.0 + inflation_monthly
+            discount *= 1.0 + real_monthly
+            continue
         if ob.is_loan:
             if balance <= PAID_OFF:
                 break
@@ -993,11 +1007,15 @@ def build_inputs(db, settings, as_of: Optional[date] = None) -> FireInputs:
         end_month = None
         if ob.end_date:
             end_month = max(0, months_between(start, ob.end_date))
+        start_month = 0
+        if ob.start_date:
+            start_month = max(0, months_between(start, ob.start_date))
         obligations.append(Obligation(
             name=ob.name,
             kind=ob.kind.value,
             monthly=float(ob.monthly_amount or 0),
             end_month=end_month,
+            start_month=start_month,
             balance=loan_balance,
             annual_rate=float(ob.interest_percent or 0) / 100.0,
             inflation_adjusted=bool(ob.inflation_adjusted),

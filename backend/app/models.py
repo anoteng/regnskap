@@ -943,6 +943,9 @@ class FireObligation(Base):
     monthly_amount = Column(DECIMAL(15, 2), nullable=False, default=0)
     balance = Column(DECIMAL(15, 2), nullable=True)
     interest_percent = Column(DECIMAL(6, 4), nullable=True)
+    # Payments begin here. A loan on deferment, like a study loan abroad,
+    # gathers interest until then without being paid on
+    start_date = Column(Date, nullable=True)
     end_date = Column(Date, nullable=True)
 
     # Child support follows the index; a fixed-term loan payment does not

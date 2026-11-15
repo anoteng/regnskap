@@ -1014,6 +1014,7 @@ CREATE TABLE `fire_obligations` (
   `monthly_amount` decimal(15,2) NOT NULL DEFAULT 0.00,
   `balance` decimal(15,2) DEFAULT NULL,
   `interest_percent` decimal(6,4) DEFAULT NULL,
+  `start_date` date DEFAULT NULL,
   `end_date` date DEFAULT NULL,
   `inflation_adjusted` tinyint(1) NOT NULL DEFAULT 0,
   `frees_up_cash` tinyint(1) NOT NULL DEFAULT 1,

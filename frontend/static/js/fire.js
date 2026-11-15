@@ -1,5 +1,5 @@
-import api from './api.js?v=25';
-import { formatCurrency, showError, showSuccess, showModal, closeModal } from './utils.js?v=25';
+import api from './api.js?v=26';
+import { formatCurrency, showError, showSuccess, showModal, closeModal } from './utils.js?v=26';
 
 const KINDS = {
     LOAN: 'Lån',
@@ -410,7 +410,7 @@ class FireManager {
                    Et lån med saldo og rente får nedbetalingsdatoen regnet ut.</p>
                 ${list.length ? `
                 <table class="table">
-                    <thead><tr><th>Navn</th><th>Type</th><th class="num">Per måned</th><th>Slutter</th><th>Bokføres på</th><th></th></tr></thead>
+                    <thead><tr><th>Navn</th><th>Type</th><th class="num">Per måned</th><th>Starter</th><th>Slutter</th><th>Bokføres på</th><th></th></tr></thead>
                     <tbody>
                         ${list.map(ob => {
                             const o = outcomes[ob.name];
@@ -420,6 +420,7 @@ class FireManager {
                                 <td>${escapeHtml(ob.name)}${ob.is_active ? '' : ' (av)'}</td>
                                 <td>${KINDS[ob.kind] || ob.kind}</td>
                                 <td class="num">${kr(ob.monthly_amount)}</td>
+                                <td>${ob.start_date ? isoDate(ob.start_date) : 'Nå'}</td>
                                 <td>${ends}${o && o.derived ? ' <span class="subtitle">(utledet)</span>' : ''}</td>
                                 <td>${costName(ob.cost_account_id)}</td>
                                 <td class="num">
@@ -736,6 +737,12 @@ class FireManager {
                     <input type="number" id="ob-interest" step="0.0001" value="${ob && ob.interest_percent !== null ? ob.interest_percent : ''}">
                 </div>
                 <div class="form-group">
+                    <label>Startdato (valgfri)</label>
+                    <input type="date" id="ob-start-date" value="${ob && ob.start_date ? ob.start_date : ''}">
+                    <small class="subtitle">Når betalingene begynner. Et lån med betalingsutsettelse
+                        får renter lagt til saldoen fram til da.</small>
+                </div>
+                <div class="form-group">
                     <label>Sluttdato (overstyrer utregningen)</label>
                     <input type="date" id="ob-end-date" value="${ob && ob.end_date ? ob.end_date : ''}">
                 </div>
@@ -791,6 +798,7 @@ class FireManager {
                 monthly_amount: val('ob-monthly') ?? 0,
                 balance: val('ob-balance'),
                 interest_percent: val('ob-interest'),
+                start_date: document.getElementById('ob-start-date').value || null,
                 end_date: document.getElementById('ob-end-date').value || null,
                 inflation_adjusted: document.getElementById('ob-inflation').checked,
                 frees_up_cash: document.getElementById('ob-frees').checked,

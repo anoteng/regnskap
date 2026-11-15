@@ -357,6 +357,8 @@ def _apply(obligation: FireObligation, payload: FireObligationInput) -> None:
             status_code=400,
             detail="Et lån trenger enten sluttdato eller saldo, ellers tar det aldri slutt",
         )
+    if payload.start_date and payload.end_date and payload.start_date >= payload.end_date:
+        raise HTTPException(status_code=400, detail="Startdatoen må være før sluttdatoen")
 
     obligation.name = payload.name.strip()
     obligation.kind = kind
@@ -365,6 +367,7 @@ def _apply(obligation: FireObligation, payload: FireObligationInput) -> None:
     obligation.monthly_amount = payload.monthly_amount or Decimal("0")
     obligation.balance = payload.balance
     obligation.interest_percent = payload.interest_percent
+    obligation.start_date = payload.start_date
     obligation.end_date = payload.end_date
     obligation.inflation_adjusted = payload.inflation_adjusted
     obligation.frees_up_cash = payload.frees_up_cash
@@ -414,7 +417,7 @@ def get_projection(
             horizon_age=inputs.horizon_age,
             monthly_spending=_d(inputs.monthly_spending),
             monthly_net_income=_d(inputs.monthly_net_income),
-            monthly_obligations=_d(sum(ob.monthly for ob in inputs.obligations)),
+            monthly_obligations=_d(sum(ob.monthly for ob in inputs.obligations if not ob.start_month)),
             swr_percent=settings.swr_percent,
             inflation_percent=settings.inflation_percent,
             expected_return_percent=settings.expected_return_percent,
