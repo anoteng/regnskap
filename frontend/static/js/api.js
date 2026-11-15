@@ -672,6 +672,14 @@ class API {
         const q = retirementDate ? `?retirement_date=${retirementDate}` : '';
         return this.get(`/fire/projection${q}`);
     }
+
+    async getFireMonteCarlo(retirementDate = null, successPercent = null) {
+        const params = new URLSearchParams();
+        if (retirementDate) params.set('retirement_date', retirementDate);
+        if (successPercent) params.set('success_percent', successPercent);
+        const q = params.toString();
+        return this.get(`/fire/monte-carlo${q ? `?${q}` : ''}`);
+    }
 }
 
 export default new API();

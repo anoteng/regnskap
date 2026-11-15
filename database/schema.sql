@@ -996,6 +996,7 @@ CREATE TABLE `fire_settings` (
   `wealth_tax_step2_rate_percent` decimal(6,3) DEFAULT 1.100,
   `wealth_tax_index_threshold` tinyint(1) NOT NULL DEFAULT 1,
   `gains_tax_percent` decimal(5,2) NOT NULL DEFAULT 37.84,
+  `mc_success_percent` decimal(5,2) NOT NULL DEFAULT 90.00,
   `created_at` timestamp NULL DEFAULT current_timestamp(),
   `updated_at` timestamp NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),

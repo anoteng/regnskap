@@ -459,6 +459,7 @@ def project(
     returns: ReturnModel,
     retirement_month: int,
     growth_only: bool = False,
+    stop_when_depleted: bool = False,
 ) -> Projection:
     """Run the plan month by month from `inputs.start` to the horizon.
 
@@ -469,6 +470,10 @@ def project(
     own. It answers a different question — what today's capital becomes if
     nothing is ever added to it — and is drawn alongside the real projection
     so the two can be compared.
+
+    `stop_when_depleted` gives up at the first month the money runs out and
+    returns a failed projection without the rest of its rows. Monte Carlo
+    only needs the verdict, and most failed runs are failed early.
     """
     horizon = inputs.horizon_months
     retirement_month = max(0, min(retirement_month, horizon))
@@ -605,6 +610,8 @@ def project(
 
             if sum(p.amount for p in pots if p.spendable) < 0 and depleted_month is None:
                 depleted_month = month
+                if stop_when_depleted:
+                    break
 
         growth = 1.0 + returns.monthly_real_return(month)
         for pot in pots:

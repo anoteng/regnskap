@@ -897,6 +897,9 @@ class FireSettings(Base):
     wealth_tax_index_threshold = Column(Boolean, nullable=False, default=True)
     # On gains taken out of an aksjesparekonto: 22 % times the 1.72 gross-up
     gains_tax_percent = Column(DECIMAL(5, 2), nullable=False, default=37.84)
+    # How sure the Monte Carlo answer has to be: the share of random paths
+    # in which the money lasts to the horizon
+    mc_success_percent = Column(DECIMAL(5, 2), nullable=False, default=90)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

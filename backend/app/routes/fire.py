@@ -33,6 +33,9 @@ from ..schemas import (
     FireCostAccount,
     FireIncomeStreamInput,
     FireIncomeStreamOut,
+    FireMonteCarloCurvePoint,
+    FireMonteCarloFanPoint,
+    FireMonteCarloOut,
     FireNumberOut,
     FireObligationInput,
     FireObligationOut,
@@ -55,6 +58,7 @@ from ..fire_engine import (
     months_between,
     project,
 )
+from ..fire_montecarlo import simulate
 
 router = APIRouter(prefix="/fire", tags=["fire"])
 
@@ -98,6 +102,7 @@ def _to_out(ledger_id: int, settings: Optional[FireSettings]) -> FireSettingsOut
         wealth_tax_step2_rate_percent=settings.wealth_tax_step2_rate_percent,
         wealth_tax_index_threshold=settings.wealth_tax_index_threshold,
         gains_tax_percent=settings.gains_tax_percent,
+        mc_success_percent=settings.mc_success_percent,
         excluded_account_ids=sorted(e.account_id for e in settings.excluded_accounts),
         obligations=[FireObligationOut.model_validate(ob) for ob in settings.obligations],
         income_streams=[
@@ -151,7 +156,7 @@ def update_fire_settings(
         "lookback_months", "shared_ledger_id", "shared_share_percent",
         "wealth_tax_threshold", "wealth_tax_rate_percent",
         "wealth_tax_step2_threshold", "wealth_tax_step2_rate_percent",
-        "wealth_tax_index_threshold", "gains_tax_percent",
+        "wealth_tax_index_threshold", "gains_tax_percent", "mc_success_percent",
     ):
         setattr(settings, field, getattr(payload, field))
 
@@ -454,6 +459,59 @@ def get_projection(
         target=_projection_out(target, inputs) if target else None,
         chart=_chart(inputs, returns, settings),
         warnings=list(inputs.warnings),
+    )
+
+
+@router.get("/monte-carlo", response_model=FireMonteCarloOut)
+def get_monte_carlo(
+    retirement_date: Optional[date] = Query(None),
+    success_percent: Optional[Decimal] = Query(None, gt=0, le=100),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    current_ledger: Ledger = Depends(get_current_ledger),
+):
+    """How often the plan holds when returns and inflation vary.
+
+    Slow the first time (some seconds), cached after that until the ledger
+    or the settings change. `success_percent` overrides the saved target and
+    `retirement_date` picks the date the spread is drawn for.
+    """
+    settings = _require_settings(db, current_ledger.id)
+    try:
+        inputs = build_inputs(db, settings)
+    except FireDisabled as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    target = float(success_percent if success_percent is not None else settings.mc_success_percent)
+    result = simulate(
+        inputs,
+        float(settings.return_volatility_percent) / 100.0,
+        float(settings.inflation_volatility_percent) / 100.0,
+        target,
+        LATEST_RETIREMENT_AGE,
+        retirement_date or settings.target_retirement_date,
+    )
+    return FireMonteCarloOut(
+        runs=result.runs,
+        target_percent=_d(result.target_percent, "0.1"),
+        earliest_date=result.earliest_date,
+        earliest_age=result.earliest_age,
+        chosen_date=result.chosen_date,
+        chosen_age=age_on(inputs.birth_date, result.chosen_date) if result.chosen_date else None,
+        chosen_success_percent=(
+            _d(result.chosen_success_percent, "0.1")
+            if result.chosen_success_percent is not None else None
+        ),
+        return_volatility_percent=settings.return_volatility_percent,
+        inflation_volatility_percent=settings.inflation_volatility_percent,
+        curve=[
+            FireMonteCarloCurvePoint(year=c.year, age=c.age, success_percent=_d(c.success_percent, "0.1"))
+            for c in result.curve
+        ],
+        fan=[
+            FireMonteCarloFanPoint(year=p.year, age=p.age, p10=_d(p.p10), p50=_d(p.p50), p90=_d(p.p90))
+            for p in result.fan
+        ],
     )
 
 

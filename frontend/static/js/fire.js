@@ -1,5 +1,5 @@
-import api from './api.js?v=28';
-import { formatCurrency, showError, showSuccess, showModal, closeModal } from './utils.js?v=28';
+import api from './api.js?v=29';
+import { formatCurrency, showError, showSuccess, showModal, closeModal } from './utils.js?v=29';
 
 const KINDS = {
     LOAN: 'Lån',
@@ -54,6 +54,13 @@ class FireManager {
         this.ledgers = null;
         this.result = null;
         this.testDate = null;
+        // Monte Carlo is slow the first time, so it runs only when asked
+        // and is then kept up to date with the date being tested
+        this.mc = null;
+        this.mcWanted = false;
+        this.mcTarget = null;
+        this.mcError = null;
+        this.mcBusy = false;
     }
 
     async init() {
@@ -84,6 +91,37 @@ class FireManager {
         }
         container.innerHTML = this.render();
         this.bind();
+        if (this.mcWanted && this.result) this.runMonteCarlo();
+    }
+
+    async runMonteCarlo() {
+        this.mcWanted = true;
+        this.mcBusy = true;
+        this.mcError = null;
+        this.updateMonteCarlo();
+        try {
+            this.mc = await api.getFireMonteCarlo(this.testDate, this.mcTarget);
+        } catch (error) {
+            this.mcError = error.message;
+        }
+        this.mcBusy = false;
+        this.updateMonteCarlo();
+    }
+
+    updateMonteCarlo() {
+        const card = document.getElementById('fire-mc-card');
+        if (!card) return;
+        card.innerHTML = this.renderMonteCarloBody();
+        this.bindMonteCarlo();
+    }
+
+    bindMonteCarlo() {
+        const run = document.getElementById('fire-mc-run');
+        if (run) run.addEventListener('click', () => {
+            const v = parseFloat(document.getElementById('fire-mc-target').value);
+            this.mcTarget = v > 0 && v <= 100 ? v : null;
+            this.runMonteCarlo();
+        });
     }
 
     // ------------------------------------------------------------------
@@ -109,6 +147,7 @@ class FireManager {
             ${this.renderIncomeStreams()}
             ${this.result ? this.renderCapital() : ''}
             ${this.result ? this.renderHoldings() : ''}
+            ${this.result ? `<div class="card" id="fire-mc-card">${this.renderMonteCarloBody()}</div>` : ''}
             ${this.result ? this.renderProjection() : ''}
             ${this.renderSettings()}
         `;
@@ -550,6 +589,138 @@ class FireManager {
         `;
     }
 
+    // ------------------------------------------------------------------
+    // Monte Carlo: the same plan through a few hundred random paths of
+    // return and inflation. One curve for how often it holds by retirement
+    // year, one band for how wide the outcomes spread at the chosen date.
+    // ------------------------------------------------------------------
+    renderMonteCarloBody() {
+        const target = this.mcTarget ?? Number(this.settings.mc_success_percent ?? 90);
+        const mc = this.mc;
+        const controls = `
+            <div class="form-group">
+                <label>Ønsket suksessrate (%)</label>
+                <input type="number" id="fire-mc-target" min="1" max="100" step="1" value="${target}">
+                <button class="btn btn-sm btn-primary" id="fire-mc-run" ${this.mcBusy ? 'disabled' : ''}>
+                    ${this.mcBusy ? 'Simulerer…' : (mc ? 'Kjør på nytt' : 'Kjør simulering')}</button>
+            </div>`;
+        const intro = `
+            <h2>Monte Carlo</h2>
+            <p class="subtitle">Den samme planen gjennom mange tilfeldige forløp for avkastning og
+               inflasjon. Suksess betyr at de tilgjengelige pengene varer til
+               ${this.result.assumptions.horizon_age} år. Første kjøring tar noen sekunder.</p>`;
+        if (this.mcError) return intro + controls + `<p class="fire-short">${escapeHtml(this.mcError)}</p>`;
+        if (!mc) return intro + controls;
+
+        const chosen = mc.chosen_date
+            ? `<p>Pensjon fra <strong>${monthYear(mc.chosen_date)}</strong> (${mc.chosen_age} år):
+                  <strong>${pct(mc.chosen_success_percent)}</strong> av forløpene holder.</p>` : '';
+        return `
+            ${intro}
+            ${controls}
+            <div class="fire-headline">
+                <p>Med ${pct(mc.target_percent)} sikkerhet:
+                   <strong>${mc.earliest_date ? `${monthYear(mc.earliest_date)}, ${mc.earliest_age} år` : 'ikke innen 75 år'}</strong></p>
+                ${chosen}
+            </div>
+            ${this.renderMonteCarloCurve(mc)}
+            ${this.renderMonteCarloFan(mc)}
+            <p class="subtitle">${mc.runs} forløp. Avkastningen svinger med ${pct(mc.return_volatility_percent)}
+               og inflasjonen med ${pct(mc.inflation_volatility_percent)} i året (standardavvik, i
+               innstillingene). Hver måned trekkes for seg, så lange børsfall over flere år er
+               mildere her enn i historien. Datoen som testes over brukes også her.</p>`;
+    }
+
+    renderMonteCarloCurve(mc) {
+        const pts = mc.curve;
+        if (!pts || pts.length < 2) return '';
+        const W = 960, H = 260;
+        const M = { top: 16, right: 24, bottom: 34, left: 56 };
+        const iw = W - M.left - M.right;
+        const ih = H - M.top - M.bottom;
+        const x = (i) => M.left + (iw * i) / (pts.length - 1);
+        const y = (v) => M.top + ih - (ih * Number(v)) / 100;
+        const grid = [0, 25, 50, 75, 100].map(v => `
+            <line x1="${M.left}" y1="${y(v).toFixed(1)}" x2="${W - M.right}" y2="${y(v).toFixed(1)}"
+                  stroke="#e2e8f0" stroke-width="1"/>
+            <text x="${M.left - 8}" y="${(y(v) + 4).toFixed(1)}" text-anchor="end"
+                  font-size="11" fill="#64748b">${v} %</text>`).join('');
+        const xLabels = pts.map((p, i) => (p.year % 5 === 0 || i === pts.length - 1)
+            ? `<text x="${x(i).toFixed(1)}" y="${H - 12}" text-anchor="middle" font-size="11" fill="#64748b">${p.year}</text>`
+            : '').join('');
+        const line = pts.map((p, i) => `${x(i).toFixed(1)},${y(p.success_percent).toFixed(1)}`).join(' ');
+        const ty = y(mc.target_percent);
+        return `
+            <h3>Sjansen for at pengene holder, etter pensjonsår</h3>
+            <div class="fire-chart">
+            <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img"
+                 aria-label="Suksessrate etter pensjonsår">
+                ${grid}
+                ${xLabels}
+                <line x1="${M.left}" y1="${ty.toFixed(1)}" x2="${W - M.right}" y2="${ty.toFixed(1)}"
+                      stroke="#10b981" stroke-width="1.5" stroke-dasharray="4 3"/>
+                <text x="${W - M.right - 4}" y="${(ty - 5).toFixed(1)}" text-anchor="end"
+                      font-size="11" fill="#10b981">${pct(mc.target_percent)}</text>
+                <polyline fill="none" stroke="#2563eb" stroke-width="2.5" points="${line}"/>
+            </svg>
+            </div>
+            <p class="subtitle">Andelen forløp som holder når pensjonen starter 1. januar det året.</p>`;
+    }
+
+    renderMonteCarloFan(mc) {
+        const pts = mc.fan;
+        if (!pts || pts.length < 2) return '';
+        const W = 960, H = 320;
+        const M = { top: 16, right: 24, bottom: 34, left: 82 };
+        const iw = W - M.left - M.right;
+        const ih = H - M.top - M.bottom;
+        const rawMax = Math.max(...pts.map(p => Number(p.p90)), 1);
+        const step = Math.pow(10, Math.floor(Math.log10(rawMax))) / 2;
+        const yMax = Math.ceil(rawMax / step) * step;
+        const x = (i) => M.left + (iw * i) / (pts.length - 1);
+        const y = (v) => M.top + ih - (ih * Math.max(0, Number(v))) / yMax;
+        const grid = Array.from({ length: 6 }, (_, k) => {
+            const v = (yMax * k) / 5;
+            return `
+                <line x1="${M.left}" y1="${y(v).toFixed(1)}" x2="${W - M.right}" y2="${y(v).toFixed(1)}"
+                      stroke="#e2e8f0" stroke-width="1"/>
+                <text x="${M.left - 8}" y="${(y(v) + 4).toFixed(1)}" text-anchor="end"
+                      font-size="11" fill="#64748b">${millions(v)}</text>`;
+        }).join('');
+        const xLabels = pts.map((p, i) => (p.year % 5 === 0 || i === pts.length - 1)
+            ? `<text x="${x(i).toFixed(1)}" y="${H - 12}" text-anchor="middle" font-size="11" fill="#64748b">${p.year}</text>`
+            : '').join('');
+        const top = pts.map((p, i) => `${x(i).toFixed(1)},${y(p.p90).toFixed(1)}`);
+        const bottom = pts.map((p, i) => `${x(i).toFixed(1)},${y(p.p10).toFixed(1)}`).reverse();
+        const median = pts.map((p, i) => `${x(i).toFixed(1)},${y(p.p50).toFixed(1)}`).join(' ');
+        const retireYear = mc.chosen_date ? Number(mc.chosen_date.slice(0, 4)) : null;
+        const ri = retireYear ? pts.findIndex(p => p.year === retireYear) : -1;
+        return `
+            <h3>Spredningen med pensjon fra ${monthYear(mc.chosen_date)}</h3>
+            <div class="fire-chart">
+            <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img"
+                 aria-label="Beholdning i dårlige, middels og gode forløp">
+                ${grid}
+                ${xLabels}
+                <polygon fill="#2563eb" fill-opacity="0.18" points="${[...top, ...bottom].join(' ')}"/>
+                <polyline fill="none" stroke="#2563eb" stroke-width="2.5" points="${median}"/>
+                <polyline fill="none" stroke="#ef4444" stroke-width="1.5" points="${pts.map((p, i) => `${x(i).toFixed(1)},${y(p.p10).toFixed(1)}`).join(' ')}"/>
+                ${ri >= 0 ? `
+                <line x1="${x(ri).toFixed(1)}" y1="${M.top}" x2="${x(ri).toFixed(1)}" y2="${M.top + ih}"
+                      stroke="#10b981" stroke-width="1.5" stroke-dasharray="3 3"/>
+                <text x="${(x(ri) + 5).toFixed(1)}" y="${M.top + 14}" font-size="11" fill="#10b981">Pensjon ${retireYear}</text>` : ''}
+                <line x1="${M.left}" y1="${M.top + ih}" x2="${W - M.right}" y2="${M.top + ih}"
+                      stroke="#94a3b8" stroke-width="1"/>
+            </svg>
+            </div>
+            <ul class="fire-legend">
+                <li><span style="background:#2563eb"></span>Midt i (median)</li>
+                <li><span style="background:#ef4444"></span>Dårlig forløp (1 av 10 går verre)</li>
+                <li><span style="background:#bfdbfe"></span>Fra 10 % til 90 % av forløpene</li>
+            </ul>
+            <p class="subtitle">Tilgjengelig og bundet beholdning ved slutten av hvert år, i dagens kroner.</p>`;
+    }
+
     renderProjection() {
         const p = this.result.target || this.result.earliest;
         if (!p) return '';
@@ -707,6 +878,11 @@ class FireManager {
                             Bunnfradraget følger lønnsveksten</label>
                     </div>
 
+                    <div class="form-group">
+                        <label>Ønsket suksessrate i Monte Carlo (%)</label>
+                        <input type="number" id="fire-mc-default" min="1" max="100" step="1" value="${s.mc_success_percent ?? 90}">
+                    </div>
+
                     <h3>Skatt på uttak fra aksjesparekonto</h3>
                     <div class="form-group">
                         <label>Sats på gevinst (%)</label>
@@ -743,6 +919,7 @@ class FireManager {
             this.testDate = document.getElementById('fire-test-date').value || null;
             this.init();
         });
+        this.bindMonteCarlo();
         const clear = document.getElementById('fire-test-clear');
         if (clear) clear.addEventListener('click', () => { this.testDate = null; this.init(); });
 
@@ -795,6 +972,7 @@ class FireManager {
             wealth_tax_step2_rate_percent: num('fire-wt-rate2'),
             wealth_tax_index_threshold: document.getElementById('fire-wt-index').checked,
             gains_tax_percent: num('fire-gains-tax') ?? 37.84,
+            mc_success_percent: num('fire-mc-default') ?? 90,
             excluded_account_ids: [...document.querySelectorAll('.fire-exclude:checked')]
                 .map(cb => parseInt(cb.value, 10)),
         };

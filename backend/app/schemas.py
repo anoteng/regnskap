@@ -937,6 +937,7 @@ class FireSettingsUpdate(BaseModel):
     wealth_tax_step2_rate_percent: Optional[Decimal] = Decimal("1.100")
     wealth_tax_index_threshold: bool = True
     gains_tax_percent: Decimal = Decimal("37.84")
+    mc_success_percent: Decimal = Decimal("90")
     excluded_account_ids: List[int] = []
 
 
@@ -1093,6 +1094,36 @@ class FireAssumptions(BaseModel):
     capital_locked: Decimal
     capital_excluded: Decimal
     buckets: List[FireBucket]
+
+
+class FireMonteCarloCurvePoint(BaseModel):
+    year: int
+    age: int
+    """Share of paths that hold when retiring at the start of this year."""
+    success_percent: Decimal
+
+
+class FireMonteCarloFanPoint(BaseModel):
+    """Capital, spendable and locked, at the end of the year across paths."""
+    year: int
+    age: int
+    p10: Decimal
+    p50: Decimal
+    p90: Decimal
+
+
+class FireMonteCarloOut(BaseModel):
+    runs: int
+    target_percent: Decimal
+    earliest_date: Optional[date] = None
+    earliest_age: Optional[int] = None
+    chosen_date: Optional[date] = None
+    chosen_age: Optional[int] = None
+    chosen_success_percent: Optional[Decimal] = None
+    return_volatility_percent: Decimal
+    inflation_volatility_percent: Decimal
+    curve: List[FireMonteCarloCurvePoint] = []
+    fan: List[FireMonteCarloFanPoint] = []
 
 
 class FireResult(BaseModel):
