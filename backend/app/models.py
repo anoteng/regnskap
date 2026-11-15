@@ -272,6 +272,9 @@ class Account(Base):
     # savings rate has to give it up. The krone is the same krone, it just
     # lands somewhere unreachable until the unlock age.
     fire_annual_contribution = Column(DECIMAL(15, 2), nullable=True)
+    # An employer pension (EPK, OTP) is the exception: the employer pays it on
+    # top of the wage, so it is new money and the savings rate gives up nothing
+    fire_contribution_by_employer = Column(Boolean, nullable=False, default=False)
     # Share of market value that counts towards net wealth. Equity funds are
     # valued at 80, bank deposits at 100, a primary residence at 25.
     wealth_valuation_percent = Column(DECIMAL(5, 2), nullable=True)

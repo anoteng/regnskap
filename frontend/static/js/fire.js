@@ -1,5 +1,5 @@
-import api from './api.js?v=26';
-import { formatCurrency, showError, showSuccess, showModal, closeModal } from './utils.js?v=26';
+import api from './api.js?v=27';
+import { formatCurrency, showError, showSuccess, showModal, closeModal } from './utils.js?v=27';
 
 const KINDS = {
     LOAN: 'Lån',
@@ -358,7 +358,7 @@ class FireManager {
         const label = (b) => {
             if (b.excluded) return 'Ekskludert';
             const inn = Number(b.annual_contribution) > 0
-                ? `, ${thousands(b.annual_contribution)}/år inn` : '';
+                ? `, ${thousands(b.annual_contribution)}/år ${b.contribution_by_employer ? 'fra arbeidsgiver' : 'inn'}` : '';
             if (b.unlock_age && b.payout_years) {
                 return `Bundet til ${b.unlock_age}, utbetales over ${b.payout_years} år${inn}`;
             }

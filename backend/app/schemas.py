@@ -154,6 +154,8 @@ class AccountCreate(AccountBase):
     fire_payout_years: Optional[int] = None
     # Earmarked yearly deposit, taken out of the general savings rate
     fire_annual_contribution: Optional[Decimal] = None
+    # Paid by the employer on top of the wage, so not taken out of anything
+    fire_contribution_by_employer: bool = False
     wealth_valuation_percent: Optional[Decimal] = None
 
 
@@ -168,6 +170,8 @@ class Account(AccountBase):
     fire_payout_years: Optional[int] = None
     # Earmarked yearly deposit, taken out of the general savings rate
     fire_annual_contribution: Optional[Decimal] = None
+    # Paid by the employer on top of the wage, so not taken out of anything
+    fire_contribution_by_employer: bool = False
     wealth_valuation_percent: Optional[Decimal] = None
     is_active: bool
     description: Optional[str] = None
@@ -975,6 +979,7 @@ class FireBucket(BaseModel):
     unlock_age: Optional[int] = None
     payout_years: Optional[int] = None
     annual_contribution: Decimal = Decimal("0")
+    contribution_by_employer: bool = False
     valuation_percent: Decimal
     excluded: bool
 

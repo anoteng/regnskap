@@ -80,6 +80,9 @@ class Bucket:
     # surplus everything else is saved from, so a pot that fills this way is
     # not a pot that grows for free: it grows at the bridge's expense.
     annual_contribution: float = 0.0
+    # Unless the employer pays it on top of the wage. Then it is new money,
+    # and working longer fills this pot without costing the bridge anything.
+    contribution_by_employer: bool = False
 
 
 @dataclass(frozen=True)
@@ -295,7 +298,8 @@ class _Pot:
 
     __slots__ = (
         "name", "amount", "valuation", "unlock_age", "payout_years",
-        "annual_contribution", "excluded", "payout_months_left", "unlocked",
+        "annual_contribution", "contribution_by_employer", "excluded",
+        "payout_months_left", "unlocked",
     )
 
     def __init__(self, bucket: Bucket):
@@ -305,6 +309,7 @@ class _Pot:
         self.unlock_age = bucket.unlock_age
         self.payout_years = bucket.payout_years
         self.annual_contribution = bucket.annual_contribution
+        self.contribution_by_employer = bucket.contribution_by_employer
         self.excluded = bucket.excluded
         self.payout_months_left: Optional[int] = None
         self.unlocked = bucket.unlock_age is None
@@ -521,12 +526,14 @@ def project(
             # is a wage to deduct them from and only until the pot unlocks:
             # you cannot pay into an IPS that has started paying out, and
             # selling shares to fund one buys nothing but a longer bridge.
+            # An employer's deposit lands on top and takes nothing from delta.
             if working:
                 for pot in pots:
                     if pot.annual_contribution and not pot.unlocked:
                         deposit = pot.annual_contribution / MONTHS_PER_YEAR
                         pot.amount += deposit
-                        delta -= deposit
+                        if not pot.contribution_by_employer:
+                            delta -= deposit
 
             _apply_cash(pots, delta)
 
@@ -929,6 +936,7 @@ def build_inputs(db, settings, as_of: Optional[date] = None) -> FireInputs:
                 float(account.fire_annual_contribution)
                 if account.fire_annual_contribution else 0.0
             ),
+            contribution_by_employer=bool(account.fire_contribution_by_employer),
         ))
         if role == FireRole.LOCKED and account.fire_unlock_age is None:
             warnings.append(
