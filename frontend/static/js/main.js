@@ -1,16 +1,16 @@
-import auth from './auth.js?v=27';
-import api from './api.js?v=27';
-import ledgerManager from './ledgers.js?v=27';
-import transactionsManager from './transactions.js?v=27';
-import bankAccountsManager from './bank-accounts.js?v=27';
-import postingQueueManager from './posting-queue.js?v=27';
-import receiptsManager from './receipts.js?v=27';
-import reportsManager from './reports.js?v=27';
-import bankConnectionsManager from './bank-connections.js?v=27';
-import adminManager from './admin.js?v=27';
-import settlementManager from './settlement.js?v=27';
-import fireManager from './fire.js?v=27';
-import { formatCurrency, formatDate, getTodayDate, getFirstDayOfMonth, getLastDayOfMonth, showModal, closeModal, showError, showSuccess } from './utils.js?v=27';
+import auth from './auth.js?v=28';
+import api from './api.js?v=28';
+import ledgerManager from './ledgers.js?v=28';
+import transactionsManager from './transactions.js?v=28';
+import bankAccountsManager from './bank-accounts.js?v=28';
+import postingQueueManager from './posting-queue.js?v=28';
+import receiptsManager from './receipts.js?v=28';
+import reportsManager from './reports.js?v=28';
+import bankConnectionsManager from './bank-connections.js?v=28';
+import adminManager from './admin.js?v=28';
+import settlementManager from './settlement.js?v=28';
+import fireManager from './fire.js?v=28';
+import { formatCurrency, formatDate, getTodayDate, getFirstDayOfMonth, getLastDayOfMonth, showModal, closeModal, showError, showSuccess } from './utils.js?v=28';
 
 // Make auth available globally for passkey management
 window.auth = auth;
@@ -558,6 +558,7 @@ class App {
         const payoutYears = account.fire_payout_years;
         const annualContribution = account.fire_annual_contribution;
         const byEmployer = !!account.fire_contribution_by_employer;
+        const gainsTax = !!account.fire_gains_tax;
         const valuation = account.wealth_valuation_percent;
         const content = `
             <form id="edit-account-form">
@@ -614,6 +615,10 @@ class App {
                         Betales av arbeidsgiver (EPK, OTP): kommer i tillegg til lonna, ikke fra sparingen</label>
                 </div>
                 <div class="form-group">
+                    <label><input type="checkbox" id="edit-acc-gains-tax" ${gainsTax ? 'checked' : ''}>
+                        Aksjesparekonto: innskuddene tas ut skattefritt forst, gevinsten skattes ved uttak</label>
+                </div>
+                <div class="form-group">
                     <label>Verdsettelse for formuesskatt (%)</label>
                     <input type="number" id="edit-acc-valuation" min="0" max="100" step="0.01" value="${valuation ?? ''}" placeholder="Aksjefond 80, bankinnskudd 100, IPS 0">
                 </div>
@@ -657,6 +662,7 @@ class App {
                 fire_payout_years: payoutYears !== '' ? parseInt(payoutYears, 10) : null,
                 fire_annual_contribution: annualContribution !== '' ? parseFloat(annualContribution) : null,
                 fire_contribution_by_employer: document.getElementById('edit-acc-by-employer').checked,
+                fire_gains_tax: document.getElementById('edit-acc-gains-tax').checked,
                 wealth_valuation_percent: valuation !== '' ? parseFloat(valuation) : null
             });
 

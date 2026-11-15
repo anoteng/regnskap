@@ -156,6 +156,8 @@ class AccountCreate(AccountBase):
     fire_annual_contribution: Optional[Decimal] = None
     # Paid by the employer on top of the wage, so not taken out of anything
     fire_contribution_by_employer: bool = False
+    # An aksjesparekonto: gains are taxed when taken out, deposits first
+    fire_gains_tax: bool = False
     wealth_valuation_percent: Optional[Decimal] = None
 
 
@@ -172,6 +174,8 @@ class Account(AccountBase):
     fire_annual_contribution: Optional[Decimal] = None
     # Paid by the employer on top of the wage, so not taken out of anything
     fire_contribution_by_employer: bool = False
+    # An aksjesparekonto: gains are taxed when taken out, deposits first
+    fire_gains_tax: bool = False
     wealth_valuation_percent: Optional[Decimal] = None
     is_active: bool
     description: Optional[str] = None
@@ -932,6 +936,7 @@ class FireSettingsUpdate(BaseModel):
     wealth_tax_step2_threshold: Optional[Decimal] = Decimal("20700000")
     wealth_tax_step2_rate_percent: Optional[Decimal] = Decimal("1.100")
     wealth_tax_index_threshold: bool = True
+    gains_tax_percent: Decimal = Decimal("37.84")
     excluded_account_ids: List[int] = []
 
 
@@ -980,6 +985,8 @@ class FireBucket(BaseModel):
     payout_years: Optional[int] = None
     annual_contribution: Decimal = Decimal("0")
     contribution_by_employer: bool = False
+    """Deposits in an aksjesparekonto, the part that comes back tax-free."""
+    basis: Optional[Decimal] = None
     valuation_percent: Decimal
     excluded: bool
 
@@ -1000,6 +1007,8 @@ class FireYearRow(BaseModel):
     withdrawn: Decimal
     working: bool
     pension_income: Decimal = Decimal("0")
+    returns: Decimal = Decimal("0")
+    gains_tax: Decimal = Decimal("0")
     """Months the row covers; the first and last of a plan are part-years."""
     months: int = 12
 

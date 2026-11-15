@@ -1,6 +1,6 @@
 """FIRE projection: when the capital covers the spending, and for how long.
 
-Five things make this more than dividing a pile of money by four percent:
+Six things make this more than dividing a pile of money by four percent:
 
   * **Locked capital.** Pension savings cannot pay for the years before they
     unlock. Retiring at 45 with most of the money tied up until 67 means the
@@ -18,6 +18,13 @@ Five things make this more than dividing a pile of money by four percent:
     value, share savings at eighty per cent, pension capital at nothing, so
     withdrawals take the most heavily taxed money first and leave the rest
     compounding. See `_draw_order`.
+
+  * **Tax on share savings.** An aksjesparekonto pays tax only on what is
+    taken out, and only once the deposits have all come back: the first
+    kroner out are the investor's own and free, everything after them is
+    gain. A pot that has been saved into for years therefore carries a
+    tax-free stretch at the start of retirement and a taxed one after it.
+    See `_withdraw_free` and `_withdraw_gain`.
 
   * **Pensions.** Folketrygd and a tjenestepensjon are not capital at all —
     they are an income that starts on a birthday — while IPS and a
@@ -83,6 +90,9 @@ class Bucket:
     # Unless the employer pays it on top of the wage. Then it is new money,
     # and working longer fills this pot without costing the bridge anything.
     contribution_by_employer: bool = False
+    # What has been paid in, for an aksjesparekonto: the part that comes back
+    # tax-free. None means withdrawals are not taxed at all.
+    basis: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -166,6 +176,8 @@ class FireInputs:
     inflation: float
     nominal_return: float
     wealth_tax: WealthTax
+    # On gains taken out of an aksjesparekonto: 22 % grossed up by 1.72
+    gains_tax: float = 0.0
     warnings: Sequence[str] = ()
 
     @property
@@ -231,6 +243,10 @@ class YearRow:
     # Pensions received this year: income streams plus instalments from a
     # pension pot being paid out. What the capital does NOT have to cover.
     pension_income: float = 0.0
+    # What the pots grew by this year, in today's kroner
+    returns: float = 0.0
+    # Tax on gains taken out of share savings, on top of what was spent
+    gains_tax: float = 0.0
     # Months this row actually covers. The first and last are part-years, and
     # a chart that plots their totals as if they were whole ones lies.
     months: int = MONTHS_PER_YEAR
@@ -299,7 +315,7 @@ class _Pot:
     __slots__ = (
         "name", "amount", "valuation", "unlock_age", "payout_years",
         "annual_contribution", "contribution_by_employer", "excluded",
-        "payout_months_left", "unlocked",
+        "payout_months_left", "unlocked", "basis",
     )
 
     def __init__(self, bucket: Bucket):
@@ -313,6 +329,7 @@ class _Pot:
         self.excluded = bucket.excluded
         self.payout_months_left: Optional[int] = None
         self.unlocked = bucket.unlock_age is None
+        self.basis = bucket.basis
 
     @property
     def spendable(self) -> bool:
@@ -346,18 +363,57 @@ def _draw_order(pots: Sequence["_Pot"]) -> list["_Pot"]:
     )
 
 
-def _apply_cash(pots: Sequence["_Pot"], delta: float) -> None:
+def _deposit(pot: "_Pot", amount: float) -> None:
+    pot.amount += amount
+    if pot.basis is not None:
+        pot.basis += amount
+
+
+def _withdraw_free(pot: "_Pot", need: float, gains_tax: float) -> float:
+    """Take what one pot gives tax-free, up to `need`.
+
+    That is all of it for an ordinary account. An aksjesparekonto gives back
+    its deposits first, and only those are free; a pot that has fallen below
+    its deposits is all deposit.
+    """
+    if pot.amount <= 0:
+        return 0.0
+    if pot.basis is None or gains_tax <= 0:
+        taken = min(need, pot.amount)
+    else:
+        taken = min(need, max(0.0, pot.basis), pot.amount)
+        pot.basis -= taken
+    pot.amount -= taken
+    return taken
+
+
+def _withdraw_gain(pot: "_Pot", need: float, gains_tax: float) -> tuple[float, float]:
+    """Take taxed gain out of a pot whose deposits are used up.
+
+    Every krone spent has to be grossed up for the tax on it. Returns what it
+    yields after tax and the tax paid.
+    """
+    if pot.amount <= 0 or pot.basis is None or gains_tax <= 0:
+        return 0.0, 0.0
+    gross = min(need / (1.0 - gains_tax), pot.amount)
+    pot.amount -= gross
+    tax = gross * gains_tax
+    return gross - tax, tax
+
+
+def _apply_cash(pots: Sequence["_Pot"], delta: float, gains_tax: float = 0.0) -> float:
     """Put money into the pots, or take it out, one month's worth.
 
     Money going in covers an overdraft first and then follows the mix already
     held, because that is where a standing order actually sends it. Money
-    coming out follows the draw order. If every pot is empty the shortfall is
-    left on the most heavily taxed one, which is what makes the plan visibly
-    fail rather than quietly balance.
+    coming out follows the draw order, and whatever tax that costs is taken
+    out as well and returned. If every pot is empty the shortfall is left on
+    the most heavily taxed one, which is what makes the plan visibly fail
+    rather than quietly balance.
     """
     order = _draw_order(pots)
     if not order:
-        return
+        return 0.0
 
     if delta >= 0:
         for pot in order:
@@ -365,30 +421,37 @@ def _apply_cash(pots: Sequence["_Pot"], delta: float) -> None:
                 break
             if pot.amount < 0:
                 covered = min(delta, -pot.amount)
-                pot.amount += covered
+                _deposit(pot, covered)
                 delta -= covered
         if delta <= 0:
-            return
+            return 0.0
         positive = [p for p in order if p.amount > 0]
         total = sum(p.amount for p in positive)
         if total <= 0:
-            order[0].amount += delta
-            return
+            _deposit(order[0], delta)
+            return 0.0
         for pot in positive:
-            pot.amount += delta * pot.amount / total
-        return
+            _deposit(pot, delta * pot.amount / total)
+        return 0.0
 
+    # Every tax-free krone goes before any taxed one, across pots: with two
+    # share savings accounts, emptying the first into taxed gain while the
+    # second still holds deposits would be paying tax for nothing
     short = -delta
+    tax_paid = 0.0
     for pot in order:
         if short <= 0:
             break
-        if pot.amount <= 0:
-            continue
-        taken = min(short, pot.amount)
-        pot.amount -= taken
-        short -= taken
-    if short > 0:
+        short -= _withdraw_free(pot, short, gains_tax)
+    for pot in order:
+        if short <= 0:
+            break
+        net, tax = _withdraw_gain(pot, short, gains_tax)
+        short -= net
+        tax_paid += tax
+    if short > PAID_OFF:
         order[0].amount -= short
+    return tax_paid
 
 
 def project(
@@ -430,6 +493,7 @@ def project(
     year_months = 0
     year_spending = year_obligations = year_tax = 0.0
     year_saved = year_withdrawn = year_pension = 0.0
+    year_returns = year_gains_tax = 0.0
 
     # The first assessment is on today's wealth, debt included, so year one is
     # neither tax-free nor taxed on a gross figure
@@ -455,6 +519,7 @@ def project(
         obligation_cost = 0.0
         spending = 0.0
         saved = withdrawn = 0.0
+        gains_tax = 0.0
 
         if not growth_only:
             # Pension capital being paid out: the instalment is recomputed
@@ -535,7 +600,8 @@ def project(
                         if not pot.contribution_by_employer:
                             delta -= deposit
 
-            _apply_cash(pots, delta)
+            gains_tax = _apply_cash(pots, delta, inputs.gains_tax)
+            withdrawn += gains_tax
 
             if sum(p.amount for p in pots if p.spendable) < 0 and depleted_month is None:
                 depleted_month = month
@@ -543,8 +609,16 @@ def project(
         growth = 1.0 + returns.monthly_real_return(month)
         for pot in pots:
             if pot.amount > 0:
+                if not pot.excluded:
+                    year_returns += pot.amount * (growth - 1.0)
                 pot.amount *= growth
-        inflation_factor *= 1.0 + returns.monthly_inflation(month)
+        month_inflation = 1.0 + returns.monthly_inflation(month)
+        inflation_factor *= month_inflation
+        # Deposits are fixed in nominal kroner, so in today's kroner they
+        # shrink, and more of the pot turns into taxable gain year by year
+        for pot in pots:
+            if pot.basis is not None:
+                pot.basis /= month_inflation
 
         available = sum(p.amount for p in pots if p.spendable)
         locked_total = sum(
@@ -565,6 +639,7 @@ def project(
         year_saved += saved
         year_withdrawn += withdrawn
         year_pension += pension
+        year_gains_tax += gains_tax
 
         if when.month == 12 or month == horizon - 1:
             net_wealth = _net_wealth(sum(p.taxable for p in pots), debt)
@@ -584,6 +659,8 @@ def project(
                 withdrawn=year_withdrawn,
                 working=working,
                 pension_income=year_pension,
+                returns=year_returns,
+                gains_tax=year_gains_tax,
                 months=year_months,
             ))
             if year_tax > 0 and first_wealth_tax_year is None:
@@ -591,6 +668,7 @@ def project(
             year_months = 0
             year_spending = year_obligations = year_tax = 0.0
             year_saved = year_withdrawn = year_pension = 0.0
+            year_returns = year_gains_tax = 0.0
 
             if when.month == 12 and not growth_only:
                 # Assessed on 31 December, paid over the year that follows
@@ -886,6 +964,26 @@ def build_inputs(db, settings, as_of: Optional[date] = None) -> FireInputs:
         ).scalar()
         return float(total or 0)
 
+    def deposits(account: Account, amount: float) -> float:
+        """What has been paid into a share savings account: the balance less
+        every value adjustment booked against its value-change account."""
+        if not account.value_change_account_id:
+            return amount
+        adjusted = db.query(JournalEntry.transaction_id).filter(
+            JournalEntry.account_id == account.value_change_account_id,
+        )
+        growth = db.query(
+            sa_func.coalesce(sa_func.sum(JournalEntry.debit - JournalEntry.credit), 0)
+        ).join(
+            Transaction, Transaction.id == JournalEntry.transaction_id
+        ).filter(
+            JournalEntry.account_id == account.id,
+            JournalEntry.transaction_id.in_(adjusted),
+            Transaction.status.in_(booked),
+            Transaction.transaction_date <= as_of,
+        ).scalar()
+        return amount - float(growth or 0)
+
     # --- capital -----------------------------------------------------------
     buckets: list[Bucket] = []
     assets = db.query(Account).filter(
@@ -937,6 +1035,7 @@ def build_inputs(db, settings, as_of: Optional[date] = None) -> FireInputs:
                 if account.fire_annual_contribution else 0.0
             ),
             contribution_by_employer=bool(account.fire_contribution_by_employer),
+            basis=deposits(account, amount) if account.fire_gains_tax else None,
         ))
         if role == FireRole.LOCKED and account.fire_unlock_age is None:
             warnings.append(
@@ -1087,6 +1186,7 @@ def build_inputs(db, settings, as_of: Optional[date] = None) -> FireInputs:
             ),
             index_threshold=bool(settings.wealth_tax_index_threshold),
         ),
+        gains_tax=float(settings.gains_tax_percent or 0) / 100.0,
         warnings=warnings,
     )
 

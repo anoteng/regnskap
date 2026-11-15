@@ -275,6 +275,9 @@ class Account(Base):
     # An employer pension (EPK, OTP) is the exception: the employer pays it on
     # top of the wage, so it is new money and the savings rate gives up nothing
     fire_contribution_by_employer = Column(Boolean, nullable=False, default=False)
+    # An aksjesparekonto: deposits come back tax-free first, the gain after
+    # them is taxed when taken out
+    fire_gains_tax = Column(Boolean, nullable=False, default=False)
     # Share of market value that counts towards net wealth. Equity funds are
     # valued at 80, bank deposits at 100, a primary residence at 25.
     wealth_valuation_percent = Column(DECIMAL(5, 2), nullable=True)
@@ -892,6 +895,8 @@ class FireSettings(Base):
     # Brackets have historically followed wage growth; if they stop, the tax
     # creeps down the income scale on its own
     wealth_tax_index_threshold = Column(Boolean, nullable=False, default=True)
+    # On gains taken out of an aksjesparekonto: 22 % times the 1.72 gross-up
+    gains_tax_percent = Column(DECIMAL(5, 2), nullable=False, default=37.84)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

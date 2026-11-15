@@ -1,5 +1,5 @@
-import api from './api.js?v=27';
-import { formatCurrency, showError, showSuccess, showModal, closeModal } from './utils.js?v=27';
+import api from './api.js?v=28';
+import { formatCurrency, showError, showSuccess, showModal, closeModal } from './utils.js?v=28';
 
 const KINDS = {
     LOAN: 'Lån',
@@ -108,6 +108,7 @@ class FireManager {
             ${this.renderObligations()}
             ${this.renderIncomeStreams()}
             ${this.result ? this.renderCapital() : ''}
+            ${this.result ? this.renderHoldings() : ''}
             ${this.result ? this.renderProjection() : ''}
             ${this.renderSettings()}
         `;
@@ -363,6 +364,9 @@ class FireManager {
                 return `Bundet til ${b.unlock_age}, utbetales over ${b.payout_years} år${inn}`;
             }
             if (b.unlock_age) return `Bundet til ${b.unlock_age}${inn}`;
+            if (b.basis !== null && b.basis !== undefined) {
+                return `Tilgjengelig, ASK med ${kr(Math.max(0, Number(b.basis)))} innskudd`;
+            }
             return 'Tilgjengelig';
         };
         return `
@@ -469,12 +473,95 @@ class FireManager {
         `;
     }
 
+    // ------------------------------------------------------------------
+    // Holdings over time for the chosen date: what is spendable and what
+    // is locked, stacked, from today to the horizon. The accumulation chart
+    // above asks when you could stop; this one shows what happens if you do.
+    // ------------------------------------------------------------------
+    renderHoldings() {
+        const p = this.result.target || this.result.earliest;
+        if (!p || p.rows.length < 2) return '';
+        const rows = p.rows;
+        const W = 960, H = 360;
+        const M = { top: 16, right: 24, bottom: 34, left: 82 };
+        const iw = W - M.left - M.right;
+        const ih = H - M.top - M.bottom;
+
+        const avail = (r) => Math.max(0, Number(r.available));
+        const lock = (r) => Math.max(0, Number(r.locked));
+        const rawMax = Math.max(...rows.map(r => avail(r) + lock(r)), 1);
+        const step = Math.pow(10, Math.floor(Math.log10(rawMax))) / 2;
+        const yMax = Math.ceil(rawMax / step) * step;
+        const x = (i) => M.left + (iw * i) / (rows.length - 1);
+        const y = (v) => M.top + ih - (ih * v) / yMax;
+
+        const area = (lower, upper) => {
+            const top = rows.map((r, i) => `${x(i).toFixed(1)},${y(upper(r)).toFixed(1)}`);
+            const bottom = rows.map((r, i) => `${x(i).toFixed(1)},${y(lower(r)).toFixed(1)}`).reverse();
+            return [...top, ...bottom].join(' ');
+        };
+
+        const ticks = 5;
+        const grid = Array.from({ length: ticks + 1 }, (_, k) => {
+            const v = (yMax * k) / ticks;
+            const gy = y(v);
+            return `
+                <line x1="${M.left}" y1="${gy.toFixed(1)}" x2="${W - M.right}" y2="${gy.toFixed(1)}"
+                      stroke="#e2e8f0" stroke-width="1"/>
+                <text x="${M.left - 8}" y="${(gy + 4).toFixed(1)}" text-anchor="end"
+                      font-size="11" fill="#64748b">${millions(v)}</text>`;
+        }).join('');
+        const xLabels = rows.map((r, i) => {
+            const last = i === rows.length - 1;
+            if (r.year % 5 !== 0 && !last) return '';
+            return `<text x="${x(i).toFixed(1)}" y="${H - 12}" text-anchor="middle"
+                          font-size="11" fill="#64748b">${r.year}</text>`;
+        }).join('');
+
+        const retireIndex = rows.findIndex(r => !r.working);
+        const retireX = retireIndex >= 0 ? x(retireIndex) : null;
+        const retireYear = p.retirement_date.slice(0, 4);
+
+        return `
+            <div class="card">
+                <h2>Beholdning med pensjon fra ${monthYear(p.retirement_date)}</h2>
+                <div class="fire-chart">
+                <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet"
+                     role="img" aria-label="Beholdning år for år, tilgjengelig og bundet">
+                    ${grid}
+                    ${xLabels}
+                    <polygon fill="#2563eb" fill-opacity="0.55" points="${area(() => 0, avail)}"/>
+                    <polygon fill="#94a3b8" fill-opacity="0.55" points="${area(avail, r => avail(r) + lock(r))}"/>
+                    ${retireX !== null ? `
+                    <line x1="${retireX.toFixed(1)}" y1="${M.top}" x2="${retireX.toFixed(1)}" y2="${M.top + ih}"
+                          stroke="#10b981" stroke-width="1.5" stroke-dasharray="3 3"/>
+                    <text x="${(retireX + 5).toFixed(1)}" y="${M.top + 14}" font-size="11" fill="#10b981">Pensjon ${retireYear}</text>` : ''}
+                    <line x1="${M.left}" y1="${M.top + ih}" x2="${W - M.right}" y2="${M.top + ih}"
+                          stroke="#94a3b8" stroke-width="1"/>
+                </svg>
+                </div>
+                <ul class="fire-legend">
+                    <li><span style="background:#2563eb"></span>Tilgjengelig</li>
+                    <li><span style="background:#94a3b8"></span>Bundet pensjonskapital</li>
+                </ul>
+                <p class="subtitle">Ved slutten av hvert år, i dagens kroner. Velg en annen dato
+                   under «Test en annen dato» for å se hvordan den endrer seg.</p>
+            </div>
+        `;
+    }
+
     renderProjection() {
         const p = this.result.target || this.result.earliest;
         if (!p) return '';
+        // The first row without a wage is where the withdrawals begin
+        const firstRetired = p.rows.findIndex(r => !r.working);
+        const rowClass = (r, i) => [
+            Number(r.available) < 0 ? 'fire-short' : '',
+            i === firstRetired ? 'fire-retire' : '',
+        ].filter(Boolean).join(' ');
         return `
             <div class="card">
-                <h2>År for år fra ${monthYear(p.retirement_date)}</h2>
+                <h2>År for år, pensjon fra ${monthYear(p.retirement_date)}</h2>
                 <div class="table-responsive">
                 <table class="table">
                     <thead>
@@ -487,13 +574,15 @@ class FireManager {
                             <th class="num">Forpliktelser</th>
                             <th class="num">Formuesskatt</th>
                             <th class="num">Pensjon</th>
+                            <th class="num">Avkastning</th>
                             <th class="num">Spart</th>
                             <th class="num">Tatt ut</th>
+                            <th class="num">Herav skatt</th>
                         </tr>
                     </thead>
                     <tbody>
-                        ${p.rows.map(r => `
-                            <tr${Number(r.available) < 0 ? ' class="fire-short"' : ''}>
+                        ${p.rows.map((r, i) => `
+                            <tr${rowClass(r, i) ? ` class="${rowClass(r, i)}"` : ''}>
                                 <td>${r.year}</td>
                                 <td>${r.age}</td>
                                 <td class="num">${kr(r.available)}</td>
@@ -503,15 +592,20 @@ class FireManager {
                                 <td class="num">${Number(r.obligations) ? kr(r.obligations) : '–'}</td>
                                 <td class="num">${Number(r.wealth_tax) ? kr(r.wealth_tax) : '–'}</td>
                                 <td class="num">${Number(r.pension_income) ? kr(r.pension_income) : '–'}</td>
+                                <td class="num">${kr(r.returns)}</td>
                                 <td class="num">${Number(r.saved) ? kr(r.saved) : '–'}</td>
                                 <td class="num">${Number(r.withdrawn) ? kr(r.withdrawn) : '–'}</td>
+                                <td class="num">${Number(r.gains_tax) ? kr(r.gains_tax) : '–'}</td>
                             </tr>`).join('')}
                     </tbody>
                 </table>
                 </div>
-                <p class="subtitle">Alle beløp i dagens kroner. Første og siste rad dekker
-                   et delår. Uttak skjer fra den tyngst formuesbeskattede potten først, så
-                   pensjonskapital som ikke teller i formuen blir stående lengst.</p>
+                <p class="subtitle">Alle beløp i dagens kroner, også avkastningen, som derfor er
+                   etter inflasjon. Første og siste rad dekker et delår; den uthevede raden er
+                   det første året uten lønn. Uttak skjer fra den tyngst formuesbeskattede potten
+                   først, så pensjonskapital som ikke teller i formuen blir stående lengst.
+                   Fra aksjesparekonto tas innskuddene ut først og skattefritt. Når de er brukt
+                   opp, skattes gevinsten, og uttaket blir større enn forbruket med skatten.</p>
             </div>
         `;
     }
@@ -613,6 +707,14 @@ class FireManager {
                             Bunnfradraget følger lønnsveksten</label>
                     </div>
 
+                    <h3>Skatt på uttak fra aksjesparekonto</h3>
+                    <div class="form-group">
+                        <label>Sats på gevinst (%)</label>
+                        <input type="number" id="fire-gains-tax" step="0.01" value="${s.gains_tax_percent ?? 37.84}">
+                        <small class="subtitle">22 % ganget med oppjusteringsfaktoren 1,72. Innskuddene
+                            tas ut først og skattefritt; skatten kommer når de er brukt opp.</small>
+                    </div>
+
                     <h3>Holdes utenfor forbruk og inntekt</h3>
                     <p class="subtitle">Motkontoer for verdiendring er alltid utenfor - avkastningen ligger
                        allerede i forventningen over.</p>
@@ -692,6 +794,7 @@ class FireManager {
             wealth_tax_step2_threshold: num('fire-wt-threshold2'),
             wealth_tax_step2_rate_percent: num('fire-wt-rate2'),
             wealth_tax_index_threshold: document.getElementById('fire-wt-index').checked,
+            gains_tax_percent: num('fire-gains-tax') ?? 37.84,
             excluded_account_ids: [...document.querySelectorAll('.fire-exclude:checked')]
                 .map(cb => parseInt(cb.value, 10)),
         };

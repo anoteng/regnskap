@@ -1519,6 +1519,12 @@ body {
     color: var(--danger-color, #c0392b);
 }
 
+/* The first year without a wage */
+.table tr.fire-retire td {
+    border-top: 2px solid #10b981;
+    font-weight: 600;
+}
+
 .table tr.fire-off td {
     opacity: 0.55;
 }

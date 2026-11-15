@@ -97,6 +97,7 @@ def _to_out(ledger_id: int, settings: Optional[FireSettings]) -> FireSettingsOut
         wealth_tax_step2_threshold=settings.wealth_tax_step2_threshold,
         wealth_tax_step2_rate_percent=settings.wealth_tax_step2_rate_percent,
         wealth_tax_index_threshold=settings.wealth_tax_index_threshold,
+        gains_tax_percent=settings.gains_tax_percent,
         excluded_account_ids=sorted(e.account_id for e in settings.excluded_accounts),
         obligations=[FireObligationOut.model_validate(ob) for ob in settings.obligations],
         income_streams=[
@@ -150,7 +151,7 @@ def update_fire_settings(
         "lookback_months", "shared_ledger_id", "shared_share_percent",
         "wealth_tax_threshold", "wealth_tax_rate_percent",
         "wealth_tax_step2_threshold", "wealth_tax_step2_rate_percent",
-        "wealth_tax_index_threshold",
+        "wealth_tax_index_threshold", "gains_tax_percent",
     ):
         setattr(settings, field, getattr(payload, field))
 
@@ -433,6 +434,7 @@ def get_projection(
                     payout_years=b.payout_years,
                     annual_contribution=_d(b.annual_contribution),
                     contribution_by_employer=b.contribution_by_employer,
+                    basis=_d(b.basis) if b.basis is not None else None,
                     valuation_percent=_d(b.valuation_percent, "0.01"),
                     excluded=b.excluded,
                 )
@@ -525,6 +527,7 @@ def _projection_out(p, inputs) -> FireProjectionOut:
                 wealth_tax=_d(r.wealth_tax), saved=_d(r.saved),
                 withdrawn=_d(r.withdrawn), working=r.working,
                 pension_income=_d(r.pension_income), months=r.months,
+                returns=_d(r.returns), gains_tax=_d(r.gains_tax),
             )
             for r in p.rows
         ],

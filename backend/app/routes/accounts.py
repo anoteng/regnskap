@@ -79,6 +79,7 @@ def create_account(
         fire_payout_years=account.fire_payout_years,
         fire_annual_contribution=account.fire_annual_contribution,
         fire_contribution_by_employer=bool(account.fire_contribution_by_employer),
+        fire_gains_tax=bool(account.fire_gains_tax),
         wealth_valuation_percent=account.wealth_valuation_percent,
         description=account.description,
         is_active=True
@@ -148,6 +149,7 @@ def update_account(
     account.fire_payout_years = account_update.fire_payout_years
     account.fire_annual_contribution = account_update.fire_annual_contribution
     account.fire_contribution_by_employer = account_update.fire_contribution_by_employer
+    account.fire_gains_tax = account_update.fire_gains_tax
     account.wealth_valuation_percent = account_update.wealth_valuation_percent
     account.description = account_update.description
 

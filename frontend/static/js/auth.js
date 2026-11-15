@@ -1,4 +1,4 @@
-import api from './api.js?v=27';
+import api from './api.js?v=28';
 
 class Auth {
     constructor() {

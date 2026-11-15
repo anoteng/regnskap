@@ -1,5 +1,5 @@
-import api from './api.js?v=27';
-import { showModal, closeModal, showError, showSuccess, formatDate } from './utils.js?v=27';
+import api from './api.js?v=28';
+import { showModal, closeModal, showError, showSuccess, formatDate } from './utils.js?v=28';
 
 class ReceiptsManager {
     constructor() {
