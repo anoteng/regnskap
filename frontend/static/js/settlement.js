@@ -1,5 +1,5 @@
-import api from './api.js?v=29';
-import { formatCurrency, formatDate, showError, showSuccess } from './utils.js?v=29';
+import api from './api.js?v=30';
+import { formatCurrency, formatDate, showError, showSuccess } from './utils.js?v=30';
 
 function currentMonth() {
     const d = new Date();
@@ -146,6 +146,30 @@ class SettlementManager {
                 </tr>`).join('')
             : '<tr><td colspan="3" class="subtitle">Ingen gjenstående faste trekk gjenkjent fra historikken.</td></tr>';
 
+        const loanStatus = {
+            PAID: '<span class="status-badge status-active">betalt</span>',
+            INVOICED: '<span class="status-badge">faktura</span>',
+            EXPECTED: '<span class="subtitle">ventet</span>',
+        };
+        const loanSource = { AGREEMENT: 'fast avtale', INVOICE: 'registrert faktura', HISTORY: 'snitt av siste terminer' };
+        const loans = data.loans || [];
+        const loanRows = loans.map(l => `
+                <tr>
+                    <td>${l.due_date ? formatDate(l.due_date) : '–'}</td>
+                    <td>${escapeHtml(l.name)}<br><small class="subtitle">${loanSource[l.source] || ''}</small></td>
+                    <td>${loanStatus[l.status] || ''}</td>
+                    <td class="num">${formatCurrency(l.amount)}</td>
+                </tr>`).join('');
+        const loanCard = loans.length ? `
+            <div class="card">
+                <h2>Lån og avbetalinger</h2>
+                <table class="table">
+                    <thead><tr><th>Forfall</th><th>Lån</th><th>Status</th><th class="num">Termin</th></tr></thead>
+                    <tbody>${loanRows}</tbody>
+                </table>
+                <p class="subtitle">Terminen regnes som betalt når det er bokført nedbetaling på lånekontoen denne måneden. Gjenstående terminer er med i «faste».</p>
+            </div>` : '';
+
         const excluded = data.excluded_account_ids.length
             ? `<p class="subtitle">Holdt utenfor: ${data.excluded_account_ids.map(id => escapeHtml(this.accountName(id))).join(', ')}
                (${formatCurrency(t.excluded_booked)} bokført denne måneden)</p>`
@@ -187,7 +211,7 @@ class SettlementManager {
                 <div class="card">
                     <h3>Gjenstår (anslag)</h3>
                     <p class="amount">${formatCurrency(parseFloat(t.planned_remaining) + parseFloat(t.recurring_remaining) + parseFloat(t.variable_remaining))}</p>
-                    <small class="subtitle">Fakturaer ${formatCurrency(t.planned_remaining)} · faste ${formatCurrency(t.recurring_remaining)} · variabelt ${formatCurrency(t.variable_remaining)}</small>
+                    <small class="subtitle">Fakturaer ${formatCurrency(t.planned_remaining)} · faste ${formatCurrency(t.recurring_remaining)}${parseFloat(t.loan_remaining || 0) > 0 ? ` (herav lån ${formatCurrency(t.loan_remaining)})` : ''} · variabelt ${formatCurrency(t.variable_remaining)}</small>
                 </div>
                 <div class="card">
                     <h3>Prognose for måneden</h3>
@@ -234,6 +258,8 @@ class SettlementManager {
                     </table>
                 </div>
             </div>
+
+            ${loanCard}
 
             <div class="card">
                 <h2>Likviditet</h2>
@@ -302,6 +328,10 @@ class SettlementManager {
                 </tr>`;
         }).join('');
 
+        const liabilityAccounts = this.accounts.filter(a => a.account_type === 'LIABILITY' && a.is_active);
+        this.fixedOptions = { liability: liabilityAccounts, asset: assetAccounts, options };
+        const fixedRows = (settings.fixed_payments || []).map(fp => this.fixedRow(fp, dis)).join('');
+
         const excludedSet = new Set(settings.excluded_account_ids);
         const excludedList = expenseAccounts.map(a => `
             <label class="settlement-exclude-item">
@@ -349,6 +379,18 @@ class SettlementManager {
             </div>
             <p class="subtitle">Andelene må summere til 100 %. Innskuddskontoen er der medlemmets innbetalinger krediteres og egne uttak fra driftskontoen debiteres; la den stå tom hvis det ikke er aktuelt.</p>
 
+            <h3 style="margin-top: 1.5rem;">Lån og avbetalinger</h3>
+            <p class="subtitle">Terminer med kjente beløp. De brukes i stedet for å gjette ut fra historikken, og en termin regnes som betalt når det er bokført nedbetaling på lånekontoen i måneden.
+            En registrert faktura på lånekontoen overstyrer beløpet. Lån uten avtale anslås fra de siste terminene så lenge det er restgjeld.</p>
+            <div class="table-responsive">
+                <table class="table settlement-fixed-table">
+                    <thead><tr><th>Navn</th><th>Lånekonto</th><th>Trekkes fra</th><th>Dag</th><th>Termin</th><th>Første måned</th><th>Første termin</th><th>Antall</th><th></th></tr></thead>
+                    <tbody id="settlement-fixed-rows">${fixedRows}</tbody>
+                </table>
+            </div>
+            ${isOwner ? '<button type="button" id="settlement-fixed-add" class="btn btn-secondary btn-sm">Legg til lån</button>' : ''}
+            <p class="subtitle">Termin = hele beløpet (avdrag, renter og gebyr). Første termin fylles bare ut hvis den avviker. Antall tomt = løper til avtalen fjernes.</p>
+
             <h3 style="margin-top: 1.5rem;">Kostnadskontoer som holdes utenfor</h3>
             <p class="subtitle">Kostnader ført på disse kontoene regnes ikke som felleskostnader (f.eks. utlegg som refunderes, eller investeringer én deltaker dekker selv).</p>
             <div class="settlement-exclude-list">${excludedList}</div>
@@ -359,8 +401,49 @@ class SettlementManager {
         `;
     }
 
+    fixedRow(fp, dis = '') {
+        const { liability, asset, options } = this.fixedOptions;
+        const month = fp.first_month ? fp.first_month.slice(0, 7) : '';
+        return `
+            <tr class="settlement-fixed-row">
+                <td><input type="text" class="fp-name" value="${escapeHtml(fp.name || '')}" style="width: 10rem;" ${dis}></td>
+                <td><select class="fp-account" ${dis}>${options(liability, fp.account_id ?? null)}</select></td>
+                <td><select class="fp-paid-from" ${dis}>${options(asset, fp.paid_from_account_id ?? null)}</select></td>
+                <td><input type="number" class="fp-day" min="1" max="31" value="${fp.due_day ?? ''}" style="width: 4rem;" ${dis}></td>
+                <td><input type="number" class="fp-amount" min="0" step="0.01" value="${fp.amount != null ? parseFloat(fp.amount) : ''}" style="width: 7rem;" ${dis}></td>
+                <td><input type="month" class="fp-first-month" value="${month}" ${dis}></td>
+                <td><input type="number" class="fp-first-amount" min="0" step="0.01" value="${fp.first_amount != null ? parseFloat(fp.first_amount) : ''}" style="width: 7rem;" ${dis}></td>
+                <td><input type="number" class="fp-count" min="1" value="${fp.payment_count ?? ''}" style="width: 4.5rem;" ${dis}></td>
+                <td>${dis ? '' : '<button type="button" class="btn btn-danger btn-sm fp-remove" title="Fjern">×</button>'}</td>
+            </tr>`;
+    }
+
     bindSettings() {
         document.getElementById('settlement-save-btn').addEventListener('click', () => this.saveSettings());
+        const rows = document.getElementById('settlement-fixed-rows');
+        document.getElementById('settlement-fixed-add').addEventListener('click', () => {
+            rows.insertAdjacentHTML('beforeend', this.fixedRow({}));
+        });
+        rows.addEventListener('click', (e) => {
+            if (e.target.classList.contains('fp-remove')) e.target.closest('tr').remove();
+        });
+    }
+
+    collectFixedPayments() {
+        const num = (el) => el.value === '' ? null : parseFloat(el.value);
+        return [...document.querySelectorAll('#settlement-fixed-rows tr.settlement-fixed-row')].map(row => {
+            const month = row.querySelector('.fp-first-month').value;
+            return {
+                name: row.querySelector('.fp-name').value.trim(),
+                account_id: parseInt(row.querySelector('.fp-account').value, 10) || null,
+                paid_from_account_id: parseInt(row.querySelector('.fp-paid-from').value, 10) || null,
+                due_day: parseInt(row.querySelector('.fp-day').value, 10) || null,
+                amount: num(row.querySelector('.fp-amount')),
+                first_month: month ? `${month}-01` : null,
+                first_amount: num(row.querySelector('.fp-first-amount')),
+                payment_count: parseInt(row.querySelector('.fp-count').value, 10) || null,
+            };
+        });
     }
 
     async saveSettings() {
@@ -381,7 +464,13 @@ class SettlementManager {
             card_due_day: parseInt(document.getElementById('settlement-card-due-day').value, 10) || 15,
             members,
             excluded_account_ids: [...document.querySelectorAll('.settlement-exclude:checked')].map(cb => parseInt(cb.value, 10)),
+            fixed_payments: this.collectFixedPayments(),
         };
+        const incomplete = payload.fixed_payments.find(fp => !fp.name || !fp.account_id || !fp.due_day || !fp.amount || !fp.first_month);
+        if (incomplete) {
+            showError('Fyll ut navn, lånekonto, dag, termin og første måned for alle lån');
+            return;
+        }
 
         try {
             this.settings = await api.updateSettlementSettings(payload);

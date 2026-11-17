@@ -1,5 +1,5 @@
-import api from './api.js?v=29';
-import { showError, showSuccess, showModal } from './utils.js?v=29';
+import api from './api.js?v=30';
+import { showError, showSuccess, showModal } from './utils.js?v=30';
 
 const escape = (text) => String(text ?? '').replace(/[&<>"']/g, (c) => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]

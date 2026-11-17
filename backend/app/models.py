@@ -819,6 +819,7 @@ class SettlementSettings(Base):
     operating_account = relationship("Account")
     members = relationship("SettlementMember", back_populates="settings", cascade="all, delete-orphan")
     excluded_accounts = relationship("SettlementExcludedAccount", back_populates="settings", cascade="all, delete-orphan")
+    fixed_payments = relationship("SettlementFixedPayment", back_populates="settings", cascade="all, delete-orphan")
 
 
 class SettlementMember(Base):
@@ -847,6 +848,38 @@ class SettlementExcludedAccount(Base):
 
     settings = relationship("SettlementSettings", back_populates="excluded_accounts")
     account = relationship("Account")
+
+
+class SettlementFixedPayment(Base):
+    """A payment with a known schedule: a loan instalment or a payment plan.
+
+    The amount comes from the agreement, not from history. A month's
+    instalment counts as paid once a repayment is booked on the loan account
+    that month, so a new payee name or a refinanced loan cannot be mistaken
+    for a bill that is still to come.
+    """
+    __tablename__ = "settlement_fixed_payments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    settings_id = Column(Integer, ForeignKey("settlement_settings.id"), nullable=False)
+    name = Column(String(200), nullable=False)
+    # Liability account the instalment is booked against
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)
+    # Bank account the money is drawn from
+    paid_from_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
+    due_day = Column(Integer, nullable=False)
+    # Full instalment: principal, interest and fees
+    amount = Column(DECIMAL(15, 2), nullable=False)
+    # First day of the month of the first instalment
+    first_month = Column(Date, nullable=False)
+    # The first instalment often differs (interest for a broken period)
+    first_amount = Column(DECIMAL(15, 2), nullable=True)
+    # NULL runs until the agreement is removed
+    payment_count = Column(Integer, nullable=True)
+
+    settings = relationship("SettlementSettings", back_populates="fixed_payments")
+    account = relationship("Account", foreign_keys=[account_id])
+    paid_from_account = relationship("Account", foreign_keys=[paid_from_account_id])
 
 
 class FireObligationKind(str, enum.Enum):

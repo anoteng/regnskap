@@ -8,9 +8,16 @@ Forecast for the month = booked expenses so far
                        + open planned transactions (registered invoices)
                        + recurring bills recognised from history, not yet seen
                          this month and not covered by a planned transaction
+                       + loan instalments not yet paid this month
                        + pro-rated estimate of variable spending
                        - income the shared account earned itself
                        + principal repaid on shared debt
+
+Loan instalments are kept apart from the recurring bills. Their amounts are
+known exactly when an agreement is registered, and whether this month's has
+been paid is read from the loan account, not from the payee name - a
+refinanced loan arrives under a new name and would otherwise be counted next
+to the old one it replaced.
 
 Expenses are counted when booked (accrual view), so credit card purchases count
 in the month they happen and the card settlement itself is never counted. That
@@ -48,6 +55,7 @@ from .models import (
     JournalEntry,
     PlannedTransaction,
     PlannedTransactionStatus,
+    SettlementFixedPayment,
     SettlementSettings,
     Transaction,
     TransactionStatus,
@@ -70,6 +78,12 @@ RECURRING_MAX_TX_FOR_VARIABLE_BILL = 1.5
 # A planned transaction is taken to cover a recurring candidate when the
 # amounts are within this fraction (insurance premiums etc. drift year to year)
 PLANNED_AMOUNT_TOLERANCE = Decimal("0.15")
+# A liability without an agreement is taken for a loan when it has been paid
+# down together with an interest expense in this many months
+LOAN_MIN_INSTALMENT_MONTHS = 2
+# Recent months whose instalments stand in for one not yet paid, when there
+# is no agreement
+LOAN_FALLBACK_MONTHS = 3
 
 ZERO = Decimal("0.00")
 _REFERENCE_RE = re.compile(r"\d[\d/.\-]*")
@@ -140,6 +154,131 @@ def _card_account_ids(db: Session, ledger_id: int) -> set[int]:
             BankAccount.account_id.isnot(None),
         )
     }
+
+
+@dataclass
+class _LoanHistory:
+    # Transactions that pay down a loan, and the month index they fall in
+    tx_ids: set = field(default_factory=set)
+    # loan account -> month index -> cash paid (principal + interest + fees)
+    paid: dict = field(default_factory=lambda: defaultdict(lambda: defaultdict(lambda: ZERO)))
+    # loan account -> months with a repayment booked alongside an expense
+    instalment_months: dict = field(default_factory=lambda: defaultdict(set))
+
+
+def _loan_history(
+    db: Session,
+    ledger_id: int,
+    since: date,
+    until: date,
+    card_ids: set[int],
+    agreement_ids: set[int],
+) -> tuple[set[int], _LoanHistory]:
+    """Loan accounts and the instalments paid on them.
+
+    A loan is a liability with an agreement, or one that has been paid down
+    together with an interest expense in a couple of months. That keeps out
+    liabilities like a suspense account, which are not instalments. Card
+    accounts are never loans: paying the card is settled through the
+    purchases behind it.
+    """
+    rows = (
+        db.query(
+            Transaction.id,
+            Transaction.transaction_date,
+            Account.account_type,
+            JournalEntry.account_id,
+            JournalEntry.debit,
+            JournalEntry.credit,
+        )
+        .join(JournalEntry, JournalEntry.transaction_id == Transaction.id)
+        .join(Account, Account.id == JournalEntry.account_id)
+        .filter(
+            Transaction.ledger_id == ledger_id,
+            Transaction.status.in_(BOOKED_STATUSES),
+            Transaction.transaction_date >= since,
+            Transaction.transaction_date <= until,
+            Transaction.id.in_(
+                db.query(JournalEntry.transaction_id)
+                .join(Account, Account.id == JournalEntry.account_id)
+                .filter(
+                    Account.ledger_id == ledger_id,
+                    Account.account_type == AccountType.LIABILITY,
+                )
+            ),
+        )
+        .all()
+    )
+    by_tx: dict = defaultdict(list)
+    for row in rows:
+        by_tx[row[0]].append(row)
+
+    hist = _LoanHistory()
+    for tx_id, entries in by_tx.items():
+        idx = _month_index(entries[0][1])
+        expense = sum(
+            (Decimal(d or 0) - Decimal(c or 0)
+             for _, _, t, _, d, c in entries if t == AccountType.EXPENSE),
+            ZERO,
+        )
+        repaid = [
+            (acc, Decimal(d or 0) - Decimal(c or 0))
+            for _, _, t, acc, d, c in entries
+            if t == AccountType.LIABILITY and acc not in card_ids
+            and Decimal(d or 0) > Decimal(c or 0)
+        ]
+        # Taking up a loan (a refinancing) credits a loan account; that is
+        # not an instalment, and it is not told apart by anything else
+        if not repaid or any(
+            t == AccountType.LIABILITY and acc not in card_ids and Decimal(c or 0) > Decimal(d or 0)
+            for _, _, t, acc, d, c in entries
+        ):
+            continue
+        account_id, principal = repaid[0]
+        hist.tx_ids.add(tx_id)
+        hist.paid[account_id][idx] += principal + expense
+        if expense > 0:
+            hist.instalment_months[account_id].add(idx)
+
+    loan_ids = set(agreement_ids) | {
+        acc for acc, months in hist.instalment_months.items()
+        if len(months) >= LOAN_MIN_INSTALMENT_MONTHS
+    }
+    # Repayments on liabilities that did not qualify stay ordinary transactions
+    hist.tx_ids = {
+        tx_id for tx_id in hist.tx_ids
+        if any(r[3] in loan_ids for r in by_tx[tx_id])
+    }
+    return loan_ids, hist
+
+
+def _agreement_due(fp: SettlementFixedPayment, target_idx: int) -> Optional[Decimal]:
+    """The agreement's instalment for the month, or None when none falls due."""
+    first_idx = _month_index(fp.first_month)
+    if target_idx < first_idx:
+        return None
+    if fp.payment_count is not None and target_idx >= first_idx + fp.payment_count:
+        return None
+    if target_idx == first_idx and fp.first_amount is not None:
+        return _q(fp.first_amount)
+    return _q(fp.amount)
+
+
+def _liability_balance(db: Session, account_id: int, as_of: date) -> Decimal:
+    row = (
+        db.query(
+            func.coalesce(func.sum(JournalEntry.credit), 0),
+            func.coalesce(func.sum(JournalEntry.debit), 0),
+        )
+        .join(Transaction, Transaction.id == JournalEntry.transaction_id)
+        .filter(
+            JournalEntry.account_id == account_id,
+            Transaction.status.in_(BOOKED_STATUSES),
+            Transaction.transaction_date <= as_of,
+        )
+        .one()
+    )
+    return Decimal(row[0]) - Decimal(row[1])
 
 
 def _side_flows(
@@ -339,6 +478,13 @@ def calculate_settlement(
         .all()
     )
 
+    card_ids = _card_account_ids(db, ledger_id)
+    agreements = list(getattr(settings, "fixed_payments", []) or [])
+    loan_ids, loans = _loan_history(
+        db, ledger_id, history_start, effective_as_of, card_ids,
+        {fp.account_id for fp in agreements},
+    )
+
     matched_tx_ids = {
         tx_id for (tx_id,) in db.query(PlannedTransaction.matched_transaction_id).filter(
             PlannedTransaction.ledger_id == ledger_id,
@@ -353,6 +499,7 @@ def calculate_settlement(
     tx_amount_by_key_month: dict[tuple[str, int], Decimal] = defaultdict(lambda: ZERO)
     invoice_amount_by_key_month: dict[tuple[str, int], Decimal] = defaultdict(lambda: ZERO)
     excluded_booked = ZERO
+    loan_booked = ZERO
     seen_tx_month: set[tuple[str, int]] = set()
 
     for tx_id, tx_date, description, account_id, amount in rows:
@@ -361,6 +508,13 @@ def calculate_settlement(
         if account_id in excluded_ids:
             if idx == target_idx:
                 excluded_booked += amount
+            continue
+        # Interest and fees on an instalment belong to the loan, which is
+        # forecast from its agreement; kept out of the recurring bills and
+        # the variable history
+        if tx_id in loans.tx_ids:
+            if idx == target_idx:
+                loan_booked += amount
             continue
 
         key = normalize_key(description)
@@ -379,7 +533,7 @@ def calculate_settlement(
         if tx_id in matched_tx_ids:
             invoice_amount_by_key_month[(key, idx)] += amount
 
-    booked_total = _q(month_totals.get(target_idx, ZERO))
+    booked_total = _q(month_totals.get(target_idx, ZERO) + loan_booked)
 
     # ------------------------------------------------------------------
     # Recurring bills from history (target month excluded from detection)
@@ -438,9 +592,9 @@ def calculate_settlement(
         .order_by(PlannedTransaction.expected_date)
         .all()
     )
-    card_ids = _card_account_ids(db, ledger_id)
     planned_lines = []
     card_statement_lines = []
+    loan_invoices = []
     for p in open_plans:
         if p.suggested_account_id in excluded_ids:
             continue
@@ -464,6 +618,9 @@ def calculate_settlement(
         # balance, so leaving it in open_invoices would subtract it twice over.
         if p.suggested_account_id in card_ids:
             card_statement_lines.append(line)
+        elif p.suggested_account_id in loan_ids:
+            line["account_id"] = p.suggested_account_id
+            loan_invoices.append(line)
         else:
             planned_lines.append(line)
     planned_total = _q(sum((l["amount"] for l in planned_lines), ZERO))
@@ -518,7 +675,7 @@ def calculate_settlement(
     typical_variable = _q(statistics.median(variable_history)) if variable_history else ZERO
     typical_variable = max(typical_variable, ZERO)
 
-    booked_fixed = _q(fixed_part(target_idx))
+    booked_fixed = _q(fixed_part(target_idx) + loan_booked)
     booked_variable = _q(booked_total - booked_fixed)
     variable_remaining = ZERO if month_complete else _q(
         typical_variable * Decimal(days_remaining) / Decimal(days_in_month)
@@ -528,7 +685,6 @@ def calculate_settlement(
     # Income and loan principal: outside the expense accounts, inside the split
     # ------------------------------------------------------------------
     deposit_ids = {m.deposit_account_id for m in settings.members if m.deposit_account_id}
-    card_ids = _card_account_ids(db, ledger_id)
     side_income, side_principal = _side_flows(
         db, ledger_id, history_start, month_end,
         excluded_ids | deposit_ids, card_ids,
@@ -536,21 +692,17 @@ def calculate_settlement(
     income_booked = _q(side_income.get(target_idx, ZERO))
     principal_booked = _q(side_principal.get(target_idx, ZERO))
 
-    # An instalment not yet seen this month is still coming. It is the most
-    # regular payment there is, so the recent median is a safe stand-in.
-    principal_remaining = ZERO
-    if not month_complete and principal_booked <= ZERO:
-        recent = [
-            float(side_principal.get(target_idx - i, ZERO))
-            for i in range(1, 4)
-        ]
-        recent = [v for v in recent if v > 0]
-        if recent:
-            principal_remaining = _q(statistics.median(recent))
+    loan_lines = _loan_lines(
+        db, agreements, loan_ids, loans, loan_invoices,
+        target_idx, month_start, month_end, effective_as_of, month_complete,
+    )
+    loan_remaining = _q(sum(
+        (l["amount"] for l in loan_lines if l["status"] != "PAID"), ZERO,
+    ))
 
     forecast_total = _q(
-        booked_total + planned_total + recurring_total + variable_remaining
-        - income_booked + principal_booked + principal_remaining
+        booked_total + planned_total + recurring_total + loan_remaining
+        + variable_remaining - income_booked + principal_booked
     )
 
     carry_by_user, carry_from = _carry(
@@ -609,19 +761,106 @@ def calculate_settlement(
             "booked_variable": booked_variable,
             "excluded_booked": _q(excluded_booked),
             "planned_remaining": planned_total,
-            "recurring_remaining": recurring_total,
+            # Loan instalments are fixed withdrawals too; kept in this
+            # figure so older clients that sum the parts still add up
+            "recurring_remaining": _q(recurring_total + loan_remaining),
+            "loan_remaining": loan_remaining,
             "variable_remaining": variable_remaining,
             "typical_variable_month": typical_variable,
             "income_booked": income_booked,
-            "debt_principal": _q(principal_booked + principal_remaining),
+            "debt_principal": principal_booked,
             "forecast_total": forecast_total,
         },
         "planned": planned_lines,
         "card_statements": card_statement_lines,
         "recurring": recurring_lines,
+        "loans": loan_lines,
         "members": members_out,
         "liquidity": _liquidity(db, settings, members_out, planned_total, card_invoiced),
     }
+
+
+def _loan_lines(
+    db: Session,
+    agreements: list,
+    loan_ids: set[int],
+    loans: _LoanHistory,
+    loan_invoices: list,
+    target_idx: int,
+    month_start: date,
+    month_end: date,
+    as_of: date,
+    month_complete: bool,
+) -> list[dict]:
+    """This month's instalment on every loan, paid or still to come.
+
+    An agreement gives the amount; a registered invoice on the loan account
+    overrides it, being the lender's own figure. A loan with neither falls
+    back on its recent instalments for as long as there is debt left.
+    """
+    by_account = {fp.account_id: fp for fp in agreements}
+    invoices = defaultdict(list)
+    for inv in loan_invoices:
+        invoices[inv["account_id"]].append(inv)
+
+    lines = []
+    for account_id in sorted(loan_ids):
+        fp = by_account.get(account_id)
+        paid = loans.paid.get(account_id, {}).get(target_idx)
+        line = {
+            "fixed_payment_id": fp.id if fp else None,
+            "account_id": account_id,
+            "name": fp.name if fp else None,
+            "due_date": None,
+            "amount": ZERO,
+            "status": "EXPECTED",
+            "source": "AGREEMENT" if fp else "HISTORY",
+        }
+        if fp:
+            due = _agreement_due(fp, target_idx)
+            if due is None and not paid and not invoices[account_id]:
+                continue
+            line["amount"] = due or ZERO
+            day = min(fp.due_day, (month_end - month_start).days + 1)
+            line["due_date"] = month_start.replace(day=day)
+        if paid:
+            line.update(amount=_q(paid), status="PAID")
+        elif invoices[account_id]:
+            inv = invoices[account_id]
+            line.update(
+                amount=_q(sum((i["amount"] for i in inv), ZERO)),
+                status="INVOICED",
+                source="INVOICE",
+                due_date=inv[0]["expected_date"],
+                planned_transaction_id=inv[0]["planned_transaction_id"],
+            )
+            if not line["name"]:
+                line["name"] = inv[0]["description"]
+        elif fp:
+            if month_complete:
+                continue
+        else:
+            # No agreement: the recent instalments stand in, until the loan
+            # is paid off or replaced
+            if month_complete or _liability_balance(db, account_id, as_of) <= 0:
+                continue
+            recent = [
+                float(loans.paid[account_id].get(target_idx - i, ZERO))
+                for i in range(1, LOAN_FALLBACK_MONTHS + 1)
+            ]
+            recent = [v for v in recent if v > 0]
+            if not recent:
+                continue
+            line["amount"] = _q(statistics.median(recent))
+        if line["amount"] <= 0:
+            continue
+        lines.append(line)
+    for line in lines:
+        if not line["name"]:
+            acc = db.get(Account, line["account_id"])
+            line["name"] = f"{acc.account_number} {acc.account_name}" if acc else "Lån"
+    lines.sort(key=lambda l: (l["due_date"] or month_end, l["account_id"]))
+    return lines
 
 
 def _detect_period(past_months: list[int], target_idx: int) -> Optional[int]:

@@ -713,6 +713,34 @@ CREATE TABLE `settlement_excluded_accounts` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `settlement_fixed_payments`
+--
+
+DROP TABLE IF EXISTS `settlement_fixed_payments`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `settlement_fixed_payments` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `settings_id` int(11) NOT NULL,
+  `name` varchar(200) NOT NULL,
+  `account_id` int(11) NOT NULL,
+  `paid_from_account_id` int(11) DEFAULT NULL,
+  `due_day` int(11) NOT NULL,
+  `amount` decimal(15,2) NOT NULL,
+  `first_month` date NOT NULL,
+  `first_amount` decimal(15,2) DEFAULT NULL,
+  `payment_count` int(11) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_settlement_fixed_settings` (`settings_id`),
+  KEY `idx_settlement_fixed_account` (`account_id`),
+  KEY `idx_settlement_fixed_paid_from` (`paid_from_account_id`),
+  CONSTRAINT `settlement_fixed_payments_ibfk_1` FOREIGN KEY (`settings_id`) REFERENCES `settlement_settings` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `settlement_fixed_payments_ibfk_2` FOREIGN KEY (`account_id`) REFERENCES `accounts` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `settlement_fixed_payments_ibfk_3` FOREIGN KEY (`paid_from_account_id`) REFERENCES `accounts` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Table structure for table `settlement_members`
 --
 

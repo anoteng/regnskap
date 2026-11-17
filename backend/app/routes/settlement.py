@@ -13,6 +13,7 @@ from ..models import (
     LedgerMember,
     LedgerRole,
     SettlementExcludedAccount,
+    SettlementFixedPayment,
     SettlementMember,
     SettlementSettings,
     User,
@@ -32,6 +33,7 @@ def _load_settings(db: Session, ledger_id: int) -> SettlementSettings | None:
         .options(
             joinedload(SettlementSettings.members).joinedload(SettlementMember.user),
             joinedload(SettlementSettings.excluded_accounts),
+            joinedload(SettlementSettings.fixed_payments),
         )
         .filter(SettlementSettings.ledger_id == ledger_id)
         .first()
@@ -69,6 +71,20 @@ def _to_out(ledger_id: int, settings: SettlementSettings | None) -> SettlementSe
             for m in sorted(settings.members, key=lambda m: m.user_id)
         ],
         excluded_account_ids=sorted(e.account_id for e in settings.excluded_accounts),
+        fixed_payments=[
+            {
+                "id": fp.id,
+                "name": fp.name,
+                "account_id": fp.account_id,
+                "paid_from_account_id": fp.paid_from_account_id,
+                "due_day": fp.due_day,
+                "amount": fp.amount,
+                "first_month": fp.first_month,
+                "first_amount": fp.first_amount,
+                "payment_count": fp.payment_count,
+            }
+            for fp in sorted(settings.fixed_payments, key=lambda fp: (fp.due_day, fp.id))
+        ],
         updated_at=settings.updated_at,
     )
 
@@ -125,6 +141,20 @@ def update_settlement_settings(
         SettlementExcludedAccount(account_id=account_id)
         for account_id in sorted(set(payload.excluded_account_ids))
     ]
+    if payload.fixed_payments is not None:
+        settings.fixed_payments = [
+            SettlementFixedPayment(
+                name=fp.name.strip(),
+                account_id=fp.account_id,
+                paid_from_account_id=fp.paid_from_account_id,
+                due_day=fp.due_day,
+                amount=fp.amount,
+                first_month=fp.first_month.replace(day=1),
+                first_amount=fp.first_amount,
+                payment_count=fp.payment_count,
+            )
+            for fp in payload.fixed_payments
+        ]
 
     db.commit()
     return _to_out(current_ledger.id, _load_settings(db, current_ledger.id))
@@ -149,9 +179,23 @@ def _validate(db: Session, ledger_id: int, payload: SettlementSettingsUpdate) ->
         if m.share_percent < 0 or m.share_percent > 100:
             raise HTTPException(status_code=400, detail="Andel må være mellom 0 og 100 prosent")
 
+    fixed = payload.fixed_payments or []
+    loan_accounts = [fp.account_id for fp in fixed]
+    if len(set(loan_accounts)) != len(loan_accounts):
+        raise HTTPException(status_code=400, detail="Et lån kan bare ha én fast avtale")
+    for fp in fixed:
+        if not fp.name.strip():
+            raise HTTPException(status_code=400, detail="Faste avtaler må ha et navn")
+        if not 1 <= fp.due_day <= 31:
+            raise HTTPException(status_code=400, detail="Trekkdag må være mellom 1 og 31")
+        if fp.amount <= 0 or (fp.first_amount is not None and fp.first_amount <= 0):
+            raise HTTPException(status_code=400, detail="Beløpet for en fast avtale må være positivt")
+        if fp.payment_count is not None and fp.payment_count < 1:
+            raise HTTPException(status_code=400, detail="Antall terminer må være minst 1")
+
     account_ids = {payload.operating_account_id} | set(payload.excluded_account_ids) | {
         m.deposit_account_id for m in payload.members
-    }
+    } | set(loan_accounts) | {fp.paid_from_account_id for fp in fixed}
     account_ids.discard(None)
     if account_ids:
         accounts = {
@@ -169,6 +213,11 @@ def _validate(db: Session, ledger_id: int, payload: SettlementSettingsUpdate) ->
         for account_id in payload.excluded_account_ids:
             if accounts[account_id].account_type != AccountType.EXPENSE:
                 raise HTTPException(status_code=400, detail="Kun kostnadskontoer kan ekskluderes")
+        for fp in fixed:
+            if accounts[fp.account_id].account_type != AccountType.LIABILITY:
+                raise HTTPException(status_code=400, detail=f"{fp.name}: lånekontoen må være en gjeldskonto")
+            if fp.paid_from_account_id is not None and accounts[fp.paid_from_account_id].account_type != AccountType.ASSET:
+                raise HTTPException(status_code=400, detail=f"{fp.name}: kontoen det trekkes fra må være en bankkonto")
 
     # A disabled configuration may be incomplete; an enabled one must be usable
     if payload.is_enabled:

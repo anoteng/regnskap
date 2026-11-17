@@ -494,6 +494,21 @@ class SettlementMemberInput(BaseModel):
     deposit_account_id: Optional[int] = None
 
 
+class SettlementFixedPaymentInput(BaseModel):
+    name: str
+    account_id: int
+    paid_from_account_id: Optional[int] = None
+    due_day: int
+    amount: Decimal
+    first_month: date
+    first_amount: Optional[Decimal] = None
+    payment_count: Optional[int] = None
+
+
+class SettlementFixedPaymentOut(SettlementFixedPaymentInput):
+    id: int
+
+
 class SettlementSettingsUpdate(BaseModel):
     is_enabled: bool = False
     operating_account_id: Optional[int] = None
@@ -502,6 +517,9 @@ class SettlementSettingsUpdate(BaseModel):
     card_due_day: int = 15
     members: List[SettlementMemberInput] = []
     excluded_account_ids: List[int] = []
+    # None keeps the stored agreements, so clients that predate them can
+    # still save the rest of the settings
+    fixed_payments: Optional[List[SettlementFixedPaymentInput]] = None
 
 
 class SettlementMemberOut(BaseModel):
@@ -521,6 +539,7 @@ class SettlementSettingsOut(BaseModel):
     card_due_day: int = 15
     members: List[SettlementMemberOut]
     excluded_account_ids: List[int]
+    fixed_payments: List[SettlementFixedPaymentOut] = []
     updated_at: Optional[datetime] = None
 
 
@@ -530,7 +549,9 @@ class SettlementTotals(BaseModel):
     booked_variable: Decimal
     excluded_booked: Decimal
     planned_remaining: Decimal
+    # Includes loan_remaining, so the parts still add up for older clients
     recurring_remaining: Decimal
+    loan_remaining: Decimal = Decimal("0")
     variable_remaining: Decimal
     typical_variable_month: Decimal
     # Netted off the split: the shared account earned these itself
@@ -563,6 +584,19 @@ class SettlementRecurringLine(BaseModel):
     expected_day: int
     amount: Decimal
     period_months: int
+
+
+class SettlementLoanLine(BaseModel):
+    fixed_payment_id: Optional[int] = None
+    planned_transaction_id: Optional[int] = None
+    account_id: int
+    name: str
+    due_date: Optional[date] = None
+    amount: Decimal
+    # PAID, INVOICED or EXPECTED
+    status: str
+    # AGREEMENT, INVOICE or HISTORY
+    source: str
 
 
 class SettlementMemberResult(BaseModel):
@@ -614,6 +648,7 @@ class SettlementCalculation(BaseModel):
     planned: List[SettlementPlannedLine]
     card_statements: List[SettlementCardStatement] = []
     recurring: List[SettlementRecurringLine]
+    loans: List[SettlementLoanLine] = []
     members: List[SettlementMemberResult]
     liquidity: SettlementLiquidity
 
