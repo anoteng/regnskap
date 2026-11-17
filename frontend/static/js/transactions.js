@@ -1,5 +1,5 @@
-import api from './api.js?v=31';
-import { formatCurrency, formatDate, showModal, closeModal, showError, showSuccess } from './utils.js?v=31';
+import api from './api.js?v=32';
+import { formatCurrency, formatDate, showModal, closeModal, showError, showSuccess } from './utils.js?v=32';
 
 class TransactionsManager {
     constructor() {

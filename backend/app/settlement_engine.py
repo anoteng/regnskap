@@ -41,7 +41,7 @@ import statistics
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, timedelta
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_CEILING, ROUND_HALF_UP
 from typing import Optional
 
 from sqlalchemy import func
@@ -763,6 +763,7 @@ def calculate_settlement(
             "own_withdrawals": withdrawals,
             "contributed": contributed,
             "carry_in": carry,
+            "liquidity_topup": ZERO,
             "recommended_transfer": _q(share + withdrawals - contributed - carry),
         })
 
@@ -772,11 +773,40 @@ def calculate_settlement(
         following = calculate_settlement(
             db, settings, next_year, next_month, as_of=as_of, with_timeline=False,
         )
-        liquidity["timeline"] = _cash_timeline(
-            db, settings, as_of, month_start, month_end,
-            members_out, planned_lines, recurring_lines, loan_lines,
-            variable_remaining, card_invoiced, liquidity, following,
-        )
+
+        def timeline():
+            return _cash_timeline(
+                db, settings, as_of, month_start, month_end,
+                members_out, planned_lines, recurring_lines, loan_lines,
+                variable_remaining, card_invoiced, liquidity, following,
+            )
+
+        # The share of the month's costs is not always enough cash on the
+        # right day: a large card invoice and a loan can fall due before the
+        # next deposit. Raise this month's contributions by what is missing,
+        # split by share. The overpayment is carried into next month as
+        # usual, where this same check holds it back for as long as the gap
+        # is there - in effect a standing buffer, returned once it is not.
+        min_balance = Decimal(settings.min_balance or 0)
+        tl = timeline()
+        need = min_balance - tl["lowest_balance"]
+        topup_total = ZERO
+        if need > 0:
+            for m in members_out:
+                rec = m["recommended_transfer"]
+                # A member who is ahead holds back nothing: the deposit has
+                # to rise by the full share of the gap
+                target = max(rec, ZERO) + (need * m["share_percent"] / Decimal(100)).quantize(
+                    Decimal("1"), rounding=ROUND_CEILING)
+                if target > rec:
+                    m["liquidity_topup"] = _q(target - rec)
+                    m["recommended_transfer"] = _q(target)
+                    topup_total += m["liquidity_topup"]
+            liquidity = _liquidity(db, settings, members_out, planned_total, card_invoiced)
+            tl = timeline()
+        tl["min_balance"] = _q(min_balance)
+        tl["topup_total"] = _q(topup_total)
+        liquidity["timeline"] = tl
 
     return {
         "ledger_id": ledger_id,

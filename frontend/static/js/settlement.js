@@ -1,5 +1,5 @@
-import api from './api.js?v=31';
-import { formatCurrency, formatDate, showError, showSuccess } from './utils.js?v=31';
+import api from './api.js?v=32';
+import { formatCurrency, formatDate, showError, showSuccess } from './utils.js?v=32';
 
 function currentMonth() {
     const d = new Date();
@@ -99,6 +99,7 @@ class SettlementManager {
             ? 'Måneden er avsluttet – tallene er faktiske.'
             : `Per ${formatDate(data.as_of)} · ${data.days_remaining} dager igjen`;
 
+        const hasTopup = data.members.some(m => parseFloat(m.liquidity_topup || 0) > 0);
         const memberRows = data.members.map(m => {
             const transfer = parseFloat(m.recommended_transfer);
             const carry = parseFloat(m.carry_in || 0);
@@ -114,6 +115,7 @@ class SettlementManager {
                     <td class="num">${formatCurrency(m.own_withdrawals)}</td>
                     <td class="num">${formatCurrency(m.contributed)}</td>
                     <td class="num">${carryCell}</td>
+                    ${hasTopup ? `<td class="num">${parseFloat(m.liquidity_topup) > 0 ? '+ ' + formatCurrency(m.liquidity_topup) : '<span class="subtitle">–</span>'}</td>` : ''}
                     <td class="num ${cls}"><strong>${formatCurrency(Math.abs(transfer))}</strong><br><small>${hint}</small></td>
                 </tr>`;
         }).join('');
@@ -233,13 +235,15 @@ class SettlementManager {
                                 <th class="num">Egne uttak</th>
                                 <th class="num">Innbetalt</th>
                                 <th class="num">Overført fra før</th>
+                                ${hasTopup ? '<th class="num">Påslag for dekning</th>' : ''}
                                 <th class="num">Anbefalt nå</th>
                             </tr>
                         </thead>
                         <tbody>${memberRows}</tbody>
                     </table>
                 </div>
-                <p class="subtitle" style="margin-top: 0.75rem;">Anbefalt = andel + egne uttak fra driftskontoen − innbetalt denne måneden − det som er til gode fra før.${carryNote}</p>
+                <p class="subtitle" style="margin-top: 0.75rem;">Anbefalt = andel + egne uttak fra driftskontoen − innbetalt denne måneden − det som er til gode fra før.${carryNote}
+                ${hasTopup ? ' Påslaget for dekning trengs for at kontoen skal dekke alle trekk fram til neste måneds innskudd (se «Dekning dag for dag»). Det regnes som til gode neste måned, men holdes igjen så lenge det trengs.' : ''}</p>
                 ${excluded}
             </div>
 
@@ -293,7 +297,8 @@ class SettlementManager {
         const headline = tl.shortfall_date
             ? `<div class="settlement-warning">Det mangler ${formatCurrency(tl.shortfall_amount)} den ${formatDate(tl.shortfall_date)} når ${escapeHtml(tl.shortfall_description)} trekkes.
                Laveste saldo er ${formatCurrency(lowest)} den ${formatDate(tl.lowest_date)}.</div>`
-            : `<p>Alle trekk har dekning. Laveste saldo er <strong>${formatCurrency(lowest)}</strong> den ${formatDate(tl.lowest_date)}.</p>`;
+            : `<p>Alle trekk har dekning${parseFloat(tl.topup_total) > 0 ? ` når anbefalingen følges, inkludert påslag på ${formatCurrency(tl.topup_total)}` : ''}.
+               Laveste saldo er <strong>${formatCurrency(lowest)}</strong> den ${formatDate(tl.lowest_date)}${parseFloat(tl.min_balance) > 0 ? ` (minstesaldo ${formatCurrency(tl.min_balance)})` : ''}.</p>`;
         const assumed = tl.assumed_deposit_days.length
             ? `<p class="subtitle">Uten innskuddsdag (antatt i dag): ${tl.assumed_deposit_days.map(escapeHtml).join(', ')}. Sett dagen under avregningsinnstillingene.</p>`
             : '';
@@ -325,7 +330,7 @@ class SettlementManager {
                     </div>
                 </details>
                 ${assumed}
-                <p class="subtitle">Kortkjøp går ut med kortfakturaen: alt som står på kortet nå, pluss forventet forbruk resten av måneden, forfaller neste måned.
+                <p class="subtitle">Innskuddene denne måneden er det som anbefales nå; neste måned andelen av prognosen. Kortkjøp går ut med kortfakturaen: alt som står på kortet nå, pluss forventet forbruk resten av måneden, forfaller neste måned.
                 Lånekontoer regnes sammen med driftskontoen. Trekk går før innskudd samme dag.</p>
             </div>`;
     }
@@ -417,6 +422,12 @@ class SettlementManager {
                 <label for="settlement-card-due-day">Forfallsdag for kortregningen</label>
                 <input type="number" id="settlement-card-due-day" min="1" max="28" value="${settings.card_due_day}" style="width: 6rem;" ${dis}>
                 <small class="subtitle">Kjøpene er allerede fordelt måneden de ble gjort; dagen brukes bare til å varsle om pengene er på plass i tide.</small>
+            </div>
+
+            <div class="form-group">
+                <label for="settlement-min-balance">Minstesaldo</label>
+                <input type="number" id="settlement-min-balance" min="0" step="100" value="${parseFloat(settings.min_balance || 0)}" style="width: 8rem;" ${dis}> kr
+                <small class="subtitle">Saldoen kontoene ikke skal under før neste måneds innskudd kommer. Innbetalingene økes med det som mangler, fordelt etter andel.</small>
             </div>
 
             <h3>Deltakere</h3>
@@ -513,6 +524,7 @@ class SettlementManager {
             variable_lookback_months: parseInt(document.getElementById('settlement-lookback').value, 10) || 3,
             carry_start: document.getElementById('settlement-carry-start').value || null,
             card_due_day: parseInt(document.getElementById('settlement-card-due-day').value, 10) || 15,
+            min_balance: parseFloat(document.getElementById('settlement-min-balance').value) || 0,
             members,
             excluded_account_ids: [...document.querySelectorAll('.settlement-exclude:checked')].map(cb => parseInt(cb.value, 10)),
             fixed_payments: this.collectFixedPayments(),

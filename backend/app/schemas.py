@@ -517,6 +517,8 @@ class SettlementSettingsUpdate(BaseModel):
     variable_lookback_months: int = 3
     carry_start: Optional[date] = None
     card_due_day: int = 15
+    # Left out by older clients; the stored value is kept then
+    min_balance: Decimal = Decimal("0")
     members: List[SettlementMemberInput] = []
     excluded_account_ids: List[int] = []
     # None keeps the stored agreements, so clients that predate them can
@@ -540,6 +542,7 @@ class SettlementSettingsOut(BaseModel):
     variable_lookback_months: int
     carry_start: Optional[date] = None
     card_due_day: int = 15
+    min_balance: Decimal = Decimal("0")
     members: List[SettlementMemberOut]
     excluded_account_ids: List[int]
     fixed_payments: List[SettlementFixedPaymentOut] = []
@@ -615,6 +618,9 @@ class SettlementMemberResult(BaseModel):
     # Running over- or underpayment from closed months; positive means the
     # member is ahead and owes less now
     carry_in: Decimal = Decimal("0")
+    # Added so the account covers every draw until next month's deposits;
+    # included in recommended_transfer
+    liquidity_topup: Decimal = Decimal("0")
     recommended_transfer: Decimal
 
 
@@ -649,6 +655,9 @@ class SettlementCashTimeline(BaseModel):
     shortfall_amount: Optional[Decimal] = None
     # Members without a deposit day are assumed to pay at once
     assumed_deposit_days: List[str] = []
+    min_balance: Decimal = Decimal("0")
+    # Raise of the contributions this month needed to stay above min_balance
+    topup_total: Decimal = Decimal("0")
 
 
 class SettlementLiquidity(BaseModel):

@@ -811,6 +811,9 @@ class SettlementSettings(Base):
     # charged to the members a month earlier, so this is only about whether
     # the cash is in the account in time.
     card_due_day = Column(Integer, nullable=False, default=15)
+    # Lowest balance the day-by-day projection may reach; contributions are
+    # raised until it holds
+    min_balance = Column(DECIMAL(15, 2), nullable=False, default=0)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

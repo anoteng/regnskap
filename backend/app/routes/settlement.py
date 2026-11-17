@@ -49,6 +49,7 @@ def _to_out(ledger_id: int, settings: SettlementSettings | None) -> SettlementSe
             variable_lookback_months=3,
             carry_start=None,
             card_due_day=15,
+            min_balance=0,
             members=[],
             excluded_account_ids=[],
             updated_at=None,
@@ -60,6 +61,7 @@ def _to_out(ledger_id: int, settings: SettlementSettings | None) -> SettlementSe
         variable_lookback_months=settings.variable_lookback_months,
         carry_start=settings.carry_start,
         card_due_day=settings.card_due_day,
+        min_balance=settings.min_balance,
         members=[
             {
                 "user_id": m.user_id,
@@ -123,6 +125,8 @@ def update_settlement_settings(
     settings.variable_lookback_months = payload.variable_lookback_months
     settings.carry_start = payload.carry_start
     settings.card_due_day = payload.card_due_day
+    if "min_balance" in payload.model_fields_set or settings.min_balance is None:
+        settings.min_balance = payload.min_balance
 
     # Clients that predate the deposit day leave it out of the payload
     old_days = {m.user_id: m.deposit_day for m in settings.members}
@@ -166,6 +170,8 @@ def update_settlement_settings(
 
 
 def _validate(db: Session, ledger_id: int, payload: SettlementSettingsUpdate) -> None:
+    if payload.min_balance < 0:
+        raise HTTPException(status_code=400, detail="Minstesaldo kan ikke være negativ")
     if not 1 <= payload.card_due_day <= 28:
         raise HTTPException(status_code=400, detail="Forfallsdag må være mellom 1 og 28")
     if not 1 <= payload.variable_lookback_months <= 24:
