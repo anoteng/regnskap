@@ -135,6 +135,9 @@ class _KeyStats:
     # month index -> earliest day of month seen
     monthly_first_day: dict = field(default_factory=dict)
     sample_description: str = ""
+    # transactions seen, and how many of them were paid with a card
+    tx_count: int = 0
+    card_tx_count: int = 0
 
 
 class SettlementDisabled(Exception):
@@ -437,6 +440,7 @@ def calculate_settlement(
     year: int,
     month: int,
     as_of: Optional[date] = None,
+    with_timeline: bool = True,
 ) -> dict:
     if not settings.is_enabled:
         raise SettlementDisabled()
@@ -485,6 +489,17 @@ def calculate_settlement(
         {fp.account_id for fp in agreements},
     )
 
+    card_tx_ids = {
+        tx_id for (tx_id,) in db.query(JournalEntry.transaction_id)
+        .join(Transaction, Transaction.id == JournalEntry.transaction_id)
+        .filter(
+            Transaction.ledger_id == ledger_id,
+            Transaction.transaction_date >= history_start,
+            Transaction.transaction_date <= month_end,
+            JournalEntry.account_id.in_(card_ids),
+        )
+    } if card_ids else set()
+
     matched_tx_ids = {
         tx_id for (tx_id,) in db.query(PlannedTransaction.matched_transaction_id).filter(
             PlannedTransaction.ledger_id == ledger_id,
@@ -526,6 +541,9 @@ def calculate_settlement(
         if (str(tx_id), idx) not in seen_tx_month:
             seen_tx_month.add((str(tx_id), idx))
             st.monthly_counts[idx] += 1
+            st.tx_count += 1
+            if tx_id in card_tx_ids:
+                st.card_tx_count += 1
         st.monthly_first_day[idx] = min(st.monthly_first_day.get(idx, 31), tx_date.day)
         if not st.sample_description:
             st.sample_description = description
@@ -576,6 +594,7 @@ def calculate_settlement(
             "typical_day": int(statistics.median(st.monthly_first_day[m] for m in past_months)),
             "description": st.sample_description,
             "last_seen": _month_from_index(past_months[-1]),
+            "by_card": st.card_tx_count * 2 > st.tx_count,
         }
 
     # ------------------------------------------------------------------
@@ -644,6 +663,7 @@ def calculate_settlement(
             "expected_day": info["typical_day"],
             "amount": info["typical_amount"],
             "period_months": info["period_months"],
+            "by_card": info["by_card"],
         })
     recurring_lines.sort(key=lambda l: l["expected_day"])
     recurring_total = _q(sum((l["amount"] for l in recurring_lines), ZERO))
@@ -746,6 +766,18 @@ def calculate_settlement(
             "recommended_transfer": _q(share + withdrawals - contributed - carry),
         })
 
+    liquidity = _liquidity(db, settings, members_out, planned_total, card_invoiced)
+    if with_timeline and month_start <= as_of <= month_end and settings.operating_account_id:
+        next_year, next_month = _month_from_index(target_idx + 1)
+        following = calculate_settlement(
+            db, settings, next_year, next_month, as_of=as_of, with_timeline=False,
+        )
+        liquidity["timeline"] = _cash_timeline(
+            db, settings, as_of, month_start, month_end,
+            members_out, planned_lines, recurring_lines, loan_lines,
+            variable_remaining, card_invoiced, liquidity, following,
+        )
+
     return {
         "ledger_id": ledger_id,
         "month": f"{year:04d}-{month:02d}",
@@ -776,7 +808,7 @@ def calculate_settlement(
         "recurring": recurring_lines,
         "loans": loan_lines,
         "members": members_out,
-        "liquidity": _liquidity(db, settings, members_out, planned_total, card_invoiced),
+        "liquidity": liquidity,
     }
 
 
@@ -861,6 +893,171 @@ def _loan_lines(
             line["name"] = f"{acc.account_number} {acc.account_name}" if acc else "Lån"
     lines.sort(key=lambda l: (l["due_date"] or month_end, l["account_id"]))
     return lines
+
+
+def _on_day(year: int, month: int, day: int) -> date:
+    return date(year, month, min(day, calendar.monthrange(year, month)[1]))
+
+
+def _cash_timeline(
+    db: Session,
+    settings: SettlementSettings,
+    as_of: date,
+    month_start: date,
+    month_end: date,
+    members_out: list,
+    planned_lines: list,
+    recurring_lines: list,
+    loan_lines: list,
+    variable_remaining: Decimal,
+    card_invoiced: Decimal,
+    liquidity: dict,
+    following: dict,
+) -> dict:
+    """Balance day by day until the end of next month.
+
+    The month-end figure says whether the money is there eventually; this says
+    whether it is there on the day each payment is drawn. The accounts loans
+    are drawn from count together with the operating account, since they are
+    topped up from it just before the draw.
+
+    Card purchases leave the account with the invoice, not on the day they are
+    made: everything owed on the card now, plus the purchases still expected
+    this month, falls due on next month's due day. Anything overdue is put on
+    today, and outflows go before inflows on the same day, so the figure errs
+    on the cautious side.
+    """
+    ledger_id = settings.ledger_id
+    account_ids = sorted({settings.operating_account_id} | {
+        fp.paid_from_account_id for fp in settings.fixed_payments
+        if fp.paid_from_account_id
+    })
+    start_balance = ZERO
+    for account_id in account_ids:
+        row = (
+            db.query(
+                func.coalesce(func.sum(JournalEntry.debit), 0),
+                func.coalesce(func.sum(JournalEntry.credit), 0),
+            )
+            .join(Transaction, Transaction.id == JournalEntry.transaction_id)
+            .filter(
+                JournalEntry.account_id == account_id,
+                Transaction.status.in_(BOOKED_STATUSES),
+                Transaction.transaction_date <= as_of,
+            )
+            .one()
+        )
+        start_balance += Decimal(row[0]) - Decimal(row[1])
+
+    next_start = month_end + timedelta(days=1)
+    next_end = _month_bounds(next_start.year, next_start.month)[1]
+    events = []
+    assumed = []
+
+    def add(day: Optional[date], description: str, amount: Decimal, kind: str):
+        amount = _q(amount)
+        if amount == 0:
+            return
+        day = max(day or as_of, as_of)
+        if day > next_end:
+            return
+        events.append({"date": day, "description": description, "amount": amount, "kind": kind})
+
+    deposit_day = {m.user_id: m.deposit_day for m in settings.members}
+
+    def contributions(members: list, year: int, month: int, field_name: str, this_month: bool):
+        for m in members:
+            amount = Decimal(m[field_name])
+            if amount <= 0:
+                continue
+            day = deposit_day.get(m["user_id"])
+            if day is None:
+                if this_month:
+                    assumed.append(m["full_name"])
+                when = as_of if this_month else date(year, month, 1)
+            else:
+                when = _on_day(year, month, day)
+            add(when, f"Innskudd {m['full_name']}", amount, "DEPOSIT")
+
+    # This month
+    contributions(members_out, month_start.year, month_start.month, "recommended_transfer", True)
+    for line in loan_lines:
+        if line["status"] != "PAID":
+            add(line["due_date"], line["name"], -line["amount"], "LOAN")
+    for line in planned_lines:
+        add(line["expected_date"], line["description"], -line["amount"], "INVOICE")
+    card_recurring = ZERO
+    for line in recurring_lines:
+        if line["by_card"]:
+            card_recurring += line["amount"]
+        else:
+            add(_on_day(month_start.year, month_start.month, line["expected_day"]),
+                line["description"], -line["amount"], "RECURRING")
+
+    # Credit card: this month's invoice if it has not been paid yet, then
+    # next month's, which holds everything charged until the month ends
+    card_ids = {c["account_id"] for c in liquidity["credit_cards"]}
+    owed = Decimal(liquidity["credit_card_owed_total"])
+    if card_ids:
+        card_paid_this_month = db.query(JournalEntry.id).join(
+            Transaction, Transaction.id == JournalEntry.transaction_id,
+        ).filter(
+            Transaction.ledger_id == ledger_id,
+            Transaction.status.in_(BOOKED_STATUSES),
+            Transaction.transaction_date >= month_start,
+            Transaction.transaction_date <= as_of,
+            JournalEntry.account_id.in_(card_ids),
+            JournalEntry.debit > 0,
+            Transaction.id.in_(
+                db.query(JournalEntry.transaction_id).filter(JournalEntry.account_id.in_(account_ids))
+            ),
+        ).first() is not None
+        next_bill = owed + variable_remaining + card_recurring
+        if not card_paid_this_month:
+            this_bill = card_invoiced if card_invoiced > 0 else owed
+            add(_on_day(month_start.year, month_start.month, settings.card_due_day),
+                "Kredittkortfaktura", -this_bill, "CARD")
+            next_bill -= this_bill
+        add(_on_day(next_start.year, next_start.month, settings.card_due_day),
+            "Kredittkortfaktura", -max(next_bill, ZERO), "CARD")
+
+    # Next month
+    contributions(following["members"], next_start.year, next_start.month, "share_amount", False)
+    for line in following["loans"]:
+        if line["status"] != "PAID":
+            add(line["due_date"], line["name"], -line["amount"], "LOAN")
+    for line in following["planned"]:
+        add(line["expected_date"], line["description"], -line["amount"], "INVOICE")
+    for line in following["recurring"]:
+        if not line["by_card"]:
+            add(_on_day(next_start.year, next_start.month, line["expected_day"]),
+                line["description"], -line["amount"], "RECURRING")
+
+    events.sort(key=lambda e: (e["date"], e["amount"] > 0))
+    balance = _q(start_balance)
+    lowest, lowest_date = balance, as_of
+    shortfall = None
+    for e in events:
+        balance = _q(balance + e["amount"])
+        e["balance"] = balance
+        if balance < lowest:
+            lowest, lowest_date = balance, e["date"]
+        if balance < 0 and shortfall is None:
+            shortfall = e
+
+    return {
+        "start_date": as_of,
+        "end_date": next_end,
+        "account_ids": account_ids,
+        "start_balance": _q(start_balance),
+        "events": events,
+        "lowest_balance": lowest,
+        "lowest_date": lowest_date,
+        "shortfall_date": shortfall["date"] if shortfall else None,
+        "shortfall_description": shortfall["description"] if shortfall else None,
+        "shortfall_amount": -shortfall["balance"] if shortfall else None,
+        "assumed_deposit_days": assumed,
+    }
 
 
 def _detect_period(past_months: list[int], target_idx: int) -> Optional[int]:

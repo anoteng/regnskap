@@ -753,6 +753,7 @@ CREATE TABLE `settlement_members` (
   `user_id` int(11) NOT NULL,
   `share_percent` decimal(5,2) NOT NULL,
   `deposit_account_id` int(11) DEFAULT NULL,
+  `deposit_day` int(11) DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_settlement_member` (`settings_id`,`user_id`),
   KEY `idx_settlement_member_user` (`user_id`),

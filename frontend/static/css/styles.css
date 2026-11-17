@@ -1427,6 +1427,11 @@ body {
     overflow-x: auto;
 }
 
+.settlement-timeline-low td {
+    font-weight: 600;
+    background: color-mix(in srgb, var(--danger-color) 6%, transparent);
+}
+
 .settlement-exclude-list {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));

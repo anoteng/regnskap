@@ -492,6 +492,8 @@ class SettlementMemberInput(BaseModel):
     user_id: int
     share_percent: Decimal
     deposit_account_id: Optional[int] = None
+    # Left out by older clients; the stored day is kept then
+    deposit_day: Optional[int] = None
 
 
 class SettlementFixedPaymentInput(BaseModel):
@@ -528,6 +530,7 @@ class SettlementMemberOut(BaseModel):
     email: str
     share_percent: Decimal
     deposit_account_id: Optional[int] = None
+    deposit_day: Optional[int] = None
 
 
 class SettlementSettingsOut(BaseModel):
@@ -584,6 +587,8 @@ class SettlementRecurringLine(BaseModel):
     expected_day: int
     amount: Decimal
     period_months: int
+    # Paid with the credit card, so the cash leaves with the card invoice
+    by_card: bool = False
 
 
 class SettlementLoanLine(BaseModel):
@@ -620,6 +625,32 @@ class SettlementCreditCard(BaseModel):
     owed: Decimal
 
 
+class SettlementCashEvent(BaseModel):
+    date: date
+    description: str
+    # Positive in, negative out
+    amount: Decimal
+    balance: Decimal
+    kind: str
+
+
+class SettlementCashTimeline(BaseModel):
+    """Day-by-day balance of the accounts the shared bills are paid from."""
+    start_date: date
+    end_date: date
+    account_ids: List[int]
+    start_balance: Decimal
+    events: List[SettlementCashEvent]
+    lowest_balance: Decimal
+    lowest_date: date
+    # First payment the balance does not cover, if any
+    shortfall_date: Optional[date] = None
+    shortfall_description: Optional[str] = None
+    shortfall_amount: Optional[Decimal] = None
+    # Members without a deposit day are assumed to pay at once
+    assumed_deposit_days: List[str] = []
+
+
 class SettlementLiquidity(BaseModel):
     operating_balance: Optional[Decimal] = None
     credit_cards: List[SettlementCreditCard]
@@ -633,6 +664,7 @@ class SettlementLiquidity(BaseModel):
     expected_available: Optional[Decimal] = None
     covers_card: Optional[bool] = None
     card_due_day: int = 15
+    timeline: Optional[SettlementCashTimeline] = None
 
 
 class SettlementCalculation(BaseModel):

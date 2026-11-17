@@ -833,6 +833,9 @@ class SettlementMember(Base):
     # Account where this member's contributions are credited and personal
     # withdrawals from the operating account are debited
     deposit_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
+    # Day of the month the member's contribution usually arrives, used for
+    # the day-by-day cash projection
+    deposit_day = Column(Integer, nullable=True)
 
     settings = relationship("SettlementSettings", back_populates="members")
     user = relationship("User")

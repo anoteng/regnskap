@@ -67,6 +67,7 @@ def _to_out(ledger_id: int, settings: SettlementSettings | None) -> SettlementSe
                 "email": m.user.email,
                 "share_percent": m.share_percent,
                 "deposit_account_id": m.deposit_account_id,
+                "deposit_day": m.deposit_day,
             }
             for m in sorted(settings.members, key=lambda m: m.user_id)
         ],
@@ -123,6 +124,9 @@ def update_settlement_settings(
     settings.carry_start = payload.carry_start
     settings.card_due_day = payload.card_due_day
 
+    # Clients that predate the deposit day leave it out of the payload
+    old_days = {m.user_id: m.deposit_day for m in settings.members}
+
     # Delete old rows before inserting replacements so the unique
     # (settings_id, user_id) key is not hit mid-flush
     settings.members.clear()
@@ -134,6 +138,7 @@ def update_settlement_settings(
             user_id=m.user_id,
             share_percent=m.share_percent,
             deposit_account_id=m.deposit_account_id,
+            deposit_day=m.deposit_day if "deposit_day" in m.model_fields_set else old_days.get(m.user_id),
         )
         for m in payload.members
     ]
@@ -178,6 +183,8 @@ def _validate(db: Session, ledger_id: int, payload: SettlementSettingsUpdate) ->
         seen.add(m.user_id)
         if m.share_percent < 0 or m.share_percent > 100:
             raise HTTPException(status_code=400, detail="Andel må være mellom 0 og 100 prosent")
+        if m.deposit_day is not None and not 1 <= m.deposit_day <= 31:
+            raise HTTPException(status_code=400, detail="Innskuddsdag må være mellom 1 og 31")
 
     fixed = payload.fixed_payments or []
     loan_accounts = [fp.account_id for fp in fixed]

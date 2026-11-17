@@ -1,5 +1,5 @@
-import api from './api.js?v=30';
-import { formatCurrency, formatDate, showError, showSuccess } from './utils.js?v=30';
+import api from './api.js?v=31';
+import { formatCurrency, formatDate, showError, showSuccess } from './utils.js?v=31';
 
 function currentMonth() {
     const d = new Date();
@@ -170,6 +170,8 @@ class SettlementManager {
                 <p class="subtitle">Terminen regnes som betalt når det er bokført nedbetaling på lånekontoen denne måneden. Gjenstående terminer er med i «faste».</p>
             </div>` : '';
 
+        const timelineCard = this.renderTimeline(data.liquidity.timeline);
+
         const excluded = data.excluded_account_ids.length
             ? `<p class="subtitle">Holdt utenfor: ${data.excluded_account_ids.map(id => escapeHtml(this.accountName(id))).join(', ')}
                (${formatCurrency(t.excluded_booked)} bokført denne måneden)</p>`
@@ -261,6 +263,8 @@ class SettlementManager {
 
             ${loanCard}
 
+            ${timelineCard}
+
             <div class="card">
                 <h2>Likviditet</h2>
                 ${shortfall}
@@ -280,6 +284,50 @@ class SettlementManager {
                 <p class="subtitle" style="margin-top: 0.5rem;">Disponibelt forutsetter at alle betaler sin andel. Anslått variabelt forbruk resten av måneden er ikke trukket fra.</p>
             </div>
         `;
+    }
+
+    renderTimeline(tl) {
+        if (!tl) return '';
+        const accounts = tl.account_ids.map(id => escapeHtml(this.accountName(id))).join(' + ');
+        const lowest = parseFloat(tl.lowest_balance);
+        const headline = tl.shortfall_date
+            ? `<div class="settlement-warning">Det mangler ${formatCurrency(tl.shortfall_amount)} den ${formatDate(tl.shortfall_date)} når ${escapeHtml(tl.shortfall_description)} trekkes.
+               Laveste saldo er ${formatCurrency(lowest)} den ${formatDate(tl.lowest_date)}.</div>`
+            : `<p>Alle trekk har dekning. Laveste saldo er <strong>${formatCurrency(lowest)}</strong> den ${formatDate(tl.lowest_date)}.</p>`;
+        const assumed = tl.assumed_deposit_days.length
+            ? `<p class="subtitle">Uten innskuddsdag (antatt i dag): ${tl.assumed_deposit_days.map(escapeHtml).join(', ')}. Sett dagen under avregningsinnstillingene.</p>`
+            : '';
+        const rows = tl.events.map(e => {
+            const amount = parseFloat(e.amount);
+            const balance = parseFloat(e.balance);
+            return `
+                <tr${e.date === tl.lowest_date && balance === lowest ? ' class="settlement-timeline-low"' : ''}>
+                    <td>${formatDate(e.date)}</td>
+                    <td>${escapeHtml(e.description)}</td>
+                    <td class="num ${amount > 0 ? 'settlement-ahead' : ''}">${amount > 0 ? '+ ' : '− '}${formatCurrency(Math.abs(amount))}</td>
+                    <td class="num ${balance < 0 ? 'settlement-due' : ''}">${formatCurrency(balance)}</td>
+                </tr>`;
+        }).join('');
+        return `
+            <div class="card">
+                <h2>Dekning dag for dag</h2>
+                ${headline}
+                <details>
+                    <summary>Vis alle inn- og utbetalinger til ${formatDate(tl.end_date)}</summary>
+                    <div class="table-responsive">
+                        <table class="table">
+                            <thead><tr><th>Dato</th><th>Hva</th><th class="num">Beløp</th><th class="num">Saldo</th></tr></thead>
+                            <tbody>
+                                <tr><td>${formatDate(tl.start_date)}</td><td>Saldo nå (${accounts})</td><td></td><td class="num">${formatCurrency(tl.start_balance)}</td></tr>
+                                ${rows}
+                            </tbody>
+                        </table>
+                    </div>
+                </details>
+                ${assumed}
+                <p class="subtitle">Kortkjøp går ut med kortfakturaen: alt som står på kortet nå, pluss forventet forbruk resten av måneden, forfaller neste måned.
+                Lånekontoer regnes sammen med driftskontoen. Trekk går før innskudd samme dag.</p>
+            </div>`;
     }
 
     // ------------------------------------------------------------------
@@ -325,6 +373,7 @@ class SettlementManager {
                     <td>${escapeHtml(m.user.full_name)}<br><small class="subtitle">${escapeHtml(m.user.email)}</small></td>
                     <td><input type="number" class="settlement-share" min="0" max="100" step="0.01" value="${defaultShare}" style="width: 6rem;" ${dis}> %</td>
                     <td><select class="settlement-deposit" ${dis}>${options(depositCandidates, cfg?.deposit_account_id ?? null)}</select></td>
+                    <td><input type="number" class="settlement-deposit-day" min="1" max="31" value="${cfg?.deposit_day ?? ''}" style="width: 4.5rem;" ${dis}></td>
                 </tr>`;
         }).join('');
 
@@ -373,11 +422,12 @@ class SettlementManager {
             <h3>Deltakere</h3>
             <div class="table-responsive">
                 <table class="table">
-                    <thead><tr><th>Medlem</th><th>Andel</th><th>Innskuddskonto</th></tr></thead>
+                    <thead><tr><th>Medlem</th><th>Andel</th><th>Innskuddskonto</th><th>Innskuddsdag</th></tr></thead>
                     <tbody>${memberRows}</tbody>
                 </table>
             </div>
-            <p class="subtitle">Andelene må summere til 100 %. Innskuddskontoen er der medlemmets innbetalinger krediteres og egne uttak fra driftskontoen debiteres; la den stå tom hvis det ikke er aktuelt.</p>
+            <p class="subtitle">Andelene må summere til 100 %. Innskuddskontoen er der medlemmets innbetalinger krediteres og egne uttak fra driftskontoen debiteres; la den stå tom hvis det ikke er aktuelt.
+            Innskuddsdagen er dagen pengene vanligvis kommer, og brukes til å sjekke at alle trekk har dekning.</p>
 
             <h3 style="margin-top: 1.5rem;">Lån og avbetalinger</h3>
             <p class="subtitle">Terminer med kjente beløp. De brukes i stedet for å gjette ut fra historikken, og en termin regnes som betalt når det er bokført nedbetaling på lånekontoen i måneden.
@@ -452,6 +502,7 @@ class SettlementManager {
                 user_id: parseInt(row.dataset.userId, 10),
                 share_percent: row.querySelector('.settlement-share').value,
                 deposit_account_id: row.querySelector('.settlement-deposit').value || null,
+                deposit_day: parseInt(row.querySelector('.settlement-deposit-day').value, 10) || null,
             }))
             .filter(m => m.share_percent !== '' && parseFloat(m.share_percent) > 0)
             .map(m => ({ ...m, share_percent: parseFloat(m.share_percent), deposit_account_id: m.deposit_account_id ? parseInt(m.deposit_account_id, 10) : null }));
