@@ -1,5 +1,5 @@
-import api from './api.js?v=32';
-import { showModal, closeModal, showError, showSuccess, formatDate } from './utils.js?v=32';
+import api from './api.js?v=33';
+import { showModal, closeModal, showError, showSuccess, formatDate } from './utils.js?v=33';
 
 class AdminManager {
     constructor() {

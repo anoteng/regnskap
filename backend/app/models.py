@@ -278,6 +278,9 @@ class Account(Base):
     # An aksjesparekonto: deposits come back tax-free first, the gain after
     # them is taxed when taken out
     fire_gains_tax = Column(Boolean, nullable=False, default=False)
+    # Tax on each payout from pension capital: IPS is taxed as ordinary income
+    # at 22, a pensjonskapitalbevis or EPK as pension income. NULL is untaxed.
+    fire_payout_tax_percent = Column(DECIMAL(5, 2), nullable=True)
     # Share of market value that counts towards net wealth. Equity funds are
     # valued at 80, bank deposits at 100, a primary residence at 25.
     wealth_valuation_percent = Column(DECIMAL(5, 2), nullable=True)
@@ -1032,8 +1035,10 @@ class FireIncomeStream(Base):
     id = Column(Integer, primary_key=True, index=True)
     settings_id = Column(Integer, ForeignKey("fire_settings.id"), nullable=False)
     name = Column(String(255), nullable=False)
-    # Today's kroner, net of tax, the way spending and income are
+    # Today's kroner per month, before the tax below
     monthly_amount = Column(DECIMAL(15, 2), nullable=False, default=0)
+    # Effective tax on it; NULL or 0 means the amount is already net
+    tax_percent = Column(DECIMAL(5, 2), nullable=True)
     start_age = Column(Integer, nullable=False)
     # NULL means for life
     end_age = Column(Integer, nullable=True)

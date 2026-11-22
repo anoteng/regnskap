@@ -834,6 +834,8 @@ def fire(
         return {
             "name": st.name,
             "per_month": _num(st.monthly_amount),
+            "tax_percent": float(st.tax_percent or 0),
+            "net_per_month": _num(Decimal(st.monthly_amount or 0) * (1 - Decimal(st.tax_percent or 0) / 100)),
             "from_age": st.start_age,
             "from": _month_str(add_months(settings.birth_date, st.start_age * 12)),
             "until_age": st.end_age,
@@ -853,6 +855,14 @@ def fire(
             "bridge_low": _num(p.bridge_low) if p.bridge_low is not None else None,
             "bridge_low_date": p.bridge_low_date.isoformat() if p.bridge_low_date else None,
             "first_wealth_tax_year": p.first_wealth_tax_year,
+            # Today's kroner, summed to the horizon
+            "gains_tax_total": _num(sum(r.gains_tax for r in p.rows)),
+            "pension_tax_total": _num(sum(r.pension_tax for r in p.rows)),
+            "taxes_by_year": [
+                {"year": r.year, "age": r.age, "gains_tax": _num(r.gains_tax),
+                 "pension_tax": _num(r.pension_tax), "wealth_tax": _num(r.wealth_tax)}
+                for r in p.rows if r.gains_tax or r.pension_tax or r.wealth_tax
+            ],
         }
 
     number = fire_number(inputs)
@@ -906,6 +916,8 @@ def fire(
                     "annual_contribution": _num(b.annual_contribution),
                     "contribution_by_employer": b.contribution_by_employer,
                     "deposits": _num(b.basis) if b.basis is not None else None,
+                    "gains_tax": b.basis is not None,
+                    "payout_tax_percent": round(b.payout_tax * 100, 2),
                     "valuation_percent": b.valuation_percent,
                     "excluded": b.excluded,
                 }

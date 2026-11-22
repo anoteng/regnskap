@@ -93,6 +93,8 @@ class Bucket:
     # What has been paid in, for an aksjesparekonto: the part that comes back
     # tax-free. None means withdrawals are not taxed at all.
     basis: Optional[float] = None
+    # Tax on each payout from pension capital, as a fraction: IPS 0.22
+    payout_tax: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -108,6 +110,12 @@ class IncomeStream:
     start_age: int
     end_age: Optional[int] = None
     inflation_adjusted: bool = True
+    # Effective tax on `monthly`, as a fraction; 0 when it is given net
+    tax: float = 0.0
+
+    @property
+    def net(self) -> float:
+        return self.monthly * (1.0 - self.tax)
 
 
 @dataclass(frozen=True)
@@ -247,6 +255,8 @@ class YearRow:
     returns: float = 0.0
     # Tax on gains taken out of share savings, on top of what was spent
     gains_tax: float = 0.0
+    # Tax on pensions received: income streams and pension capital payouts
+    pension_tax: float = 0.0
     # Months this row actually covers. The first and last are part-years, and
     # a chart that plots their totals as if they were whole ones lies.
     months: int = MONTHS_PER_YEAR
@@ -315,7 +325,7 @@ class _Pot:
     __slots__ = (
         "name", "amount", "valuation", "unlock_age", "payout_years",
         "annual_contribution", "contribution_by_employer", "excluded",
-        "payout_months_left", "unlocked", "basis",
+        "payout_months_left", "unlocked", "basis", "payout_tax",
     )
 
     def __init__(self, bucket: Bucket):
@@ -330,6 +340,7 @@ class _Pot:
         self.payout_months_left: Optional[int] = None
         self.unlocked = bucket.unlock_age is None
         self.basis = bucket.basis
+        self.payout_tax = bucket.payout_tax
 
     @property
     def spendable(self) -> bool:
@@ -498,7 +509,7 @@ def project(
     year_months = 0
     year_spending = year_obligations = year_tax = 0.0
     year_saved = year_withdrawn = year_pension = 0.0
-    year_returns = year_gains_tax = 0.0
+    year_returns = year_gains_tax = year_pension_tax = 0.0
 
     # The first assessment is on today's wealth, debt included, so year one is
     # neither tax-free nor taxed on a gross figure
@@ -520,6 +531,7 @@ def project(
                     pot.payout_months_left = pot.payout_years * MONTHS_PER_YEAR
 
         pension = 0.0
+        pension_tax = 0.0
         debt = 0.0
         obligation_cost = 0.0
         spending = 0.0
@@ -535,17 +547,20 @@ def project(
                     instalment = pot.amount / pot.payout_months_left
                     pot.amount -= instalment
                     pot.payout_months_left -= 1
-                    pension += instalment
+                    pension += instalment * (1.0 - pot.payout_tax)
+                    pension_tax += instalment * pot.payout_tax
 
             for stream in inputs.income_streams:
                 if age < stream.start_age:
                     continue
                 if stream.end_age is not None and age >= stream.end_age:
                     continue
-                pension += (
+                gross = (
                     stream.monthly if stream.inflation_adjusted
                     else stream.monthly / inflation_factor
                 )
+                pension += gross * (1.0 - stream.tax)
+                pension_tax += gross * stream.tax
 
             for i, ob in enumerate(inputs.obligations):
                 cost_nominal = 0.0
@@ -647,6 +662,7 @@ def project(
         year_withdrawn += withdrawn
         year_pension += pension
         year_gains_tax += gains_tax
+        year_pension_tax += pension_tax
 
         if when.month == 12 or month == horizon - 1:
             net_wealth = _net_wealth(sum(p.taxable for p in pots), debt)
@@ -668,6 +684,7 @@ def project(
                 pension_income=year_pension,
                 returns=year_returns,
                 gains_tax=year_gains_tax,
+                pension_tax=year_pension_tax,
                 months=year_months,
             ))
             if year_tax > 0 and first_wealth_tax_year is None:
@@ -675,7 +692,7 @@ def project(
             year_months = 0
             year_spending = year_obligations = year_tax = 0.0
             year_saved = year_withdrawn = year_pension = 0.0
-            year_returns = year_gains_tax = 0.0
+            year_returns = year_gains_tax = year_pension_tax = 0.0
 
             if when.month == 12 and not growth_only:
                 # Assessed on 31 December, paid over the year that follows
@@ -707,6 +724,18 @@ def project(
         ],
         warnings=list(inputs.warnings),
     )
+
+
+def _gain_share(buckets: Iterable[Bucket]) -> float:
+    """Untaxed gain in aksjesparekontoer, as a share of the spendable capital."""
+    total = gain = 0.0
+    for b in buckets:
+        if b.excluded or b.unlock_age is not None or b.amount <= 0:
+            continue
+        total += b.amount
+        if b.basis is not None:
+            gain += max(0.0, b.amount - b.basis)
+    return gain / total if total > 0 else 0.0
 
 
 def _spendable_valuation(buckets: Iterable[Bucket]) -> float:
@@ -765,14 +794,19 @@ def fire_number(inputs: FireInputs) -> FireNumber:
         if ob.end_month is None and not ob.is_loan
     )
     perpetual_annual = perpetual_monthly * MONTHS_PER_YEAR
-    base = perpetual_annual / inputs.swr if inputs.swr > 0 else 0.0
+    # Withdrawals from an aksjesparekonto lose the gains tax once the deposits
+    # are out, so the capital has to raise that as well. The share of gain in
+    # the spendable capital today stands in for the taxed share of every
+    # withdrawal: an estimate, where the projection itself is exact.
+    rate = inputs.swr * (1.0 - inputs.gains_tax * _gain_share(inputs.buckets))
+    base = perpetual_annual / rate if rate > 0 else 0.0
 
     valuation = _spendable_valuation(inputs.buckets)
     capital = base
     tax = 0.0
     for _ in range(FIXED_POINT_ROUNDS):
         tax = inputs.wealth_tax.on(capital * valuation)
-        nxt = (perpetual_annual + tax) / inputs.swr if inputs.swr > 0 else 0.0
+        nxt = (perpetual_annual + tax) / rate if rate > 0 else 0.0
         if abs(nxt - capital) < FIXED_POINT_TOLERANCE:
             capital = nxt
             break
@@ -858,8 +892,8 @@ def _stream_present_value(
         )
         if running:
             real = (
-                stream.monthly if stream.inflation_adjusted
-                else stream.monthly / inflation_factor
+                stream.net if stream.inflation_adjusted
+                else stream.net / inflation_factor
             )
             total += real / discount
         inflation_factor *= 1.0 + inflation_monthly
@@ -1043,6 +1077,10 @@ def build_inputs(db, settings, as_of: Optional[date] = None) -> FireInputs:
             ),
             contribution_by_employer=bool(account.fire_contribution_by_employer),
             basis=deposits(account, amount) if account.fire_gains_tax else None,
+            payout_tax=(
+                float(account.fire_payout_tax_percent) / 100.0
+                if role == FireRole.LOCKED and account.fire_payout_tax_percent else 0.0
+            ),
         ))
         if role == FireRole.LOCKED and account.fire_unlock_age is None:
             warnings.append(
@@ -1153,6 +1191,7 @@ def build_inputs(db, settings, as_of: Optional[date] = None) -> FireInputs:
             start_age=st.start_age,
             end_age=st.end_age,
             inflation_adjusted=bool(st.inflation_adjusted),
+            tax=float(st.tax_percent or 0) / 100.0,
         ))
         if st.start_age > settings.horizon_age:
             warnings.append(

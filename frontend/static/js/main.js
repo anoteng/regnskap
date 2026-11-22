@@ -1,16 +1,16 @@
-import auth from './auth.js?v=32';
-import api from './api.js?v=32';
-import ledgerManager from './ledgers.js?v=32';
-import transactionsManager from './transactions.js?v=32';
-import bankAccountsManager from './bank-accounts.js?v=32';
-import postingQueueManager from './posting-queue.js?v=32';
-import receiptsManager from './receipts.js?v=32';
-import reportsManager from './reports.js?v=32';
-import bankConnectionsManager from './bank-connections.js?v=32';
-import adminManager from './admin.js?v=32';
-import settlementManager from './settlement.js?v=32';
-import fireManager from './fire.js?v=32';
-import { formatCurrency, formatDate, getTodayDate, getFirstDayOfMonth, getLastDayOfMonth, showModal, closeModal, showError, showSuccess } from './utils.js?v=32';
+import auth from './auth.js?v=33';
+import api from './api.js?v=33';
+import ledgerManager from './ledgers.js?v=33';
+import transactionsManager from './transactions.js?v=33';
+import bankAccountsManager from './bank-accounts.js?v=33';
+import postingQueueManager from './posting-queue.js?v=33';
+import receiptsManager from './receipts.js?v=33';
+import reportsManager from './reports.js?v=33';
+import bankConnectionsManager from './bank-connections.js?v=33';
+import adminManager from './admin.js?v=33';
+import settlementManager from './settlement.js?v=33';
+import fireManager from './fire.js?v=33';
+import { formatCurrency, formatDate, getTodayDate, getFirstDayOfMonth, getLastDayOfMonth, showModal, closeModal, showError, showSuccess } from './utils.js?v=33';
 
 // Make auth available globally for passkey management
 window.auth = auth;
@@ -559,6 +559,7 @@ class App {
         const annualContribution = account.fire_annual_contribution;
         const byEmployer = !!account.fire_contribution_by_employer;
         const gainsTax = !!account.fire_gains_tax;
+        const payoutTax = account.fire_payout_tax_percent;
         const valuation = account.wealth_valuation_percent;
         const content = `
             <form id="edit-account-form">
@@ -609,6 +610,10 @@ class App {
                     <input type="number" id="edit-acc-payout-years" min="1" max="40" value="${payoutYears ?? ''}" placeholder="IPS og pensjonskapitalbevis minst 10; tomt = hele belopet pa en gang">
                 </div>
                 <div class="form-group">
+                    <label>Skatt pa utbetalingene (%) (bare for bundet kapital)</label>
+                    <input type="number" id="edit-acc-payout-tax" min="0" max="99" step="0.1" value="${payoutTax ?? ''}" placeholder="IPS 22; pensjonskapitalbevis og EPK som pensjon, ca. 15-25">
+                </div>
+                <div class="form-group">
                     <label>Arlig innskudd (bare for bundet kapital)</label>
                     <input type="number" id="edit-acc-contribution" min="0" step="100" value="${annualContribution ?? ''}" placeholder="Oremerket sparing hit, i dagens kroner. IPS maks 25 000">
                     <label><input type="checkbox" id="edit-acc-by-employer" ${byEmployer ? 'checked' : ''}>
@@ -647,6 +652,7 @@ class App {
         const fireRole = document.getElementById('edit-acc-fire-role').value;
         const unlockAge = document.getElementById('edit-acc-unlock-age').value;
         const payoutYears = document.getElementById('edit-acc-payout-years').value;
+        const payoutTax = document.getElementById('edit-acc-payout-tax').value;
         const annualContribution = document.getElementById('edit-acc-contribution').value;
         const valuation = document.getElementById('edit-acc-valuation').value;
 
@@ -663,6 +669,7 @@ class App {
                 fire_annual_contribution: annualContribution !== '' ? parseFloat(annualContribution) : null,
                 fire_contribution_by_employer: document.getElementById('edit-acc-by-employer').checked,
                 fire_gains_tax: document.getElementById('edit-acc-gains-tax').checked,
+                fire_payout_tax_percent: payoutTax !== '' ? parseFloat(payoutTax) : null,
                 wealth_valuation_percent: valuation !== '' ? parseFloat(valuation) : null
             });
 

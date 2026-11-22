@@ -158,6 +158,8 @@ class AccountCreate(AccountBase):
     fire_contribution_by_employer: bool = False
     # An aksjesparekonto: gains are taxed when taken out, deposits first
     fire_gains_tax: bool = False
+    # Tax on each payout from pension capital; None is untaxed
+    fire_payout_tax_percent: Optional[Decimal] = Field(None, ge=0, lt=100)
     wealth_valuation_percent: Optional[Decimal] = None
 
 
@@ -176,6 +178,8 @@ class Account(AccountBase):
     fire_contribution_by_employer: bool = False
     # An aksjesparekonto: gains are taxed when taken out, deposits first
     fire_gains_tax: bool = False
+    # Tax on each payout from pension capital; None is untaxed
+    fire_payout_tax_percent: Optional[Decimal] = Field(None, ge=0, lt=100)
     wealth_valuation_percent: Optional[Decimal] = None
     is_active: bool
     description: Optional[str] = None
@@ -1035,6 +1039,8 @@ class FireIncomeStreamInput(BaseModel):
     id: Optional[int] = None
     name: str
     monthly_amount: Decimal = Decimal("0")
+    # Effective tax on the amount; None or 0 means it is already net
+    tax_percent: Optional[Decimal] = Field(None, ge=0, lt=100)
     start_age: int
     end_age: Optional[int] = None
     inflation_adjusted: bool = True
@@ -1064,6 +1070,7 @@ class FireBucket(BaseModel):
     contribution_by_employer: bool = False
     """Deposits in an aksjesparekonto, the part that comes back tax-free."""
     basis: Optional[Decimal] = None
+    payout_tax_percent: Optional[Decimal] = None
     valuation_percent: Decimal
     excluded: bool
 
@@ -1086,6 +1093,8 @@ class FireYearRow(BaseModel):
     pension_income: Decimal = Decimal("0")
     returns: Decimal = Decimal("0")
     gains_tax: Decimal = Decimal("0")
+    # Tax on pensions: income streams and payouts from pension capital
+    pension_tax: Decimal = Decimal("0")
     """Months the row covers; the first and last of a plan are part-years."""
     months: int = 12
 

@@ -128,18 +128,24 @@ Alle beløp er i dagens kroner per måned, om ikke annet står.
   - `indexed`: om beløpet følger inflasjonen. `frees_up_cash`: om beløpet går til sparing når
     forpliktelsen er slutt. `counts_as_debt`: om restgjelden trekkes fra formuen.
 - `income_streams`: pensjoner som kommer som inntekt, med alder og måned de starter (`from`) og
-  eventuelt slutter (`until`).
+  eventuelt slutter (`until`). `per_month` er brutto; `tax_percent` er den effektive skatten som
+  trekkes, og `net_per_month` det som er igjen. Skatt 0 betyr at beløpet er oppgitt netto.
 - `excluded_cost_accounts`: kostnadskontoer som er holdt utenfor forbruket av andre grunner, typisk
   overføringen til fellesregnskapet, som telles via andelen i stedet.
 - `capital`: kapital per konto. `unlock_age` er satt for bundet pensjon, `payout_years` hvis den
   betales ut over flere år, `annual_contribution` er årlig innskudd (`contribution_by_employer`:
-  betalt av arbeidsgiver, ikke av egen lønn), `deposits` er innskutt beløp på aksjesparekonto,
+  betalt av arbeidsgiver, ikke av egen lønn), `payout_tax_percent` er skatten på hver utbetaling
+  fra bundet pensjon (IPS 22), `gains_tax: true` markerer aksjesparekonto: innskuddene tas ut
+  skattefritt først, deretter skattes gevinsten med `settings.gains_tax_percent`. `deposits` er innskutt beløp på aksjesparekonto,
   `valuation_percent` er verdsettelsen i formuesgrunnlaget, og `excluded` betyr at pengene ikke
   er dine å bruke.
 - `result`: appens svar. `monthly_spending` er forbruket utenom forpliktelsene,
   `fire_number.total` er kapitalen som trengs, og `earliest` er første måned planen holder til
   horisonten (`null` hvis den ikke gjør det før 75 år). `bridge_low` er det laveste den frie
-  kapitalen kommer før pensjonen frigjøres. `warnings` er appens egne merknader til tallene.
+  kapitalen kommer før pensjonen frigjøres. `gains_tax_total` og `pension_tax_total` er skatten
+  på uttak fra aksjesparekonto og på pensjon fram til horisonten, og `taxes_by_year` viser den år
+  for år sammen med formuesskatten. FIRE-tallet tar med gevinstskatten som et anslag; datoen
+  regner den nøyaktig. `warnings` er appens egne merknader til tallene.
 
 ```json
 {"ledger_id": 5, "as_of": "2026-11-22",
@@ -157,18 +163,21 @@ Alle beløp er i dagens kroner per måned, om ikke annet står.
     "cost_account": {"ledger_id": 5, "number": "7103", "name": "Renter på studielån"},
     "per_month": 2500.0, "until": "2038-05", "until_derived": true,
     "balance": 250000.0, "interest_percent": 4.5, "...": "..."}],
- "income_streams": [{"name": "Folketrygd", "per_month": 15000.0, "from_age": 67, "from": "2052-06",
+ "income_streams": [{"name": "Folketrygd", "per_month": 15000.0, "tax_percent": 20.0,
+                     "net_per_month": 12000.0, "from_age": 67, "from": "2052-06",
                      "until_age": null, "until": null, "indexed": true, "is_active": true}],
  "excluded_cost_accounts": [{"ledger_id": 5, "number": "6102", "name": "Felleskostnader"}],
  "capital": {"available": 400000.0, "locked": 120000.0, "excluded": 0.0,
              "accounts": [{"number": "1605", "name": "IPS", "amount": 30000.0,
-                           "unlock_age": 62, "payout_years": 10, "...": "..."}]},
+                           "unlock_age": 62, "payout_years": 10, "payout_tax_percent": 22.0,
+                           "gains_tax": false, "...": "..."}]},
  "result": {"monthly_spending": 25000.0, "monthly_net_income": 45000.0,
             "monthly_obligations": 6500.0,
             "fire_number": {"total": 9000000.0, "...": "..."},
             "earliest": {"date": "2043-01-01", "age": 57, "success": true, "depleted": null,
                          "bridge_low": 100000.0, "bridge_low_date": "2052-05-01",
-                         "first_wealth_tax_year": 2040},
+                         "first_wealth_tax_year": 2040, "gains_tax_total": 400000.0,
+                         "pension_tax_total": 250000.0, "taxes_by_year": ["..."]},
             "target": null, "warnings": []}}
 ```
 

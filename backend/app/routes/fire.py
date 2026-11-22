@@ -343,6 +343,7 @@ def _apply_stream(stream: FireIncomeStream, payload: FireIncomeStreamInput) -> N
         )
     stream.name = payload.name.strip()
     stream.monthly_amount = payload.monthly_amount or Decimal("0")
+    stream.tax_percent = payload.tax_percent
     stream.start_age = payload.start_age
     stream.end_age = payload.end_age
     stream.inflation_adjusted = payload.inflation_adjusted
@@ -440,6 +441,7 @@ def get_projection(
                     annual_contribution=_d(b.annual_contribution),
                     contribution_by_employer=b.contribution_by_employer,
                     basis=_d(b.basis) if b.basis is not None else None,
+                    payout_tax_percent=_d(b.payout_tax * 100, "0.01") if b.payout_tax else None,
                     valuation_percent=_d(b.valuation_percent, "0.01"),
                     excluded=b.excluded,
                 )
@@ -586,6 +588,7 @@ def _projection_out(p, inputs) -> FireProjectionOut:
                 withdrawn=_d(r.withdrawn), working=r.working,
                 pension_income=_d(r.pension_income), months=r.months,
                 returns=_d(r.returns), gains_tax=_d(r.gains_tax),
+                pension_tax=_d(r.pension_tax),
             )
             for r in p.rows
         ],

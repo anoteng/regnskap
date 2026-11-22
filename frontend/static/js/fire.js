@@ -1,5 +1,5 @@
-import api from './api.js?v=32';
-import { formatCurrency, showError, showSuccess, showModal, closeModal } from './utils.js?v=32';
+import api from './api.js?v=33';
+import { formatCurrency, showError, showSuccess, showModal, closeModal } from './utils.js?v=33';
 
 const KINDS = {
     LOAN: 'Lån',
@@ -489,15 +489,18 @@ class FireManager {
                 <p class="subtitle">Folketrygd og tjenestepensjon er ingen saldo du eier, men en
                    utbetaling som starter på en bursdag. Den kan ikke brukes tidlig og skattlegges
                    ikke som formue, så den hører hjemme i kontantstrømmen og ikke blant kontoene.
-                   Beløpet er i dagens kroner, etter skatt. Hent tallene fra nav.no og spk.no.</p>
+                   Beløpet er i dagens kroner før skatt, med effektiv skattesats ved siden av; er
+                   beløpet allerede netto, settes skatten til 0. Hent tallene fra nav.no og spk.no.</p>
                 ${list.length ? `
                 <table class="table">
-                    <thead><tr><th>Navn</th><th class="num">Per måned</th><th>Fra alder</th><th>Til alder</th><th>Indeks</th><th></th></tr></thead>
+                    <thead><tr><th>Navn</th><th class="num">Per måned</th><th class="num">Skatt</th><th class="num">Netto</th><th>Fra alder</th><th>Til alder</th><th>Indeks</th><th></th></tr></thead>
                     <tbody>
                         ${list.map(st => `
                             <tr${st.is_active ? '' : ' class="fire-off"'}>
                                 <td>${escapeHtml(st.name)}${st.is_active ? '' : ' (av)'}</td>
                                 <td class="num">${kr(st.monthly_amount)}</td>
+                                <td class="num">${Number(st.tax_percent) ? `${Number(st.tax_percent)} %` : '–'}</td>
+                                <td class="num">${kr(Number(st.monthly_amount) * (1 - Number(st.tax_percent || 0) / 100))}</td>
                                 <td>${st.start_age}</td>
                                 <td>${st.end_age ?? 'Livsvarig'}</td>
                                 <td>${st.inflation_adjusted ? 'Ja' : 'Nei'}</td>
@@ -744,7 +747,8 @@ class FireManager {
                             <th class="num">Forbruk</th>
                             <th class="num">Forpliktelser</th>
                             <th class="num">Formuesskatt</th>
-                            <th class="num">Pensjon</th>
+                            <th class="num">Pensjon netto</th>
+                            <th class="num">Pensjonsskatt</th>
                             <th class="num">Avkastning</th>
                             <th class="num">Spart</th>
                             <th class="num">Tatt ut</th>
@@ -763,6 +767,7 @@ class FireManager {
                                 <td class="num">${Number(r.obligations) ? kr(r.obligations) : '–'}</td>
                                 <td class="num">${Number(r.wealth_tax) ? kr(r.wealth_tax) : '–'}</td>
                                 <td class="num">${Number(r.pension_income) ? kr(r.pension_income) : '–'}</td>
+                                <td class="num">${Number(r.pension_tax) ? kr(r.pension_tax) : '–'}</td>
                                 <td class="num">${kr(r.returns)}</td>
                                 <td class="num">${Number(r.saved) ? kr(r.saved) : '–'}</td>
                                 <td class="num">${Number(r.withdrawn) ? kr(r.withdrawn) : '–'}</td>
@@ -1108,8 +1113,13 @@ class FireManager {
                            placeholder="Folketrygd, SPK, …" required>
                 </div>
                 <div class="form-group">
-                    <label>Per måned, i dagens kroner etter skatt</label>
+                    <label>Per måned, i dagens kroner før skatt</label>
                     <input type="number" id="st-monthly" step="0.01" value="${st ? st.monthly_amount : ''}" required>
+                </div>
+                <div class="form-group">
+                    <label>Effektiv skatt (%)</label>
+                    <input type="number" id="st-tax" min="0" max="99" step="0.1" value="${st && st.tax_percent !== null ? st.tax_percent : ''}"
+                           placeholder="Pensjon fra Norge 15–25 avhengig av samlet pensjon; 0 hvis beløpet er netto">
                 </div>
                 <div class="form-group">
                     <label>Fra alder</label>
@@ -1136,6 +1146,7 @@ class FireManager {
             const payload = {
                 name: document.getElementById('st-name').value,
                 monthly_amount: parseFloat(document.getElementById('st-monthly').value) || 0,
+                tax_percent: document.getElementById('st-tax').value !== '' ? parseFloat(document.getElementById('st-tax').value) : null,
                 start_age: parseInt(document.getElementById('st-start').value, 10),
                 end_age: end === '' ? null : parseInt(end, 10),
                 inflation_adjusted: document.getElementById('st-inflation').checked,
