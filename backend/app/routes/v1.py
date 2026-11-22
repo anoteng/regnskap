@@ -27,12 +27,17 @@ from sqlalchemy.orm import Session, selectinload
 
 from backend.database import get_db
 from ..models import (
-    Account, AccountType, ApiToken, BankAccount, FireRole, JournalEntry, Ledger,
+    Account, AccountType, ApiToken, BankAccount, FireRole, FireSettings, JournalEntry, Ledger,
     LedgerMember, LedgerRole, Transaction, TransactionSource, TransactionStatus, User,
+)
+from ..fire_engine import (
+    ConstantReturns, FireDisabled, add_months, age_on, build_inputs, earliest_retirement,
+    fire_number, months_between, project,
 )
 from ..market_value import set_market_value
 from ..transaction_chaining import TransactionChainMatcher
 from .api_tokens import TOKEN_PREFIX, hash_token
+from .fire import LATEST_RETIREMENT_AGE
 
 router = APIRouter(prefix="/v1", tags=["api-v1"])
 
@@ -748,3 +753,179 @@ def record_market_value(
     if adjustment:
         db.refresh(adjustment)
     return {"adjustment": _transaction_out(adjustment) if adjustment else None}
+
+
+# ─── FIRE ────────────────────────────────────────────────────────────────────
+
+def _month_str(value: Optional[date]) -> Optional[str]:
+    return value.strftime("%Y-%m") if value else None
+
+
+def _account_ref(account: Optional[Account]) -> Optional[dict]:
+    if account is None:
+        return None
+    return {"ledger_id": account.ledger_id, "number": account.account_number, "name": account.account_name}
+
+
+@router.get("/fire")
+def fire(
+    retirement_date: Optional[date] = Query(None, description="ÅÅÅÅ-MM-DD; also project retiring then"),
+    ledger: Ledger = Depends(get_ledger),
+    db: Session = Depends(get_db),
+):
+    """
+    The ledger's FIRE setup and the app's own answer. The setup is what the
+    projection is built on: settings, costs that end (obligations), pensions
+    that arrive as income and capital per account. `result` is computed the
+    same way as in the app, so another calculation can be compared with it.
+    """
+    settings = db.query(FireSettings).filter(FireSettings.ledger_id == ledger.id).first()
+    if settings is None or not settings.is_enabled:
+        raise HTTPException(status_code=404, detail="Regnskapet har ikke FIRE-oppsett")
+
+    try:
+        inputs = build_inputs(db, settings)
+    except FireDisabled as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    returns = ConstantReturns(inputs.nominal_return, inputs.inflation)
+    earliest = earliest_retirement(inputs, returns, LATEST_RETIREMENT_AGE)
+    chosen = retirement_date or settings.target_retirement_date
+    target = project(inputs, returns, max(0, months_between(inputs.start, chosen))) if chosen else None
+    # Payoff dates do not depend on when work stops; any projection has them
+    reference = earliest or target or project(
+        inputs, returns, months_between(inputs.start, add_months(settings.birth_date, LATEST_RETIREMENT_AGE * 12))
+    )
+
+    accounts = {}
+    wanted = {ob.account_id for ob in settings.obligations} | {ob.cost_account_id for ob in settings.obligations}
+    wanted |= {e.account_id for e in settings.excluded_accounts}
+    wanted.discard(None)
+    if wanted:
+        accounts = {a.id: a for a in db.query(Account).filter(Account.id.in_(wanted)).all()}
+
+    # The engine keeps the active obligations in the same order
+    outcomes = iter(zip(inputs.obligations, reference.obligations))
+    obligations = []
+    for ob in settings.obligations:
+        used, outcome = next(outcomes) if ob.is_active else (None, None)
+        obligations.append({
+            "name": ob.name,
+            "kind": ob.kind.value,
+            "is_active": ob.is_active,
+            "account": _account_ref(accounts.get(ob.account_id)),
+            "cost_account": _account_ref(accounts.get(ob.cost_account_id)),
+            "per_month": _num(ob.monthly_amount),
+            "first_payment": _month_str(ob.start_date),
+            "until": _month_str(ob.end_date) or (_month_str(outcome.ends) if outcome else None),
+            "until_derived": bool(outcome and outcome.derived and not ob.end_date),
+            # Read from the loan account when not given
+            "balance": _num(used.balance) if used and used.balance else (
+                _num(ob.balance) if ob.balance is not None else None
+            ),
+            "interest_percent": float(ob.interest_percent) if ob.interest_percent is not None else None,
+            "indexed": bool(ob.inflation_adjusted),
+            "frees_up_cash": bool(ob.frees_up_cash),
+            "counts_as_debt": bool(ob.counts_as_debt),
+            "total_interest": _num(outcome.total_interest) if outcome else None,
+        })
+
+    def stream_out(st):
+        return {
+            "name": st.name,
+            "per_month": _num(st.monthly_amount),
+            "from_age": st.start_age,
+            "from": _month_str(add_months(settings.birth_date, st.start_age * 12)),
+            "until_age": st.end_age,
+            "until": _month_str(add_months(settings.birth_date, st.end_age * 12)) if st.end_age else None,
+            "indexed": bool(st.inflation_adjusted),
+            "is_active": st.is_active,
+        }
+
+    def projection_out(p):
+        if p is None:
+            return None
+        return {
+            "date": p.retirement_date.isoformat(),
+            "age": age_on(inputs.birth_date, p.retirement_date),
+            "success": p.success,
+            "depleted": p.depleted_date.isoformat() if p.depleted_date else None,
+            "bridge_low": _num(p.bridge_low) if p.bridge_low is not None else None,
+            "bridge_low_date": p.bridge_low_date.isoformat() if p.bridge_low_date else None,
+            "first_wealth_tax_year": p.first_wealth_tax_year,
+        }
+
+    number = fire_number(inputs)
+    pots = inputs.buckets
+    real_return = (1 + inputs.nominal_return) / (1 + inputs.inflation) - 1
+    return {
+        "ledger_id": ledger.id,
+        "as_of": inputs.start.isoformat(),
+        "settings": {
+            "birth_date": settings.birth_date.isoformat() if settings.birth_date else None,
+            "age": age_on(inputs.birth_date, inputs.start),
+            "horizon_age": settings.horizon_age,
+            "target_retirement_date": settings.target_retirement_date.isoformat()
+            if settings.target_retirement_date else None,
+            "swr_percent": float(settings.swr_percent),
+            "expected_return_percent": float(settings.expected_return_percent),
+            "inflation_percent": float(settings.inflation_percent),
+            "real_return_percent": round(real_return * 100, 2),
+            "lookback_months": settings.lookback_months,
+            "shared_ledger_id": settings.shared_ledger_id,
+            "shared_share_percent": float(settings.shared_share_percent)
+            if settings.shared_share_percent is not None else None,
+            "gains_tax_percent": float(settings.gains_tax_percent or 0),
+            "wealth_tax": {
+                "threshold": _num(settings.wealth_tax_threshold),
+                "rate_percent": float(settings.wealth_tax_rate_percent),
+                "step2_threshold": _num(settings.wealth_tax_step2_threshold)
+                if settings.wealth_tax_step2_threshold is not None else None,
+                "step2_rate_percent": float(settings.wealth_tax_step2_rate_percent)
+                if settings.wealth_tax_step2_rate_percent is not None else None,
+                "indexed": bool(settings.wealth_tax_index_threshold),
+            },
+        },
+        "excluded_cost_accounts": sorted(
+            (_account_ref(accounts[e.account_id]) for e in settings.excluded_accounts if e.account_id in accounts),
+            key=lambda a: (a["ledger_id"], a["number"]),
+        ),
+        "obligations": obligations,
+        "income_streams": [stream_out(st) for st in settings.income_streams],
+        "capital": {
+            "available": _num(sum(b.amount for b in pots if b.unlock_age is None and not b.excluded)),
+            "locked": _num(sum(b.amount for b in pots if b.unlock_age is not None and not b.excluded)),
+            "excluded": _num(sum(b.amount for b in pots if b.excluded)),
+            "accounts": [
+                {
+                    "number": b.name.split(" ", 1)[0],
+                    "name": b.name.split(" ", 1)[1] if " " in b.name else b.name,
+                    "amount": _num(b.amount),
+                    "unlock_age": b.unlock_age,
+                    "payout_years": b.payout_years,
+                    "annual_contribution": _num(b.annual_contribution),
+                    "contribution_by_employer": b.contribution_by_employer,
+                    "deposits": _num(b.basis) if b.basis is not None else None,
+                    "valuation_percent": b.valuation_percent,
+                    "excluded": b.excluded,
+                }
+                for b in pots
+            ],
+        },
+        "result": {
+            "monthly_spending": _num(inputs.monthly_spending),
+            "monthly_net_income": _num(inputs.monthly_net_income),
+            "monthly_obligations": _num(sum(ob.monthly for ob in inputs.obligations if not ob.start_month)),
+            "fire_number": {
+                "total": _num(number.total),
+                "perpetual_annual_spending": _num(number.perpetual_annual_spending),
+                "base_capital": _num(number.base_capital),
+                "pension_capital": _num(number.pension_capital),
+                "wealth_tax_capital": _num(number.wealth_tax_capital),
+                "bridge_capital": _num(number.bridge_capital),
+            },
+            "earliest": projection_out(earliest),
+            "target": projection_out(target),
+            "warnings": list(inputs.warnings),
+        },
+    }

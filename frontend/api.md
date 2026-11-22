@@ -106,6 +106,72 @@ Inntekter, kostnader og netto per måned, og eiendeler, gjeld og nettoformue ved
    "assets": 2400000.0, "liabilities": 1900000.0, "net_worth": 500000.0}]}
 ```
 
+### `GET /fire`
+FIRE-oppsettet for regnskapet og appens eget svar. Gir 404 hvis regnskapet ikke har FIRE slått på.
+Valgfritt `?retirement_date=ÅÅÅÅ-MM-DD` regner i tillegg ut hva som skjer om man slutter å jobbe da
+(`result.target`); uten den brukes måldatoen fra oppsettet, om den finnes.
+
+Alle beløp er i dagens kroner per måned, om ikke annet står.
+
+- `settings`: fødselsdato, horisont (alderen beregningen går til), uttaksrate (`swr_percent`),
+  forventet avkastning og inflasjon (nominelt; `real_return_percent` er realavkastningen), hvor
+  mange måneder forbruket snittes over (`lookback_months`), andelen av fellesregnskapet som regnes
+  med (`shared_ledger_id`, `shared_share_percent`), gevinstskatt på aksjesparekonto og formuesskatt.
+- `obligations`: kostnader og lån som tar slutt.
+  - `cost_account` er kostnadskontoen den bokføres på (med `ledger_id`, siden den kan ligge i
+    fellesregnskapet). Den kontoen er holdt utenfor forbruket, og kostnaden løper i stedet med
+    `per_month` til `until`.
+  - `account` er gjeldskontoen for et lån. `balance` er restgjelden som brukes, lest fra kontoen
+    når den ikke er oppgitt.
+  - `until` er siste måned. `until_derived: true` betyr at den er regnet ut fra saldo, rente og
+    terminbeløp, ikke oppgitt. `first_payment` er satt når betalingen starter senere.
+  - `indexed`: om beløpet følger inflasjonen. `frees_up_cash`: om beløpet går til sparing når
+    forpliktelsen er slutt. `counts_as_debt`: om restgjelden trekkes fra formuen.
+- `income_streams`: pensjoner som kommer som inntekt, med alder og måned de starter (`from`) og
+  eventuelt slutter (`until`).
+- `excluded_cost_accounts`: kostnadskontoer som er holdt utenfor forbruket av andre grunner, typisk
+  overføringen til fellesregnskapet, som telles via andelen i stedet.
+- `capital`: kapital per konto. `unlock_age` er satt for bundet pensjon, `payout_years` hvis den
+  betales ut over flere år, `annual_contribution` er årlig innskudd (`contribution_by_employer`:
+  betalt av arbeidsgiver, ikke av egen lønn), `deposits` er innskutt beløp på aksjesparekonto,
+  `valuation_percent` er verdsettelsen i formuesgrunnlaget, og `excluded` betyr at pengene ikke
+  er dine å bruke.
+- `result`: appens svar. `monthly_spending` er forbruket utenom forpliktelsene,
+  `fire_number.total` er kapitalen som trengs, og `earliest` er første måned planen holder til
+  horisonten (`null` hvis den ikke gjør det før 75 år). `bridge_low` er det laveste den frie
+  kapitalen kommer før pensjonen frigjøres. `warnings` er appens egne merknader til tallene.
+
+```json
+{"ledger_id": 5, "as_of": "2026-11-22",
+ "settings": {"birth_date": "1985-06-01", "age": 41, "horizon_age": 90, "swr_percent": 3.5,
+              "expected_return_percent": 6.0, "inflation_percent": 2.5, "real_return_percent": 3.41,
+              "shared_ledger_id": 2, "shared_share_percent": 50.0, "...": "..."},
+ "obligations": [
+   {"name": "Barnebidrag", "kind": "CHILD_SUPPORT", "is_active": true, "account": null,
+    "cost_account": {"ledger_id": 5, "number": "6904", "name": "Barnebidrag"},
+    "per_month": 4000.0, "first_payment": null, "until": "2030-08", "until_derived": false,
+    "balance": null, "interest_percent": null, "indexed": true,
+    "frees_up_cash": true, "counts_as_debt": false, "total_interest": 0.0},
+   {"name": "Studielån", "kind": "LOAN",
+    "account": {"ledger_id": 5, "number": "2603", "name": "Studielån"},
+    "cost_account": {"ledger_id": 5, "number": "7103", "name": "Renter på studielån"},
+    "per_month": 2500.0, "until": "2038-05", "until_derived": true,
+    "balance": 250000.0, "interest_percent": 4.5, "...": "..."}],
+ "income_streams": [{"name": "Folketrygd", "per_month": 15000.0, "from_age": 67, "from": "2052-06",
+                     "until_age": null, "until": null, "indexed": true, "is_active": true}],
+ "excluded_cost_accounts": [{"ledger_id": 5, "number": "6102", "name": "Felleskostnader"}],
+ "capital": {"available": 400000.0, "locked": 120000.0, "excluded": 0.0,
+             "accounts": [{"number": "1605", "name": "IPS", "amount": 30000.0,
+                           "unlock_age": 62, "payout_years": 10, "...": "..."}]},
+ "result": {"monthly_spending": 25000.0, "monthly_net_income": 45000.0,
+            "monthly_obligations": 6500.0,
+            "fire_number": {"total": 9000000.0, "...": "..."},
+            "earliest": {"date": "2043-01-01", "age": 57, "success": true, "depleted": null,
+                         "bridge_low": 100000.0, "bridge_low_date": "2052-05-01",
+                         "first_wealth_tax_year": 2040},
+            "target": null, "warnings": []}}
+```
+
 ## Bokføre
 
 Krever en nøkkel med **Lese og bokføre**, og et regnskap der `can_write` er `true`.
