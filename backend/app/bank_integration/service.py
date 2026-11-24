@@ -785,6 +785,8 @@ class BankIntegrationService:
         # does not mint its ids two ways at once, and if it did, the
         # cautious reading is the right one.
         quota = None
+        # Next ordinal per hash, for naming transactions the bank sends without an id
+        ordinal = Counter()
         if any(not id_survives_a_refetch(raw_tx.get('external_id'))
                for raw_tx in raw_transactions):
             batch_counts = Counter(
@@ -799,6 +801,7 @@ class BankIntegrationService:
                 h: max(0, n - held_counts.get(h, 0))
                 for h, n in batch_counts.items()
             }
+            ordinal.update(held_counts)
             refetched = sum(batch_counts[h] - quota[h] for h in batch_counts)
             if refetched:
                 print(f"[DEBUG] {refetched} transactions already held, skipping")
@@ -830,6 +833,20 @@ class BankIntegrationService:
                             duplicate_count += 1
                             continue
                         quota[dedup_hash] -= 1
+
+                    # DNB sends no id at all. The column needs one, and the
+                    # hash with its ordinal is as stable as the count above
+                    if not raw_tx.get('external_id'):
+                        while True:
+                            ordinal[dedup_hash] += 1
+                            derived = f"hash:{dedup_hash}:{ordinal[dedup_hash]}"
+                            taken = self.db.query(BankTransaction.id).filter(
+                                BankTransaction.bank_connection_id == bank_connection.id,
+                                BankTransaction.external_transaction_id == derived,
+                            ).first()
+                            if not taken:
+                                break
+                        raw_tx['external_id'] = derived
 
                     # Check if already fetched
                     existing_bank_tx = TransactionDeduplicator.check_duplicate_bank_transaction(
@@ -929,8 +946,13 @@ class BankIntegrationService:
         bank_connection.status = BankConnectionStatus.ACTIVE
         bank_connection.connection_error = None
 
-        # Complete sync log
-        sync_log.sync_status = BankSyncStatus.SUCCESS
+        # Complete sync log. Rows the database turned down are not a
+        # success: say so, or a bank that sends something new fails silently
+        sync_log.sync_status = BankSyncStatus.PARTIAL if errors else BankSyncStatus.SUCCESS
+        if errors:
+            shown = "; ".join(errors[:3])
+            more = f" (og {len(errors) - 3} til)" if len(errors) > 3 else ""
+            sync_log.error_message = f"{len(errors)} transaksjoner ble ikke lagret: {shown}{more}"[:2000]
         sync_log.transactions_imported = imported_count
         sync_log.transactions_duplicate = duplicate_count
         sync_log.completed_at = datetime.utcnow()
