@@ -1,5 +1,11 @@
-import api from './api.js?v=33';
-import { formatCurrency, formatDate, showModal, closeModal, showError, showSuccess } from './utils.js?v=33';
+import api from './api.js?v=35';
+import { formatCurrency, formatDate, showModal, closeModal, showError, showSuccess } from './utils.js?v=35';
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text ?? '';
+    return div.innerHTML;
+}
 
 class TransactionsManager {
     constructor() {
@@ -123,6 +129,11 @@ class TransactionsManager {
         document.getElementById('import-csv-btn').addEventListener('click', () => {
             this.showImportCSVModal();
         });
+
+        document.getElementById('ai-import-btn').addEventListener('click', () => {
+            this.showAiImportModal();
+        });
+        this.showAiImportButton();
 
         const search = document.getElementById('filter-search');
         search?.addEventListener('keydown', (e) => {
@@ -462,6 +473,183 @@ class TransactionsManager {
             await this.loadTransactions();
         } catch (error) {
             showError(error.message);
+        }
+    }
+
+    // AI import runs on Premium or on the user's own key; offer it to no one else
+    async showAiImportButton() {
+        const btn = document.getElementById('ai-import-btn');
+        try {
+            const [subscription, key] = await Promise.all([
+                api.getMySubscription().catch(() => null),
+                api.getAiKeyStatus().catch(() => null),
+            ]);
+            const allowed = (subscription && subscription.tier === 'PREMIUM') || (key && key.configured);
+            btn.style.display = allowed ? '' : 'none';
+        } catch (e) {
+            btn.style.display = 'none';
+        }
+    }
+
+    showAiImportModal() {
+        // Credit cards first: they are the accounts banks most often keep out of PSD2
+        const accounts = [...this.bankAccounts].sort((a, b) =>
+            (b.account_type === 'CREDIT_CARD') - (a.account_type === 'CREDIT_CARD'));
+        const options = accounts
+            .map(ba => `<option value="${ba.id}">${escapeHtml(ba.name)}</option>`)
+            .join('');
+
+        const content = `
+            <div id="ai-import-step1">
+                <div class="form-group">
+                    <label>Konto</label>
+                    <select id="ai-import-account">${options}</select>
+                </div>
+                <div class="form-group">
+                    <label>Lim inn transaksjoner</label>
+                    <textarea id="ai-import-text" rows="8" style="width: 100%; font-family: monospace; font-size: 0.85rem;"
+                        placeholder="Kopier radene fra Excel-eksporten eller nettbanken og lim dem inn her. Du kan også lime inn et skjermbilde."></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Skjermbilder (valgfritt)</label>
+                    <input type="file" id="ai-import-files" accept="image/*" multiple>
+                    <div id="ai-import-pasted" style="font-size: 0.85rem; color: var(--text-secondary);"></div>
+                </div>
+                <p style="font-size: 0.85rem; color: var(--text-secondary);">
+                    Reserverte transaksjoner tas ikke med, og det som allerede ligger på kontoen
+                    (dato, retning og beløp) blir markert som duplikat. Ingenting lagres før du har sett over listen.
+                </p>
+                <button id="ai-import-read" class="btn btn-primary">Tolk</button>
+            </div>
+            <div id="ai-import-step2" style="display: none;"></div>
+        `;
+        showModal('Importer med AI', content, '900px');
+
+        // Screenshots pasted straight into the text box, as from a snipping tool
+        this.aiPastedImages = [];
+        document.getElementById('ai-import-text').addEventListener('paste', (e) => {
+            const images = [...(e.clipboardData?.items || [])]
+                .filter(item => item.type.startsWith('image/'))
+                .map(item => item.getAsFile())
+                .filter(Boolean);
+            if (images.length === 0) return;
+            e.preventDefault();
+            this.aiPastedImages.push(...images);
+            document.getElementById('ai-import-pasted').textContent =
+                `${this.aiPastedImages.length} innlimt${this.aiPastedImages.length === 1 ? '' : 'e'} skjermbilde${this.aiPastedImages.length === 1 ? '' : 'r'}`;
+        });
+
+        document.getElementById('ai-import-read').addEventListener('click', () => this.readAiImport());
+    }
+
+    async readAiImport() {
+        const bankAccountId = parseInt(document.getElementById('ai-import-account').value);
+        const text = document.getElementById('ai-import-text').value;
+        const files = [...document.getElementById('ai-import-files').files, ...this.aiPastedImages];
+        if (!text.trim() && files.length === 0) {
+            showError('Lim inn tekst eller legg ved et skjermbilde.');
+            return;
+        }
+
+        const btn = document.getElementById('ai-import-read');
+        btn.disabled = true;
+        btn.textContent = 'Tolker...';
+        try {
+            const result = await api.aiImportPreview(bankAccountId, text, files);
+            this.renderAiImportPreview(result);
+        } catch (error) {
+            showError(error.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Tolk';
+        }
+    }
+
+    renderAiImportPreview(result) {
+        this.aiImportRows = result.transactions;
+        const labels = {
+            new: '<span class="badge" style="background: #d1fae5; color: #065f46;">Ny</span>',
+            possible: '<span class="badge" style="background: #fef3c7; color: #92400e;">Mulig duplikat</span>',
+            duplicate: '<span class="badge" style="background: #e5e7eb; color: #374151;">Finnes</span>',
+            reserved: '<span class="badge" style="background: #e5e7eb; color: #374151;">Reservert</span>',
+        };
+        const counts = { new: 0, possible: 0, duplicate: 0, reserved: 0 };
+        result.transactions.forEach(t => counts[t.status]++);
+
+        const rows = result.transactions.map((t, i) => {
+            const amount = parseFloat(t.amount) * (t.direction === 'in' ? 1 : -1);
+            const match = t.match
+                ? `<div style="font-size: 0.8rem; color: var(--text-secondary);">Ligner: ${formatDate(t.match.date)} ${escapeHtml(t.match.description)}</div>`
+                : '';
+            return `
+                <tr style="${t.status === 'reserved' ? 'opacity: 0.5;' : ''}">
+                    <td><input type="checkbox" class="ai-import-keep" data-index="${i}"
+                        ${t.status === 'new' ? 'checked' : ''} ${t.status === 'reserved' ? 'disabled' : ''}></td>
+                    <td style="white-space: nowrap;">${formatDate(t.date)}</td>
+                    <td>${escapeHtml(t.description)}${match}</td>
+                    <td style="text-align: right; white-space: nowrap;" class="${amount < 0 ? 'negative' : 'positive'}">${formatCurrency(amount)}</td>
+                    <td>${labels[t.status]}</td>
+                </tr>`;
+        }).join('');
+
+        const step2 = document.getElementById('ai-import-step2');
+        step2.innerHTML = `
+            <p><strong>${result.account.number} ${escapeHtml(result.account.name)}</strong>:
+                ${counts.new} nye, ${counts.possible} mulige duplikater, ${counts.duplicate} finnes allerede, ${counts.reserved} reserverte.
+                Fortegnet viser retningen: minus er penger ut (kjøp), pluss er penger inn.</p>
+            ${result.notes ? `<p style="font-size: 0.9rem; color: var(--text-secondary);">${escapeHtml(result.notes)}</p>` : ''}
+            ${result.transactions.length === 0 ? '<p>Fant ingen transaksjoner.</p>' : `
+            <div style="max-height: 55vh; overflow: auto;">
+                <table class="table">
+                    <thead><tr><th></th><th>Dato</th><th>Tekst</th><th style="text-align: right;">Beløp</th><th>Status</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>`}
+            <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
+                <button id="ai-import-back" class="btn btn-secondary">Tilbake</button>
+                <button id="ai-import-save" class="btn btn-primary" ${result.transactions.length === 0 ? 'disabled' : ''}>Importer valgte som kladd</button>
+            </div>
+        `;
+        document.getElementById('ai-import-step1').style.display = 'none';
+        step2.style.display = '';
+        this.aiImportAccountId = result.bank_account_id;
+
+        document.getElementById('ai-import-back').addEventListener('click', () => {
+            step2.style.display = 'none';
+            document.getElementById('ai-import-step1').style.display = '';
+        });
+        document.getElementById('ai-import-save').addEventListener('click', () => this.saveAiImport());
+    }
+
+    async saveAiImport() {
+        const chosen = [...document.querySelectorAll('.ai-import-keep:checked')]
+            .map(box => this.aiImportRows[parseInt(box.dataset.index)])
+            .map(t => ({
+                date: t.date,
+                description: t.description,
+                amount: t.amount,
+                direction: t.direction,
+                // Kept although it looked like one already in the books
+                force: t.status === 'duplicate',
+            }));
+        if (chosen.length === 0) {
+            showError('Ingen transaksjoner er valgt.');
+            return;
+        }
+
+        const btn = document.getElementById('ai-import-save');
+        btn.disabled = true;
+        btn.textContent = 'Lagrer...';
+        try {
+            const result = await api.aiImportCommit(this.aiImportAccountId, chosen);
+            closeModal();
+            const skipped = result.duplicates ? ` ${result.duplicates} fantes allerede og ble hoppet over.` : '';
+            showSuccess(`${result.imported} transaksjoner lagt i bokføringskøen.${skipped}`);
+            this.loadTransactions();
+        } catch (error) {
+            showError(error.message);
+            btn.disabled = false;
+            btn.textContent = 'Importer valgte som kladd';
         }
     }
 

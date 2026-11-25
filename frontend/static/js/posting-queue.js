@@ -1,5 +1,5 @@
-import api from './api.js?v=33';
-import { showModal, closeModal, showError, showSuccess } from './utils.js?v=33';
+import api from './api.js?v=35';
+import { showModal, closeModal, showError, showSuccess } from './utils.js?v=35';
 
 class PostingQueueManager {
     constructor() {
@@ -222,7 +222,8 @@ class PostingQueueManager {
             'MANUAL': '<span class="badge" style="background: #e5e7eb; color: #374151;">📝 Manuell</span>',
             'CSV_IMPORT': '<span class="badge" style="background: #dbeafe; color: #1e40af;">📄 CSV</span>',
             'BANK_SYNC': '<span class="badge" style="background: #d1fae5; color: #065f46;">🏦 Bank</span>',
-            'API': '<span class="badge" style="background: #fef3c7; color: #92400e;">API</span>'
+            'API': '<span class="badge" style="background: #fef3c7; color: #92400e;">API</span>',
+            'AI_IMPORT': '<span class="badge" style="background: #ede9fe; color: #5b21b6;">AI-import</span>'
         };
         return badges[source] || badges['MANUAL'];
     }

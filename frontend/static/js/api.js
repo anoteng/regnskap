@@ -391,6 +391,38 @@ class API {
         return response.json();
     }
 
+    async aiImportPreview(bankAccountId, text, files) {
+        const formData = new FormData();
+        formData.append('bank_account_id', bankAccountId);
+        formData.append('text', text || '');
+        for (const file of files) {
+            formData.append('files', file, file.name || 'skjermbilde.png');
+        }
+
+        const headers = { 'Authorization': `Bearer ${this.token}` };
+        if (this.currentLedgerId) {
+            headers['X-Ledger-ID'] = this.currentLedgerId;
+        }
+
+        const response = await fetch(`${API_BASE}/ai-import/preview`, {
+            method: 'POST',
+            headers: headers,
+            body: formData,
+        });
+
+        if (!response.ok) {
+            let detail = 'Tolkningen feilet';
+            try { detail = (await response.json()).detail || detail; } catch (e) { /* not JSON */ }
+            throw new Error(detail);
+        }
+
+        return response.json();
+    }
+
+    async aiImportCommit(bankAccountId, transactions) {
+        return this.post('/ai-import/commit', { bank_account_id: bankAccountId, transactions });
+    }
+
     async getCSVMappings() {
         return this.get('/csv-mappings/');
     }

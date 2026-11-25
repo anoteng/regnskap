@@ -876,7 +876,7 @@ CREATE TABLE `transactions` (
   `reference` varchar(100) DEFAULT NULL,
   `is_reconciled` tinyint(1) DEFAULT 0,
   `status` enum('DRAFT','POSTED','RECONCILED') NOT NULL DEFAULT 'POSTED',
-  `source` varchar(20) DEFAULT 'MANUAL' COMMENT 'MANUAL, CSV_IMPORT, BANK_SYNC',
+  `source` varchar(20) DEFAULT 'MANUAL' COMMENT 'MANUAL, CSV_IMPORT, BANK_SYNC, API, AI_IMPORT',
   `source_reference` varchar(255) DEFAULT NULL COMMENT 'External transaction ID if from bank sync',
   `created_at` timestamp NULL DEFAULT current_timestamp(),
   `updated_at` timestamp NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),

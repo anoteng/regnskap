@@ -258,7 +258,7 @@ class Transaction(TransactionBase):
     created_by: Optional[int] = None
     is_reconciled: bool
     status: str  # DRAFT, POSTED, RECONCILED
-    source: Optional[str] = None  # MANUAL, CSV_IMPORT, BANK_SYNC
+    source: Optional[str] = None  # MANUAL, CSV_IMPORT, BANK_SYNC, API, AI_IMPORT
     source_reference: Optional[str] = None  # External transaction ID if from bank sync
     created_at: datetime
     journal_entries: List[JournalEntry] = []

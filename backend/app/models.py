@@ -78,6 +78,7 @@ class TransactionSource(str, enum.Enum):
     CSV_IMPORT = "CSV_IMPORT"
     BANK_SYNC = "BANK_SYNC"
     API = "API"
+    AI_IMPORT = "AI_IMPORT"
 
 
 class ChartOfAccountsTemplate(Base):
