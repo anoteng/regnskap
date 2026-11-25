@@ -1,5 +1,5 @@
-import api from './api.js?v=35';
-import { formatCurrency, formatDate, showModal, closeModal, showError, showSuccess } from './utils.js?v=35';
+import api from './api.js?v=36';
+import { formatCurrency, formatDate, showModal, closeModal, showError, showSuccess } from './utils.js?v=36';
 
 function escapeHtml(text) {
     const div = document.createElement('div');

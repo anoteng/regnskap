@@ -1,5 +1,5 @@
-import api from './api.js?v=35';
-import { showError, showSuccess } from './utils.js?v=35';
+import api from './api.js?v=36';
+import { showError, showSuccess } from './utils.js?v=36';
 
 class AiKeyManager {
     constructor() {

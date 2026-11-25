@@ -1,5 +1,5 @@
-import api from './api.js?v=35';
-import { showModal, closeModal, showError, showSuccess } from './utils.js?v=35';
+import api from './api.js?v=36';
+import { showModal, closeModal, showError, showSuccess } from './utils.js?v=36';
 
 class BankAccountsManager {
     constructor() {
@@ -14,6 +14,7 @@ class BankAccountsManager {
 
     async loadAccounts() {
         this.accounts = await api.getAccounts();
+        this.allAccounts = null;
     }
 
     setupEventListeners() {
@@ -24,6 +25,7 @@ class BankAccountsManager {
 
     async loadBankAccounts() {
         const bankAccounts = await api.getBankAccounts();
+        this.bankAccounts = bankAccounts;
         this.renderBankAccounts(bankAccounts);
     }
 
@@ -150,6 +152,9 @@ class BankAccountsManager {
         const baTypeSelect = document.getElementById('ba-type');
         baTypeSelect.addEventListener('change', () => {
             this.updateAccountOptions();
+            if (document.getElementById('ba-account-mode').value === 'new') {
+                this.updateAccountHints();
+            }
         });
 
         // Setup event listener for account mode selection
@@ -198,23 +203,69 @@ class BankAccountsManager {
             filteredAccounts.map(a => `<option value="${a.id}">${a.account_number} - ${a.account_name}</option>`).join('');
 
         if (baType === 'CREDIT_CARD') {
-            accountHint.textContent = 'Velg en gjeldskonto, f.eks. 2401 (Kredittkort)';
+            accountHint.textContent = 'Velg en gjeldskonto, f.eks. 2501 (Kredittkort)';
         } else {
             accountHint.textContent = 'Velg f.eks. konto 1201 (Brukskonto bank) eller 1202 (Sparekonto bank)';
         }
     }
 
-    updateAccountHints() {
+    // Where this kind of account lives in the ledger's chart: beside the bank
+    // accounts of the same kind already there, else the template's range --
+    // 12xx for bank and savings, 25xx (2501 Kredittkort) for credit cards
+    accountRange(baType) {
+        const isCard = baType === 'CREDIT_CARD';
+        const counts = {};
+        (this.bankAccounts || [])
+            .filter(ba => (ba.account_type === 'CREDIT_CARD') === isCard)
+            .map(ba => this.allAccounts.find(a => a.id === ba.account_id))
+            .filter(a => a && /^\d{4}$/.test(a.account_number))
+            .forEach(a => {
+                const prefix = a.account_number.slice(0, 2);
+                counts[prefix] = (counts[prefix] || 0) + 1;
+            });
+        const found = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+        return found ? found[0] : (isCard ? '25' : '12');
+    }
+
+    // First number in the range not used by any account, hidden ones included,
+    // since the ledger refuses a number twice either way
+    nextFreeNumber(prefix) {
+        const taken = new Set(this.allAccounts.map(a => a.account_number));
+        for (let n = 1; n <= 99; n++) {
+            const candidate = `${prefix}${String(n).padStart(2, '0')}`;
+            if (!taken.has(candidate)) return candidate;
+        }
+        return null;
+    }
+
+    async updateAccountHints() {
         const baType = document.getElementById('ba-type').value;
+        const numberInput = document.getElementById('new-acc-number');
         const numberHint = document.getElementById('number-hint');
 
+        if (!this.allAccounts) {
+            try {
+                this.allAccounts = await api.get('/accounts/?show_inactive=true');
+            } catch (e) {
+                this.allAccounts = this.accounts;
+            }
+        }
+
+        const prefix = this.accountRange(baType);
+        const suggestion = this.nextFreeNumber(prefix);
+
+        // Fill in the suggestion, but never over a number the user typed
+        if (suggestion && (!numberInput.value || numberInput.dataset.suggested === numberInput.value)) {
+            numberInput.value = suggestion;
+            numberInput.dataset.suggested = suggestion;
+        }
+        numberHint.textContent = suggestion
+            ? `Neste ledige nummer i ${prefix}xx-serien er ${suggestion}`
+            : `Ingen ledige nummer i ${prefix}xx-serien`;
+
         if (baType === 'CREDIT_CARD') {
-            numberHint.textContent = 'Bruk et ledig nummer, f.eks. 2401-2409 for kredittkort';
-            document.getElementById('new-acc-number').placeholder = '2401';
             document.getElementById('new-acc-name').placeholder = 'Visa kredittkort';
         } else {
-            numberHint.textContent = 'Bruk et ledig nummer, f.eks. 1202-1209 for bankkontoer';
-            document.getElementById('new-acc-number').placeholder = '1202';
             document.getElementById('new-acc-name').placeholder = 'Sparekonto bank';
         }
     }
